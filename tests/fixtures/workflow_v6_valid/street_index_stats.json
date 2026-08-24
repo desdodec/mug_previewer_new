@@ -1,0 +1,7 @@
+{
+  "context_scale_statistics": {
+    "bbox_span_p50_m": 20,
+    "bbox_span_p90_m": 40,
+    "recommended_context_width_m": 1400
+  }
+}
