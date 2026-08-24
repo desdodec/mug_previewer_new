@@ -66,3 +66,5 @@ python -m mug_previewer render context `
 ```
 
 When the context SVG contains `rear-map-framing` metadata, the renderer uses the typed street metric bounds and dataset P90 span. The preserved policy is P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and a maximum 1.35× expansion. SVGs without usable metric metadata remain supported through the legacy highlighted-street SVG-space crop. Full-wrap composition remains deferred.
+
+For current workflow-v6 tile contexts, the adapter reconstructs each SVG's EPSG:3857 geographic crop from its authoritative street bounds plus summary.json's tile zoom, shared reference window, and padding. This is preferred over embedded metadata; older files without either contract use legacy framing.

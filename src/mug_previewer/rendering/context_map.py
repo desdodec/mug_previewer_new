@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import cairosvg
 from PIL import Image
 
-from ..datasets.models import Dataset, StreetRecord
+from ..datasets.models import Dataset, MetricBounds, StreetRecord
 from .native import face_policy as native
 
 LOGGER = logging.getLogger(__name__)
@@ -49,45 +49,6 @@ class ContextScalePolicy:
 
 
 DEFAULT_CONTEXT_SCALE_POLICY = ContextScalePolicy()
-
-
-@dataclass(frozen=True)
-class MetricBounds:
-    min_x: float
-    min_y: float
-    max_x: float
-    max_y: float
-
-    def __post_init__(self) -> None:
-        values = (self.min_x, self.min_y, self.max_x, self.max_y)
-        if not all(math.isfinite(value) for value in values):
-            raise RearMapMetadataError("Rear-map bounds must contain finite coordinates.")
-        if self.max_x < self.min_x or self.max_y < self.min_y:
-            raise RearMapMetadataError("Rear-map bounds must have non-negative dimensions.")
-
-    @property
-    def width_m(self) -> float:
-        return self.max_x - self.min_x
-
-    @property
-    def height_m(self) -> float:
-        return self.max_y - self.min_y
-
-    @property
-    def span_m(self) -> float:
-        return max(self.width_m, self.height_m)
-
-    @property
-    def centre(self) -> tuple[float, float]:
-        return ((self.min_x + self.max_x) / 2, (self.min_y + self.max_y) / 2)
-
-    def contains(self, other: "MetricBounds", *, tolerance: float = 1e-7) -> bool:
-        return (
-            self.min_x <= other.min_x + tolerance
-            and self.min_y <= other.min_y + tolerance
-            and self.max_x >= other.max_x - tolerance
-            and self.max_y >= other.max_y - tolerance
-        )
 
 
 @dataclass(frozen=True)
@@ -194,11 +155,18 @@ def render_context_map_result(
     diagnostics: dict[str, float | str | bool | None] = {
         "framing_mode": "legacy", "dataset_context_width_m": None, "street_context_width_m": None,
         "final_context_width_m": None, "centre_x_m": None, "centre_y_m": None,
-        "metric_metadata_available": metadata is not None,
+        "metric_metadata_available": metadata is not None or street.context_source_bounds is not None,
     }
-    if metadata is not None:
+    typed_source_bounds = street.context_source_bounds
+    if typed_source_bounds is not None:
         try:
-            markup, diagnostics = _metric_crop_markup(dataset, street, markup, metadata, options.policy)
+            markup, diagnostics = _metric_crop_markup(dataset, street, markup, typed_source_bounds, options.policy)
+        except ContextRenderError as error:
+            LOGGER.warning("Typed rear-map metric framing for %s is unavailable; using legacy SVG-space framing: %s", street.id, error)
+            markup = _legacy_crop_markup(markup)
+    elif metadata is not None:
+        try:
+            markup, diagnostics = _metric_crop_markup(dataset, street, markup, metadata.source_bounds_m, options.policy)
         except ContextRenderError as error:
             LOGGER.warning("Rear-map metric framing for %s is unavailable; using legacy SVG-space framing: %s", street.id, error)
             markup = _legacy_crop_markup(markup)
@@ -263,7 +231,7 @@ def _refine_context_markup(markup: str, street: StreetRecord) -> str:
     return re.sub(r'(<image\b[^>]*\bopacity=")[0-9.]+', r'\g<1>0.58', refined, count=1)
 
 def _metric_crop_markup(
-    dataset: Dataset, street: StreetRecord, markup: str, metadata: RearMapMetadata, policy: ContextScalePolicy,
+    dataset: Dataset, street: StreetRecord, markup: str, source_bounds: MetricBounds, policy: ContextScalePolicy,
 ) -> tuple[str, dict[str, float | str | bool | None]]:
     street_bounds = _street_metric_bounds(street)
     p90 = _dataset_p90(dataset)
@@ -272,14 +240,14 @@ def _metric_crop_markup(
     final_height = final_width / REAR_MAP_PHYSICAL_ASPECT
     centre_x, centre_y = street_bounds.centre
     desired = MetricBounds(centre_x - final_width / 2, centre_y - final_height / 2, centre_x + final_width / 2, centre_y + final_height / 2)
-    if not metadata.source_bounds_m.contains(desired):
+    if not source_bounds.contains(desired):
         raise ContextRenderError("Context SVG source bounds cannot contain the requested metric crop.")
     source_x, source_y, source_width, source_height = _svg_view_box(markup)
-    view_width = desired.width_m * source_width / metadata.source_bounds_m.width_m
-    view_height = desired.height_m * source_height / metadata.source_bounds_m.height_m
-    view_x = source_x + (desired.min_x - metadata.source_bounds_m.min_x) * source_width / metadata.source_bounds_m.width_m
+    view_width = desired.width_m * source_width / source_bounds.width_m
+    view_height = desired.height_m * source_height / source_bounds.height_m
+    view_x = source_x + (desired.min_x - source_bounds.min_x) * source_width / source_bounds.width_m
     # Projected metric Y grows upward while SVG Y grows downward.
-    view_y = source_y + (metadata.source_bounds_m.max_y - desired.max_y) * source_height / metadata.source_bounds_m.height_m
+    view_y = source_y + (source_bounds.max_y - desired.max_y) * source_height / source_bounds.height_m
     return _replace_view_box(markup, (view_x, view_y, view_width, view_height)), {
         "framing_mode": "metric", "dataset_context_width_m": dataset_width,
         "street_context_width_m": street_bounds.span_m * policy.street_padding_multiplier,

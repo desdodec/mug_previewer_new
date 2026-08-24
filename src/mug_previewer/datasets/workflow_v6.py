@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from .models import Dataset, DatasetCapabilities, DatasetPaths, DatasetStatistics, StreetRecord
+from .models import ContextSourceGeometry, Dataset, DatasetCapabilities, DatasetPaths, DatasetStatistics, MetricBounds, StreetRecord
 
 PREFIX = re.compile(r"^(\d+)_")
+WEB_MERCATOR_HALF_WORLD = math.pi * 6378137.0
+TILE_SIZE = 256
+
 
 class DatasetLoadError(ValueError):
     pass
+
 
 @dataclass(frozen=True)
 class LoadResult:
@@ -22,6 +27,7 @@ class LoadResult:
     errors: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     information: tuple[str, ...] = ()
+
 
 def _json(path: Path | None) -> Mapping[str, Any]:
     if path is None:
@@ -34,11 +40,80 @@ def _json(path: Path | None) -> Mapping[str, Any]:
         raise DatasetLoadError(f"JSON metadata must be an object: {path}")
     return loaded
 
+
 def _number(row: Mapping[str, str], name: str) -> float | None:
+    value = row.get(name)
     try:
-        return float(row[name]) if row.get(name, "").strip() else None
+        return float(value) if value is not None and str(value).strip() else None
     except ValueError:
         return None
+
+
+def metric_bounds_from_raster_crop(
+    source_bounds: MetricBounds,
+    source_size_px: tuple[int, int],
+    crop_rect_px: tuple[int, int, int, int],
+) -> MetricBounds:
+    """Map a raster crop to projected metres; raster Y grows down, metric Y up."""
+    source_width, source_height = source_size_px
+    left, top, width, height = crop_rect_px
+    if source_width <= 0 or source_height <= 0 or width <= 0 or height <= 0:
+        raise ValueError("Raster source and crop dimensions must be positive.")
+    metres_per_px_x = source_bounds.width_m / source_width
+    metres_per_px_y = source_bounds.height_m / source_height
+    return MetricBounds(
+        source_bounds.min_x + left * metres_per_px_x,
+        source_bounds.max_y - (top + height) * metres_per_px_y,
+        source_bounds.min_x + (left + width) * metres_per_px_x,
+        source_bounds.max_y - top * metres_per_px_y,
+    )
+
+
+def _context_source_geometry(summary: Mapping[str, Any]) -> ContextSourceGeometry | None:
+    """Load the v6 tile-crop parameters persisted by the upstream generator."""
+    try:
+        context = summary["context_glyphs"]
+        frame = summary["frame_bbox"]["frame_bounds_3857"]
+        reference = context["shared_reference_window_px"]
+        geometry = ContextSourceGeometry(
+            crs=str(summary["working_crs"]),
+            frame_bounds_m=MetricBounds(float(frame["minx"]), float(frame["miny"]), float(frame["maxx"]), float(frame["maxy"])),
+            tile_zoom=int(context["tile_zoom"]),
+            shared_reference_window_px=(int(reference["width"]), int(reference["height"])),
+            padding_fraction_per_side=float(context["padding_fraction_per_side"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    if geometry.crs != "EPSG:3857" or geometry.tile_zoom < 0 or min(geometry.shared_reference_window_px) <= 0 or geometry.padding_fraction_per_side < 0:
+        return None
+    return geometry
+
+
+def _context_crop_bounds(row: Mapping[str, str], geometry: ContextSourceGeometry | None) -> MetricBounds | None:
+    """Recreate v6's global-tile crop exactly from typed street bounds."""
+    if geometry is None:
+        return None
+    values = tuple(_number(row, name) for name in ("bbox_min_x", "bbox_min_y", "bbox_max_x", "bbox_max_y"))
+    if any(value is None for value in values):
+        return None
+    try:
+        street = MetricBounds(*(float(value) for value in values))
+        world_size = TILE_SIZE * (2 ** geometry.tile_zoom)
+        to_world_x = lambda value: (value + WEB_MERCATOR_HALF_WORLD) / (2 * WEB_MERCATOR_HALF_WORLD) * world_size
+        to_world_y = lambda value: (WEB_MERCATOR_HALF_WORLD - value) / (2 * WEB_MERCATOR_HALF_WORLD) * world_size
+        min_x, max_x = to_world_x(street.min_x), to_world_x(street.max_x)
+        min_y, max_y = to_world_y(street.max_y), to_world_y(street.min_y)
+        street_width = max(1, math.ceil(max_x) - math.floor(min_x))
+        street_height = max(1, math.ceil(max_y) - math.floor(min_y))
+        width = math.ceil(max(street_width, geometry.shared_reference_window_px[0]) * (1 + 2 * geometry.padding_fraction_per_side))
+        height = math.ceil(max(street_height, geometry.shared_reference_window_px[1]) * (1 + 2 * geometry.padding_fraction_per_side))
+        left = math.floor((min_x + max_x) / 2 - width / 2)
+        top = math.floor((min_y + max_y) / 2 - height / 2)
+        world_bounds = MetricBounds(-WEB_MERCATOR_HALF_WORLD, -WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD, WEB_MERCATOR_HALF_WORLD)
+        return metric_bounds_from_raster_crop(world_bounds, (world_size, world_size), (left, top, width, height))
+    except (ValueError, OverflowError):
+        return None
+
 
 def _svg_ids(directory: Path | None) -> dict[str, Path]:
     if directory is None:
@@ -50,15 +125,13 @@ def _svg_ids(directory: Path | None) -> dict[str, Path]:
             result.setdefault(match.group(1), path)
     return result
 
+
 def _svg_names(directory: Path | None) -> dict[str, Path]:
     """Index SVG filenames exactly; numeric IDs remain the compatibility fallback."""
     if directory is None:
         return {}
-    return {
-        path.name: path
-        for path in directory.iterdir()
-        if path.is_file() and path.suffix.casefold() == ".svg"
-    }
+    return {path.name: path for path in directory.iterdir() if path.is_file() and path.suffix.casefold() == ".svg"}
+
 
 def _name(identifier: str, summary: Mapping[str, Any]) -> str:
     place = summary.get("place_name")
@@ -67,6 +140,7 @@ def _name(identifier: str, summary: Mapping[str, Any]) -> str:
     value = re.sub(r"^\d{8}_\d{6}_", "", identifier)
     value = re.sub(r"_streets(?:_parks)?(?:_water)?(?:_boundary)?(?:_clip)?$", "", value)
     return value.replace("_", " ").title()
+
 
 class WorkflowV6DatasetLoader:
     """Centralises v6 filenames, metadata and ID-based SVG matching."""
@@ -93,6 +167,7 @@ class WorkflowV6DatasetLoader:
         glyph_ids = _svg_ids(paths.glyph_directory)
         glyph_names = _svg_names(paths.glyph_directory)
         context_ids = _svg_ids(paths.context_directory)
+        context_geometry = _context_source_geometry(summary)
         streets: list[StreetRecord] = []
         warnings: list[str] = []
         skipped = 0
@@ -112,6 +187,7 @@ class WorkflowV6DatasetLoader:
                 bbox_max_x=_number(row, "bbox_max_x"), bbox_max_y=_number(row, "bbox_max_y"),
                 bbox_width_m=_number(row, "bbox_width_m"), bbox_height_m=_number(row, "bbox_height_m"),
                 bbox_span_m=_number(row, "bbox_span_m"), bbox_area_m2=_number(row, "bbox_area_m2"),
+                context_source_bounds=_context_crop_bounds(row, context_geometry),
             ))
         if not streets:
             return LoadResult(None, ("No usable streets: no street-index rows resolved to glyph SVG files.",))
@@ -132,7 +208,7 @@ class WorkflowV6DatasetLoader:
             boundary_layer=paths.boundary_path is not None,
         )
         dataset = Dataset(self.path, self.path.name, _name(self.path.name, summary), "workflow-v6", paths,
-            summary, DatasetStatistics(scale, stats), capabilities, tuple(streets), len(rows), tuple(warnings))
+            summary, DatasetStatistics(scale, stats), capabilities, tuple(streets), len(rows), context_geometry, tuple(warnings))
         return LoadResult(dataset, warnings=tuple(warnings), information=(f"Index rows: {len(rows)}", f"Usable streets: {len(streets)}"))
 
     def _paths(self) -> DatasetPaths:
