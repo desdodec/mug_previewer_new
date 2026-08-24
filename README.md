@@ -36,3 +36,20 @@ python -m mug_previewer datasets list
 python -m mug_previewer dataset inspect "E:\...\dataset"
 python -m mug_previewer dataset validate "E:\...\dataset"
 python -m mug_previewer dataset streets "E:\...\dataset" --search "Church" --limit 25
+
+## Front-face rendering
+
+The production renderer is `mug_previewer.rendering.face.render_face(street, options=None)`. It accepts a typed `StreetRecord`; workflow filenames, CSV files and glyph directories are resolved only by the dataset loader.
+
+It returns an RGBA **495 × 462 px** PNG: the left/front half of V28's 990 × 462 fast-preview canvas. The image is a direct crop, retaining the original V28 glyph placement, face geometry, colour, line weights, typography and spacing. CairoSVG renders the SVG artwork and Pillow returns/saves the PNG.
+
+The retained V28 text stack is `system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`. On Windows this normally selects Segoe UI; it deliberately retains the original system-font fallback stack rather than bundling a system or commercial font.
+
+```powershell
+python -m mug_previewer render face `
+  --dataset "E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6\20260824_101707_stoke_newington_streets_parks_water_boundary_clip" `
+  --street-id 0246 `
+  --output output\0246_face.png
+```
+
+Use `--area "…"` to override the display-area text; otherwise the dataset display name is used. `output/` is ignored by Git. Rear context rendering, full-wrap composition, exports, and user interfaces remain deferred.
