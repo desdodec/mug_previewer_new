@@ -52,4 +52,17 @@ python -m mug_previewer render face `
   --output output\0246_face.png
 ```
 
-Use `--area "…"` to override the display-area text; otherwise the dataset display name is used. `output/` is ignored by Git. Rear context rendering, full-wrap composition, exports, and user interfaces remain deferred.
+Use `--area "…"` to override the display-area text; otherwise the dataset display name is used. `output/` is ignored by Git.
+
+## Rear-context rendering
+
+`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns the RGBA **495 × 462 px** rear half of V28's fast-preview canvas. It preserves the fixed 2:3 physical map artwork box and attribution layout, without composing a full wrap.
+
+```powershell
+python -m mug_previewer render context `
+  --dataset "E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6\20260824_101707_stoke_newington_streets_parks_water_boundary_clip" `
+  --street-id 0246 `
+  --output output\0246_context.png
+```
+
+When the context SVG contains `rear-map-framing` metadata, the renderer uses the typed street metric bounds and dataset P90 span. The preserved policy is P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and a maximum 1.35× expansion. SVGs without usable metric metadata remain supported through the legacy highlighted-street SVG-space crop. Full-wrap composition remains deferred.

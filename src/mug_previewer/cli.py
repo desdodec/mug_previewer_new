@@ -8,6 +8,7 @@ from .config import load_settings
 from .datasets.discovery import discover_datasets
 from .datasets.loader import DatasetLoadError, load_dataset
 from .datasets.validation import validate_dataset
+from .rendering.context_map import ContextRenderError, render_context_map_result
 from .rendering.face import FaceRenderError, FaceRenderOptions, render_face
 
 
@@ -31,6 +32,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     face.add_argument("--street-id", required=True)
     face.add_argument("--output", type=Path, required=True)
     face.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
+    context = render.add_parser("context")
+    context.add_argument("--dataset", type=Path, required=True)
+    context.add_argument("--street-id", required=True)
+    context.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
     if args.command == "datasets":
@@ -55,13 +60,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Street not found: {args.street_id}")
             return 2
         try:
-            image = render_face(street, FaceRenderOptions(area=args.area if args.area is not None else data.display_name))
-        except FaceRenderError as error:
+            if args.operation == "face":
+                image = render_face(street, FaceRenderOptions(area=args.area if args.area is not None else data.display_name))
+            else:
+                context_result = render_context_map_result(data, street)
+                image = context_result.image
+        except (FaceRenderError, ContextRenderError) as error:
             print(f"Render error: {error}")
             return 2
         args.output.parent.mkdir(parents=True, exist_ok=True)
         image.save(args.output, format="PNG")
-        print(f"Rendered face: {street.id} {street.display_name}\nOutput: {args.output}\nSize: {image.width}x{image.height}")
+        if args.operation == "context":
+            print(
+                f"Rendered context: {street.id} {street.display_name}\nOutput: {args.output}\n"
+                f"Size: {image.width}x{image.height}\nFraming: {context_result.framing_mode}\n"
+                f"Final context width: {context_result.final_context_width_m}"
+            )
+        else:
+            print(f"Rendered face: {street.id} {street.display_name}\nOutput: {args.output}\nSize: {image.width}x{image.height}")
         return 0
 
     if args.operation == "validate":

@@ -1,1 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <metadata id="rear-map-framing">{"street_bounds_m":[100,200,140,220],"source_bounds_m":[-1000,-1000,2000,2000]}</metadata>
+  <rect width="1000" height="1000" fill="#f7f6ef"/>
+  <path d="M0 0H1000V1000H0Z" fill="none" stroke="#c8c6bc" stroke-width="8"/>
+  <polyline class="highlighted-street" points="540,600 560,590" fill="none" stroke="#a43232" stroke-width="18"/>
+</svg>

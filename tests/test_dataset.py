@@ -34,7 +34,12 @@ def test_old_dataset_and_failures(tmp_path: Path) -> None:
     path = make_dataset(tmp_path / "old")
     (path / "street_index_stats.json").unlink()
     index = path / "street_index.csv"
-    index.write_text(index.read_text(encoding="utf-8").replace(",bbox_span_m", "").replace(",40", "").replace(",20", ""), encoding="utf-8")
+    index.write_text(
+        "street_name,requested_street,group_id,glyph_file\n"
+        "St John's Road,St John's Road,street_group_st_johns,0001_St John's Road.svg\n"
+        "Café Road,Café Road,street_group_cafe,0002_Café Road.svg\n",
+        encoding="utf-8",
+    )
     data = load_dataset(path)
     assert not data.capabilities.metric_context_framing
     assert not validate_dataset(tmp_path / "missing").valid
