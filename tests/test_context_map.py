@@ -24,6 +24,8 @@ from mug_previewer.rendering.context_map import (
     REAR_PANEL_SCALE,
     REAR_PANEL_PX,
     REAR_STREET_HIGHLIGHT_SCALE,
+    LEGACY_MAX_RASTER_MAGNIFICATION,
+    _legacy_crop_markup,
     _scale_highlight_stroke,
     _rear_panel_layout,
     calculate_context_width_m,
@@ -220,3 +222,68 @@ def test_typed_context_bounds_take_precedence_over_embedded_metadata(tmp_path: P
     result = render_context_map_result(data, typed)
     assert result.framing_mode == "metric"
     assert result.metric_metadata_available
+
+
+def _legacy_raster_svg(bounds: tuple[float, float, float, float]) -> str:
+    image = Image.new("RGB", (300, 800), "#eeeeee")
+    payload = BytesIO()
+    image.save(payload, format="PNG")
+    uri = base64.b64encode(payload.getvalue()).decode("ascii")
+    left, top, right, bottom = bounds
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 800">'
+        '<metadata>{"highlight_color":"#E83E8C"}</metadata>'
+        f'<image href="data:image/png;base64,{uri}" width="300" height="800"/>'
+        f'<polyline points="{left},{top} {right},{bottom}" fill="none" stroke="#E83E8C" stroke-width="8"/>'
+        '</svg>'
+    )
+
+
+def _legacy_dataset_with_spans(tmp_path: Path, data, spans: list[float]):
+    records = []
+    for index, span in enumerate(spans):
+        context_path = tmp_path / f"legacy_{index}.svg"
+        context_path.write_text(_legacy_raster_svg((150 - span / 2, 400 - span / 2, 150 + span / 2, 400 + span / 2)), encoding="utf-8")
+        records.append(replace(data.get_street("0001"), id=f"L{index:03}", context_path=context_path, context_source_bounds=None))
+    return replace(data, streets=tuple(records)), records
+
+
+def test_legacy_tiny_street_uses_dataset_and_resolution_floors(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    legacy, records = _legacy_dataset_with_spans(tmp_path, data, [2.0] + [12.0] * 10)
+    markup = records[0].context_path.read_text(encoding="utf-8")
+    _, diagnostics = _legacy_crop_markup(legacy, records[0], markup, ContextRenderOptions())
+
+    assert diagnostics["legacy_final_context_span"] >= diagnostics["legacy_base_context_span"]
+    assert diagnostics["legacy_final_context_span"] >= diagnostics["legacy_resolution_floor_span"]
+    assert diagnostics["legacy_final_context_span"] > diagnostics["legacy_street_required_span"]
+
+
+def test_legacy_large_street_expands_beyond_dataset_and_resolution_defaults(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    legacy, records = _legacy_dataset_with_spans(tmp_path, data, [12.0] * 10 + [150.0])
+    markup = records[-1].context_path.read_text(encoding="utf-8")
+    _, diagnostics = _legacy_crop_markup(legacy, records[-1], markup, ContextRenderOptions())
+
+    assert diagnostics["legacy_street_required_span"] > diagnostics["legacy_base_context_span"]
+    assert diagnostics["legacy_street_required_span"] > diagnostics["legacy_resolution_floor_span"]
+    assert diagnostics["legacy_final_context_span"] == pytest.approx(diagnostics["legacy_street_required_span"])
+
+
+def test_legacy_resolution_floor_caps_canonical_raster_enlargement(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    legacy, records = _legacy_dataset_with_spans(tmp_path, data, [2.0] + [12.0] * 10)
+    markup = records[0].context_path.read_text(encoding="utf-8")
+    _, diagnostics = _legacy_crop_markup(legacy, records[0], markup, ContextRenderOptions())
+
+    assert diagnostics["source_context_raster_size_px"] == (300, 800)
+    assert diagnostics["effective_raster_magnification"] <= LEGACY_MAX_RASTER_MAGNIFICATION + 0.01
+
+
+def test_metric_rendering_does_not_populate_legacy_framing_diagnostics(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    result = render_context_map_result(data, data.get_street("0001"))
+
+    assert result.framing_mode == "metric"
+    assert result.legacy_final_context_span is None
+    assert result.effective_raster_magnification is None

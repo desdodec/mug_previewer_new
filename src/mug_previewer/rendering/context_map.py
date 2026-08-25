@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -9,6 +10,8 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 import cairosvg
 from PIL import Image
@@ -37,6 +40,17 @@ ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 # Visual-only adjustment to the already-framed highlighted street.  It does
 # not affect the underlying street path, crop, map scale or palette.
 REAR_STREET_HIGHLIGHT_SCALE = 0.85
+
+# Legacy context SVGs predate the workflow-v6 metric contract. Their map is
+# an embedded raster in SVG-space, so these values operate in that coordinate
+# system rather than metres. A P90 reference resists tiny and huge outliers;
+# the raster cap protects the final canonical wrap from excess enlargement.
+LEGACY_BBOX_PERCENTILE = 90.0
+LEGACY_DATASET_CONTEXT_MULTIPLIER = 2.0
+LEGACY_STREET_PADDING = 1.60
+LEGACY_MAX_RASTER_MAGNIFICATION = 2.5
+# The context panel is enlarged into a 945 px-wide template-v2 print zone.
+LEGACY_CANONICAL_REAR_PANEL_SCALE = 945 / REAR_PANEL_PX[0]
 
 
 class ContextRenderError(ValueError):
@@ -85,6 +99,16 @@ class ContextRenderResult:
     centre_x_m: float | None
     centre_y_m: float | None
     metric_metadata_available: bool
+    legacy_dataset_reference_span: float | None = None
+    legacy_base_context_span: float | None = None
+    legacy_street_span: float | None = None
+    legacy_street_required_span: float | None = None
+    legacy_resolution_floor_span: float | None = None
+    legacy_final_context_span: float | None = None
+    source_context_raster_size_px: tuple[int, int] | None = None
+    source_crop_size_px: tuple[float, float] | None = None
+    effective_raster_magnification: float | None = None
+    projected_highlight_width_px: float | None = None
 
 
 def calculate_context_width_m(
@@ -175,15 +199,15 @@ def render_context_map_result(
             markup, diagnostics = _metric_crop_markup(dataset, street, markup, typed_source_bounds, options.policy)
         except ContextRenderError as error:
             LOGGER.warning("Typed rear-map metric framing for %s is unavailable; using legacy SVG-space framing: %s", street.id, error)
-            markup = _legacy_crop_markup(markup)
+            markup, diagnostics = _legacy_crop_markup(dataset, street, markup, options)
     elif metadata is not None:
         try:
             markup, diagnostics = _metric_crop_markup(dataset, street, markup, metadata.source_bounds_m, options.policy)
         except ContextRenderError as error:
             LOGGER.warning("Rear-map metric framing for %s is unavailable; using legacy SVG-space framing: %s", street.id, error)
-            markup = _legacy_crop_markup(markup)
+            markup, diagnostics = _legacy_crop_markup(dataset, street, markup, options)
     else:
-        markup = _legacy_crop_markup(markup)
+        markup, diagnostics = _legacy_crop_markup(dataset, street, markup, options)
     try:
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
         image = _rasterise_rear_panel(markup, panel_width, panel_height)
@@ -295,25 +319,153 @@ def _metric_crop_markup(
     }
 
 
-def _legacy_crop_markup(markup: str) -> str:
-    """Legacy highlighted-polyline SVG-space crop for older datasets."""
+def _legacy_crop_markup(
+    dataset: Dataset, street: StreetRecord, markup: str, options: ContextRenderOptions,
+) -> tuple[str, dict[str, float | str | bool | None | tuple[int, int] | tuple[float, float]]]:
+    """Frame old raster-backed context SVGs without treating a tiny road as a map scale."""
     source_x, source_y, source_width, source_height = _svg_view_box(markup)
     bounds = _highlight_bounds(markup)
+    diagnostics: dict[str, float | str | bool | None | tuple[int, int] | tuple[float, float]] = {
+        "framing_mode": "legacy", "dataset_context_width_m": None, "street_context_width_m": None,
+        "final_context_width_m": None, "centre_x_m": None, "centre_y_m": None,
+        "metric_metadata_available": False,
+    }
     if bounds is None:
-        return markup
+        return markup, diagnostics
+
+    raster_size, image_size = _legacy_source_raster(markup, (source_width, source_height))
+    street_span = _legacy_span(bounds)
+    reference_span = _legacy_dataset_reference_span(tuple(
+        str(item.context_path) for item in dataset.streets if item.context_path is not None
+    ))
+    if reference_span is None:
+        reference_span = street_span
+    base_context_span = reference_span * LEGACY_DATASET_CONTEXT_MULTIPLIER
+    street_required_span = street_span * LEGACY_STREET_PADDING
+    resolution_floor_span = _legacy_resolution_floor_span(
+        source_width, source_height, raster_size, image_size, options.panel_size,
+    )
+    maximum_crop_span = min(source_width, source_height * REAR_MAP_PHYSICAL_ASPECT)
+    final_span = min(max(base_context_span, street_required_span, resolution_floor_span), maximum_crop_span)
+    crop_width, crop_height = final_span, final_span / REAR_MAP_PHYSICAL_ASPECT
     left, top, right, bottom = bounds
-    crop_width = max(right - left, source_width * 0.03) * 1.60
-    crop_height = max(bottom - top, source_height * 0.03) * 1.15
-    target_ratio = REAR_MAP_PHYSICAL_ASPECT
-    if crop_width / crop_height < target_ratio:
-        crop_width = crop_height * target_ratio
-    else:
-        crop_height = crop_width / target_ratio
-    crop_width, crop_height = min(crop_width, source_width), min(crop_height, source_height)
     centre_x, centre_y = (left + right) / 2, (top + bottom) / 2
     crop_x = min(max(centre_x - crop_width / 2, source_x), source_x + source_width - crop_width)
     crop_y = min(max(centre_y - crop_height / 2, source_y), source_y + source_height - crop_height)
-    return _replace_view_box(markup, (crop_x, crop_y, crop_width, crop_height))
+    crop_raster_width = crop_width * raster_size[0] / image_size[0]
+    crop_raster_height = crop_height * raster_size[1] / image_size[1]
+    _, _, map_width, map_height, _ = _rear_panel_layout(*options.panel_size)
+    final_map_width = map_width * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    final_map_height = map_height * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    magnification = max(final_map_width / crop_raster_width, final_map_height / crop_raster_height)
+    highlight_width = _highlight_stroke_width(markup)
+    diagnostics.update({
+        "legacy_dataset_reference_span": reference_span,
+        "legacy_base_context_span": base_context_span,
+        "legacy_street_span": street_span,
+        "legacy_street_required_span": street_required_span,
+        "legacy_resolution_floor_span": resolution_floor_span,
+        "legacy_final_context_span": final_span,
+        "source_context_raster_size_px": raster_size,
+        "source_crop_size_px": (crop_raster_width, crop_raster_height),
+        "effective_raster_magnification": magnification,
+        "projected_highlight_width_px": (
+            highlight_width * options.highlight_stroke_scale * final_map_width / crop_width
+            if highlight_width is not None else None
+        ),
+    })
+    return _replace_view_box(markup, (crop_x, crop_y, crop_width, crop_height)), diagnostics
+
+
+def _legacy_span(bounds: tuple[float, float, float, float]) -> float:
+    """Return an aspect-aware SVG-space span that is safe for the rear crop."""
+    left, top, right, bottom = bounds
+    return max(right - left, (bottom - top) * REAR_MAP_PHYSICAL_ASPECT)
+
+
+@lru_cache(maxsize=32)
+def _legacy_dataset_reference_span(context_paths: tuple[str, ...]) -> float | None:
+    spans: list[float] = []
+    for value in context_paths:
+        try:
+            bounds = _highlight_bounds(Path(value).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError):
+            continue
+        if bounds is not None:
+            span = _legacy_span(bounds)
+            if math.isfinite(span) and span > 0:
+                spans.append(span)
+    if not spans:
+        return None
+    spans.sort()
+    rank = (len(spans) - 1) * LEGACY_BBOX_PERCENTILE / 100
+    lower, upper = math.floor(rank), math.ceil(rank)
+    return spans[lower] if lower == upper else spans[lower] + (spans[upper] - spans[lower]) * (rank - lower)
+
+
+def _legacy_source_raster(
+    markup: str, fallback_size: tuple[float, float],
+) -> tuple[tuple[int, int], tuple[float, float]]:
+    """Return embedded raster pixels and its displayed SVG dimensions."""
+    fallback = (max(1, round(fallback_size[0])), max(1, round(fallback_size[1])))
+    try:
+        root = ET.fromstring(markup)
+    except ET.ParseError:
+        return fallback, fallback_size
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "image":
+            continue
+        href = element.get("href") or element.get("{http://www.w3.org/1999/xlink}href")
+        if not href or not href.startswith("data:image") or ";base64," not in href:
+            continue
+        try:
+            payload = base64.b64decode(href.split(";base64,", 1)[1])
+            with Image.open(io.BytesIO(payload)) as image:
+                pixels = image.size
+            width = float(element.get("width", fallback_size[0]))
+            height = float(element.get("height", fallback_size[1]))
+            if min(pixels) > 0 and width > 0 and height > 0:
+                return pixels, (width, height)
+        except (OSError, ValueError, base64.binascii.Error):
+            continue
+    return fallback, fallback_size
+
+
+def _legacy_resolution_floor_span(
+    source_width: float, source_height: float, raster_size: tuple[int, int], image_size: tuple[float, float], panel_size: tuple[int, int],
+) -> float:
+    """Minimum SVG crop width that keeps the canonical map at <= 2.5x raster scale."""
+    _, _, map_width, map_height, _ = _rear_panel_layout(*panel_size)
+    output_width = map_width * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    output_height = map_height * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    raster_width, raster_height = raster_size
+    image_width, image_height = image_size
+    horizontal = output_width / LEGACY_MAX_RASTER_MAGNIFICATION * image_width / raster_width
+    vertical = output_height / LEGACY_MAX_RASTER_MAGNIFICATION * image_height / raster_height * REAR_MAP_PHYSICAL_ASPECT
+    return min(max(horizontal, vertical), min(source_width, source_height * REAR_MAP_PHYSICAL_ASPECT))
+
+
+def _highlight_stroke_width(markup: str) -> float | None:
+    """Return the coloured highlighted-road width before its visual-only scaling."""
+    legacy = re.search(r'"highlight_color"\s*:\s*"(#[0-9A-Fa-f]{6})"', markup)
+    colour = legacy.group(1).casefold() if legacy else None
+    widths: list[float] = []
+    try:
+        root = ET.fromstring(markup)
+    except ET.ParseError:
+        return None
+    for element in root.iter():
+        if element.tag.rsplit("}", 1)[-1] not in {"polyline", "path"}:
+            continue
+        if "highlighted-street" not in element.get("class", "").split() and element.get("stroke", "").casefold() != colour:
+            continue
+        try:
+            width = float(element.get("stroke-width", ""))
+        except ValueError:
+            continue
+        if math.isfinite(width) and width > 0:
+            widths.append(width)
+    return min(widths) if widths else None
 
 
 def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> Image.Image:
