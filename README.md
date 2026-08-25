@@ -49,11 +49,15 @@ python -m mug_previewer render face `
 
 Use `--area "…"` to override display-area text; otherwise the dataset display name is used.
 
+The complete front composition (street name, locality, and face) is physically scaled to `1.08` and shifted down by `6%` of the front-panel height. Its internal typography and face relationships remain unchanged.
+
 ## Rear-context rendering
 
 `mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.
+
+The highlighted street retains its colour and geometry but uses an `0.85` visual stroke multiplier, so it remains immediately legible without overpowering map detail.
 
 ```powershell
 python -m mug_previewer render context `

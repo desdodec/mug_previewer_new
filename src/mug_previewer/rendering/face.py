@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import io
+import math
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -33,6 +34,12 @@ TITLE_SCALE_MULTIPLIER = 0.96
 TITLE_WEIGHT = 625
 STREET_STROKE_MULTIPLIER = 1.18
 SUPPORTING_STROKE_WIDTH = 1.68
+# Keep the title, locality and face as a single physical composition.  The
+# slight enlargement and lower placement use the available ceramic height
+# without changing any of the native face or typography relationships.
+FRONT_GROUP_SCALE = 1.08
+FRONT_GROUP_Y_OFFSET_RATIO = 0.06
+FRONT_GROUP_Y_OFFSET = FRONT_PANEL_PX[1] * FRONT_GROUP_Y_OFFSET_RATIO
 
 
 class FaceRenderError(ValueError):
@@ -44,6 +51,8 @@ class FaceRenderOptions:
     """Display-area text for the fixed V28 front-panel composition."""
 
     area: str = ""
+    group_scale: float = FRONT_GROUP_SCALE
+    group_y_offset: float = FRONT_GROUP_Y_OFFSET
 
 
 def render_face(
@@ -73,18 +82,41 @@ def render_face(
     title_size = min(52.0, max(20.0, width * 0.195 / max(len(street_name) * 0.60, 1)))
     title_size *= TITLE_SCALE_MULTIPLIER
     area = options.area.strip()
+    group_transform = _front_group_transform(
+        panel_center, height, options.group_scale, options.group_y_offset,
+    )
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <defs><style>
     .mug-title {{ font-family:{font_stack}; font-size:{title_size:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
     .mug-area {{ font:500 18.0px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
   </style></defs>
-  <text class="mug-title" x="{panel_center:.1f}" y="{height * TITLE_Y_RATIO:.1f}">{_escape(street_name)}</text>
-  <text class="mug-area" x="{panel_center:.1f}" y="{height * AREA_Y_RATIO:.1f}">{_escape(area)}</text>
-  {face_markup}
+  <g class="front-composition" transform="{group_transform}">
+    <text class="mug-title" x="{panel_center:.1f}" y="{height * TITLE_Y_RATIO:.1f}">{_escape(street_name)}</text>
+    <text class="mug-area" x="{panel_center:.1f}" y="{height * AREA_Y_RATIO:.1f}">{_escape(area)}</text>
+    {face_markup}
+  </g>
 </svg>'''
     png = cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=width, output_height=height)
     with Image.open(io.BytesIO(png)) as rendered:
         return rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1])).copy()
+
+
+def _front_group_transform(
+    panel_center: float,
+    panel_height: float,
+    scale: float,
+    y_offset: float,
+) -> str:
+    """Return the shared front-group transform around its panel centre."""
+    if scale <= 0:
+        raise FaceRenderError("Front composition scale must be positive.")
+    if not all(math.isfinite(float(value)) for value in (scale, y_offset)):
+        raise FaceRenderError("Front composition transform must be finite.")
+    anchor_y = panel_height / 2
+    return (
+        f"translate(0 {y_offset:.2f}) translate({panel_center:.2f} {anchor_y:.2f}) "
+        f"scale({scale:.4f}) translate({-panel_center:.2f} {-anchor_y:.2f})"
+    )
 
 
 def _render_native_face(glyph: Path, panel_center: float, width: int, height: int) -> str:

@@ -18,10 +18,13 @@ from mug_previewer.rendering.context_map import (
     ATTRIBUTION_FONT_SIZE,
     ATTRIBUTION_LINES,
     ContextRenderError,
+    ContextRenderOptions,
     REAR_MAP_BASE_HEIGHT_RATIO,
     REAR_MAP_HEIGHT_RATIO,
     REAR_PANEL_SCALE,
     REAR_PANEL_PX,
+    REAR_STREET_HIGHLIGHT_SCALE,
+    _scale_highlight_stroke,
     _rear_panel_layout,
     calculate_context_width_m,
     parse_rear_map_metadata,
@@ -83,6 +86,19 @@ def test_metric_context_render_returns_rear_panel(tmp_path: Path) -> None:
     assert result.final_context_width_m == pytest.approx(1400)
 
 
+def test_rear_stroke_option_preserves_metric_framing_and_panel_dimensions(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    baseline = render_context_map_result(data, street, ContextRenderOptions(highlight_stroke_scale=1.00))
+    refined = render_context_map_result(data, street)
+    assert baseline.image.size == refined.image.size == REAR_PANEL_PX
+    assert baseline.framing_mode == refined.framing_mode == "metric"
+    assert baseline.dataset_context_width_m == refined.dataset_context_width_m
+    assert baseline.street_context_width_m == refined.street_context_width_m
+    assert baseline.final_context_width_m == refined.final_context_width_m
+    assert (baseline.centre_x_m, baseline.centre_y_m) == (refined.centre_x_m, refined.centre_y_m)
+
+
 def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None:
     panel_width, panel_height = REAR_PANEL_PX
     map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
@@ -96,6 +112,21 @@ def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None
     assert attribution_y + 16.5 <= panel_height
     assert ATTRIBUTION_FONT_SIZE == pytest.approx(12.0)
     assert ATTRIBUTION_LINES == ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
+
+
+def test_final_rear_highlight_scales_width_without_changing_geometry_or_colour() -> None:
+    markup = (
+        '<svg viewBox="0 0 100 100"><polyline class="highlighted-street" '
+        'points="10,20 30,40" fill="none" stroke="#e83e8c" stroke-width="18"/>'
+        '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/></svg>'
+    )
+    adjusted = _scale_highlight_stroke(markup, REAR_STREET_HIGHLIGHT_SCALE)
+    assert REAR_STREET_HIGHLIGHT_SCALE == pytest.approx(0.85)
+    assert 'points="10,20 30,40"' in adjusted
+    assert 'stroke="#e83e8c"' in adjusted
+    assert 'stroke-width="15.30"' in adjusted
+    assert '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/>' in adjusted
+
 
 def test_legacy_context_render_fallback(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))

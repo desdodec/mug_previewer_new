@@ -37,6 +37,12 @@ The final production rule is rear physical scale `1.20`, which preserves that ge
 
 The distinction is intentional: do not retune geographic framing when maintaining rear physical scale or attribution placement.
 
+## Task 02L composition calibration
+
+The front title, locality, and face are one physical composition: production applies a uniform `1.08` scale around the front-panel centre plus a downward offset of `6%` of panel height. This improves use of the lower ceramic while preserving the original internal face and type relationships, horizontal centring, front zone, seam exclusion, and canonical canvas.
+
+Rear physical scale remains `1.20`; its map crop, metric framing, map-and-attribution occupied bounds, colour palette, and highlighted-street path geometry are unchanged. Only the highlighted-street stroke is reduced to `0.85` of its incoming width, retaining visible but more restrained road emphasis.
+
 ```python
 from mug_previewer.preview import MugPreviewOptions, render_mug_preview
 from mug_previewer.rendering.artwork import render_wrap

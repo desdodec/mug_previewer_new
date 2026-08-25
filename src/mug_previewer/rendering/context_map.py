@@ -34,6 +34,9 @@ ATTRIBUTION_FONT_SIZE = 12.0
 ATTRIBUTION_LINE_HEIGHT = 16.5
 ATTRIBUTION_MAP_GAP = 11.0
 ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
+# Visual-only adjustment to the already-framed highlighted street.  It does
+# not affect the underlying street path, crop, map scale or palette.
+REAR_STREET_HIGHLIGHT_SCALE = 0.85
 
 
 class ContextRenderError(ValueError):
@@ -69,6 +72,7 @@ class RearMapMetadata:
 class ContextRenderOptions:
     panel_size: tuple[int, int] = REAR_PANEL_PX
     policy: ContextScalePolicy = DEFAULT_CONTEXT_SCALE_POLICY
+    highlight_stroke_scale: float = REAR_STREET_HIGHLIGHT_SCALE
 
 
 @dataclass(frozen=True)
@@ -181,6 +185,7 @@ def render_context_map_result(
     else:
         markup = _legacy_crop_markup(markup)
     try:
+        markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
         image = _rasterise_rear_panel(markup, panel_width, panel_height)
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
         raise ContextRenderError(f"Could not rasterise context SVG for street {street.id}: {error}") from error
@@ -237,6 +242,32 @@ def _refine_context_markup(markup: str, street: StreetRecord) -> str:
 
     refined = re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
     return re.sub(r'(<image\b[^>]*\bopacity=")[0-9.]+', r'\g<1>0.58', refined, count=1)
+
+
+def _scale_highlight_stroke(markup: str, scale: float) -> str:
+    """Scale only marked-road stroke widths, preserving all map geometry."""
+    if not math.isfinite(scale) or scale <= 0:
+        raise ContextRenderError("Rear highlighted-street scale must be positive and finite.")
+    legacy = re.search(r'"highlight_color"\s*:\s*"(#[0-9A-Fa-f]{6})"', markup)
+    legacy_colour = legacy.group(1).casefold() if legacy else None
+
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        classes = tag.split('class="', 1)[1].split('"', 1)[0].split() if 'class="' in tag else []
+        stroke = re.search(r'\bstroke="(#[0-9A-Fa-f]{6})"', tag)
+        marked = "highlighted-street" in classes or (
+            legacy_colour is not None and stroke is not None and stroke.group(1).casefold() == legacy_colour
+        )
+        if not marked:
+            return tag
+        width = re.search(r'\bstroke-width="([0-9.]+)"', tag)
+        if width is None:
+            return tag
+        adjusted = float(width.group(1)) * scale
+        return re.sub(r'\bstroke-width="[0-9.]+"', f'stroke-width="{adjusted:.2f}"', tag, count=1)
+
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
+
 
 def _metric_crop_markup(
     dataset: Dataset, street: StreetRecord, markup: str, source_bounds: MetricBounds, policy: ContextScalePolicy,
