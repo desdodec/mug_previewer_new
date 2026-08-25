@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw
 
-from mug_previewer.preview.diagnostic import create_mockup_diagnostic_wrap
+from mug_previewer.preview.diagnostic import create_cylindrical_stripe_wrap, create_mockup_diagnostic_wrap
 from mug_previewer.preview.mockup import (
     CANONICAL_WRAP_PREVIEW_GEOMETRY,
     DEFAULT_MUG_PREVIEW_LAYOUT,
@@ -130,6 +130,92 @@ def test_rear_preview_is_deterministic_masked_and_debuggable() -> None:
     for point in ((0, 0), (900, 800), (860, 800)):
         assert mirrored_mask.getpixel(point) == 0
         assert rear.getpixel(point) == mirrored_base.getpixel(point)
+
+
+def _body_difference_stats(
+    expected: Image.Image, actual: Image.Image, mask: Image.Image,
+) -> tuple[float, int, float]:
+    deltas = [
+        max(abs(left - right) for left, right in zip(expected_pixel[:3], actual_pixel[:3]))
+        for expected_pixel, actual_pixel, coverage in zip(expected.getdata(), actual.getdata(), mask.getdata())
+        if coverage
+    ]
+    return sum(deltas) / len(deltas), max(deltas), sum(delta > 0 for delta in deltas) * 100 / len(deltas)
+
+
+def test_transparent_wrap_is_identical_to_blank_mug_over_the_full_body() -> None:
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    transparent = Image.new("RGBA", (geometry.width_px, geometry.height_px), (0, 0, 0, 0))
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        base = opened.convert("RGBA")
+    with Image.open(assets / "white_mug_mask.png") as opened:
+        body_mask = opened.convert("L")
+
+    for orientation in ("front-handle-right", "rear-handle-left"):
+        expected = base if orientation == "front-handle-right" else base.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        mask = body_mask if orientation == "front-handle-right" else body_mask.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        actual = render_mug_preview(transparent, MugPreviewOptions(orientation=orientation))
+        mean, maximum, changed_percent = _body_difference_stats(expected, actual, mask)
+
+        assert (mean, maximum, changed_percent) == (0.0, 0, 0.0)
+
+
+def test_small_opaque_mark_changes_only_its_projected_pixels() -> None:
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    target_size = (
+        DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy[2] - DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy[0],
+        DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy[3] - DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy[1],
+    )
+    for orientation, source_centre_x, left in (
+        ("front-handle-right", geometry.front_centre_x, 198),
+        ("rear-handle-left", geometry.rear_centre_x, 341),
+    ):
+        marked = Image.new("RGBA", (geometry.width_px, geometry.height_px), (0, 0, 0, 0))
+        centre = round(source_centre_x)
+        ImageDraw.Draw(marked).rectangle((centre - 10, 500, centre + 10, 520), fill=(220, 30, 30, 255))
+        blank = render_mug_preview(Image.new("RGBA", marked.size, (0, 0, 0, 0)), MugPreviewOptions(orientation=orientation))
+        actual = render_mug_preview(marked, MugPreviewOptions(orientation=orientation))
+        projected_alpha = project_canonical_wrap(
+            marked, target_size=target_size, source_centre_x=source_centre_x,
+        ).getchannel("A")
+        changed = [
+            (x, y)
+            for y in range(482, 1105)
+            for x in range(left, left + target_size[0])
+            if actual.getpixel((x, y))[:3] != blank.getpixel((x, y))[:3]
+        ]
+
+        assert changed
+        assert all(projected_alpha.getpixel((x - left, y - 482)) > 0 for x, y in changed)
+
+
+def test_stripe_spacing_is_widest_at_cylinder_centre_for_both_orientations() -> None:
+    for source_centre_x in (
+        CANONICAL_WRAP_PREVIEW_GEOMETRY.front_centre_x,
+        CANONICAL_WRAP_PREVIEW_GEOMETRY.rear_centre_x,
+    ):
+        stripe_wrap = Image.new("RGBA", (2362, 1063), (0, 0, 0, 0))
+        stripe_draw = ImageDraw.Draw(stripe_wrap)
+        for index in range(-6, 7):
+            x = round(source_centre_x) + index * 75
+            stripe_draw.rectangle((x - 5, 0, x + 5, 1062), fill=(24, 91, 191, 255))
+        projected = project_canonical_wrap(stripe_wrap, target_size=(485, 623), source_centre_x=source_centre_x)
+        row = [projected.getpixel((x, 311))[3] > 200 for x in range(projected.width)]
+        regions: list[tuple[int, int]] = []
+        start = None
+        for x, occupied in enumerate(row + [False]):
+            if occupied and start is None:
+                start = x
+            elif not occupied and start is not None:
+                regions.append((start, x - 1))
+                start = None
+        centres = [(start + end) / 2 for start, end in regions]
+        spacings = [right - left for left, right in zip(centres, centres[1:])]
+
+        assert len(centres) == 13
+        assert spacings[0] < spacings[1] < spacings[2] < spacings[3] < spacings[4] < spacings[5]
+        assert spacings[6] > spacings[7] > spacings[8] > spacings[9] > spacings[10] > spacings[11]
 
 
 

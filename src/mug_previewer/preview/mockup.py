@@ -125,7 +125,9 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     artwork = Image.new("RGBA", base.size, (0, 0, 0, 0))
     artwork.alpha_composite(projected, (left, top))
     result = Image.alpha_composite(base, artwork)
-    result = Image.alpha_composite(result, _ceramic_lighting(body_mask, layout))
+    # The supplied studio asset already carries the mug's rim, body, handle,
+    # and cast-shadow lighting. Do not overlay lighting over the projected
+    # rectangle: even a feathered layer makes a blank wrap change ceramic.
     if options.show_debug_guides:
         _draw_debug_guides(result, layout, handle_on_left=orientation.mirror_mug)
     return result
@@ -158,11 +160,12 @@ def project_canonical_wrap(
     centre = geometry.front_centre_x if source_centre_x is None else source_centre_x
 
     def source_x(output_x: float) -> float:
+        """Invert x_screen = centre + radius * sin(theta) for Pillow."""
         midpoint = max((target_width - 1) / 2, 1.0)
         normalised = (output_x - midpoint) / midpoint
         return centre + geometry.width_px * asin(normalised * sine_limit) / (2 * pi)
 
-    positions = (source_x(0), source_x(target_width - 1))
+    positions = (source_x(0), source_x(target_width))
     logical_left = floor(min(positions)) - 2
     logical_right = ceil(max(positions)) + 3
     strip = _continuous_wrap_strip(source, logical_left, logical_right - logical_left)
@@ -170,7 +173,8 @@ def project_canonical_wrap(
     for segment in range(mesh_segments):
         x0, x1 = round(segment * target_width / mesh_segments), round((segment + 1) * target_width / mesh_segments)
         if x1 > x0:
-            sx0, sx1 = source_x(x0) - logical_left, source_x(x1 - 1) - logical_left
+            # Adjacent mesh cells share the same cylindrical source boundary.
+            sx0, sx1 = source_x(x0) - logical_left, source_x(x1) - logical_left
             mesh.append(((x0, 0, x1, target_height), (sx0, 0, sx0, source.height, sx1, source.height, sx1, 0)))
     return strip.transform(target_size, Image.Transform.MESH, mesh, resample=Image.Resampling.BICUBIC)
 
@@ -200,27 +204,6 @@ def _continuous_wrap_strip(source: Image.Image, logical_left: int, width: int) -
     return strip
 
 
-def _ceramic_lighting(body_mask: Image.Image, layout: MugPreviewLayout) -> Image.Image:
-    """Apply restrained edge shading and a narrow centre highlight over print."""
-    left, top, right, bottom = layout.body_bounds_xyxy
-    width, height = right - left, bottom - top
-    local = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    draw, midpoint = ImageDraw.Draw(local), max((width - 1) / 2, 1.0)
-    for x in range(width):
-        distance = abs(x - midpoint) / midpoint
-        # Lighting belongs to the ceramic body, not a rectangular ink region:
-        # it must reach zero at both projection bounds to avoid hard side bands.
-        edge_fade = sin(pi * distance)
-        shade_alpha = round(14 * edge_fade ** 1.8)
-        if shade_alpha:
-            draw.line((x, 0, x, height), fill=(0, 0, 0, shade_alpha))
-        highlight_alpha = round(15 * max(0.0, 1.0 - distance * 2.4))
-        if highlight_alpha:
-            draw.line((x, 0, x, height), fill=(255, 255, 255, highlight_alpha))
-    local.putalpha(ImageChops.multiply(local.getchannel("A"), body_mask.crop((left, top, right, bottom))))
-    lighting = Image.new("RGBA", layout.canvas_size, (0, 0, 0, 0))
-    lighting.alpha_composite(local, (left, top))
-    return lighting
 
 
 def _load_owned_mug_assets(layout: MugPreviewLayout) -> tuple[Image.Image, Image.Image]:
