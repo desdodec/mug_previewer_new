@@ -8,6 +8,7 @@ from .config import load_settings
 from .datasets.discovery import discover_datasets
 from .datasets.loader import DatasetLoadError, load_dataset
 from .datasets.validation import validate_dataset
+from .rendering.artwork import WrapRenderError, WrapRenderOptions, render_wrap_result
 from .rendering.context_map import ContextRenderError, render_context_map_result
 from .rendering.face import FaceRenderError, FaceRenderOptions, render_face
 
@@ -36,6 +37,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     context.add_argument("--dataset", type=Path, required=True)
     context.add_argument("--street-id", required=True)
     context.add_argument("--output", type=Path, required=True)
+    wrap = render.add_parser("wrap")
+    wrap.add_argument("--dataset", type=Path, required=True)
+    wrap.add_argument("--street-id", required=True)
+    wrap.add_argument("--output", type=Path, required=True)
+    wrap.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
     args = parser.parse_args(argv)
 
     if args.command == "datasets":
@@ -62,19 +68,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.operation == "face":
                 image = render_face(street, FaceRenderOptions(area=args.area if args.area is not None else data.display_name))
-            else:
+            elif args.operation == "context":
                 context_result = render_context_map_result(data, street)
                 image = context_result.image
-        except (FaceRenderError, ContextRenderError) as error:
+            else:
+                wrap_result = render_wrap_result(
+                    data,
+                    street,
+                    WrapRenderOptions(face_options=FaceRenderOptions(area=args.area if args.area is not None else data.display_name)),
+                )
+                image = wrap_result.image
+        except (FaceRenderError, ContextRenderError, WrapRenderError) as error:
             print(f"Render error: {error}")
             return 2
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        image.save(args.output, format="PNG")
+        image.save(args.output, format="PNG", dpi=(300, 300))
         if args.operation == "context":
             print(
                 f"Rendered context: {street.id} {street.display_name}\nOutput: {args.output}\n"
                 f"Size: {image.width}x{image.height}\nFraming: {context_result.framing_mode}\n"
                 f"Final context width: {context_result.final_context_width_m}"
+            )
+        elif args.operation == "wrap":
+            print(
+                f"Rendered wrap: {street.id} {street.display_name}\nOutput: {args.output}\n"
+                f"Size: {image.width}x{image.height}\nFront panel: {wrap_result.front_panel.width}x{wrap_result.front_panel.height} "
+                f"at {wrap_result.front_placed_box}\nRear panel: {wrap_result.rear_panel.width}x{wrap_result.rear_panel.height} "
+                f"at {wrap_result.rear_placed_box}\nFraming: {wrap_result.context.framing_mode}\n"
+                f"Final context width: {wrap_result.context.final_context_width_m}"
             )
         else:
             print(f"Rendered face: {street.id} {street.display_name}\nOutput: {args.output}\nSize: {image.width}x{image.height}")
