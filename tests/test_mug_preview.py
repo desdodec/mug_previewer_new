@@ -130,3 +130,42 @@ def test_rear_preview_is_deterministic_masked_and_debuggable() -> None:
     for point in ((0, 0), (900, 800), (860, 800)):
         assert mirrored_mask.getpixel(point) == 0
         assert rear.getpixel(point) == mirrored_base.getpixel(point)
+
+
+
+def _luminance(pixel: tuple[int, int, int, int]) -> float:
+    return sum(pixel[:3]) / 3
+
+
+def test_transparent_wrap_preserves_blank_mug_without_print_area_bands() -> None:
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    transparent = Image.new("RGBA", (geometry.width_px, geometry.height_px), (0, 0, 0, 0))
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        base = opened.convert("RGBA")
+
+    for orientation, boundaries in (
+        ("front-handle-right", (198, 683)),
+        ("rear-handle-left", (341, 826)),
+    ):
+        preview = render_mug_preview(transparent, MugPreviewOptions(orientation=orientation))
+        expected_base = base if orientation == "front-handle-right" else base.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        for boundary in boundaries:
+            before = _luminance(preview.getpixel((boundary - 1, 800)))
+            after = _luminance(preview.getpixel((boundary, 800)))
+            assert abs(after - before) < 8
+            assert preview.getpixel((boundary, 800)) == expected_base.getpixel((boundary, 800))
+
+
+def test_transparent_pixels_do_not_change_unprinted_ceramic() -> None:
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    transparent = Image.new("RGBA", (geometry.width_px, geometry.height_px), (0, 0, 0, 0))
+    marked = transparent.copy()
+    ImageDraw.Draw(marked).rectangle((450, 500, 494, 550), fill=(220, 30, 30, 255))
+
+    for orientation in ("front-handle-right", "rear-handle-left"):
+        blank = render_mug_preview(transparent, MugPreviewOptions(orientation=orientation))
+        preview = render_mug_preview(marked, MugPreviewOptions(orientation=orientation))
+        # The source mark is central only in the front view; distant transparent
+        # pixels must always reveal exactly the same underlying ceramic.
+        assert preview.getpixel((250, 800)) == blank.getpixel((250, 800))

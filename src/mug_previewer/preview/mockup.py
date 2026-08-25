@@ -208,7 +208,12 @@ def _ceramic_lighting(body_mask: Image.Image, layout: MugPreviewLayout) -> Image
     draw, midpoint = ImageDraw.Draw(local), max((width - 1) / 2, 1.0)
     for x in range(width):
         distance = abs(x - midpoint) / midpoint
-        draw.line((x, 0, x, height), fill=(0, 0, 0, round(46 * distance ** 1.8)))
+        # Lighting belongs to the ceramic body, not a rectangular ink region:
+        # it must reach zero at both projection bounds to avoid hard side bands.
+        edge_fade = sin(pi * distance)
+        shade_alpha = round(14 * edge_fade ** 1.8)
+        if shade_alpha:
+            draw.line((x, 0, x, height), fill=(0, 0, 0, shade_alpha))
         highlight_alpha = round(15 * max(0.0, 1.0 - distance * 2.4))
         if highlight_alpha:
             draw.line((x, 0, x, height), fill=(255, 255, 255, highlight_alpha))
