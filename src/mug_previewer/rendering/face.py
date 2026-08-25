@@ -37,9 +37,8 @@ SUPPORTING_STROKE_WIDTH = 1.68
 # Keep the title, locality and face as a single physical composition.  The
 # slight enlargement and lower placement use the available ceramic height
 # without changing any of the native face or typography relationships.
-FRONT_GROUP_SCALE = 1.08
-FRONT_GROUP_Y_OFFSET_RATIO = 0.06
-FRONT_GROUP_Y_OFFSET = FRONT_PANEL_PX[1] * FRONT_GROUP_Y_OFFSET_RATIO
+FRONT_GROUP_SCALE = 1.18
+FRONT_GROUP_Y_OFFSET = 60.0
 
 
 class FaceRenderError(ValueError):

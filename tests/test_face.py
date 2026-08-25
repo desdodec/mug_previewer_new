@@ -12,7 +12,6 @@ from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.rendering.face import (
     FRONT_GROUP_SCALE,
     FRONT_GROUP_Y_OFFSET,
-    FRONT_GROUP_Y_OFFSET_RATIO,
     FRONT_PANEL_PX,
     FaceRenderError,
     FaceRenderOptions,
@@ -38,10 +37,10 @@ def test_render_face_returns_v28_front_panel(tmp_path: Path) -> None:
 
 def test_final_front_composition_scale_and_offset_are_shared_and_safe(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))
-    assert FRONT_GROUP_SCALE == pytest.approx(1.08)
-    assert FRONT_GROUP_Y_OFFSET == pytest.approx(FRONT_PANEL_PX[1] * FRONT_GROUP_Y_OFFSET_RATIO)
+    assert FRONT_GROUP_SCALE == pytest.approx(1.18)
+    assert FRONT_GROUP_Y_OFFSET == pytest.approx(60.0)
     transform = _front_group_transform(247.5, FRONT_PANEL_PX[1], FRONT_GROUP_SCALE, FRONT_GROUP_Y_OFFSET)
-    assert "translate(247.50 231.00) scale(1.0800) translate(-247.50 -231.00)" in transform
+    assert "translate(247.50 231.00) scale(1.1800) translate(-247.50 -231.00)" in transform
 
     for street in data.streets:
         image = render_face(street, FaceRenderOptions(area=data.display_name))
@@ -50,6 +49,7 @@ def test_final_front_composition_scale_and_offset_are_shared_and_safe(tmp_path: 
         left, top, right, bottom = bounds
         assert 0 < left < right < FRONT_PANEL_PX[0]
         assert 0 < top < bottom < FRONT_PANEL_PX[1]
+        assert (left + right) / 2 == pytest.approx(FRONT_PANEL_PX[0] / 2, abs=1.0)
 
 
 def test_render_face_missing_glyph_is_clear(tmp_path: Path) -> None:

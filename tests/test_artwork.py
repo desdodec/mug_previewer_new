@@ -100,6 +100,14 @@ def test_real_front_and_rear_renderers_compose(tmp_path: Path) -> None:
     assert result.front_placed_box == PixelBox(0, 90, 945, 882)
     assert result.rear_placed_box == PixelBox(1417, 90, 945, 882)
     assert result.context.framing_mode == "metric"
+    front_bounds = result.front_panel.getchannel("A").getbbox()
+    assert front_bounds is not None
+    scale = result.front_placed_box.width / FRONT_PANEL_PX[0]
+    front_left = result.front_placed_box.x + front_bounds[0] * scale
+    front_right = result.front_placed_box.x + front_bounds[2] * scale
+    assert front_left >= TEMPLATE_V2_WRAP_LAYOUT.front_box.x
+    assert front_right <= TEMPLATE_V2_WRAP_LAYOUT.front_box.right
+    assert front_right <= TEMPLATE_V2_WRAP_LAYOUT.seam_zone.x
 
 
 def test_wrap_propagates_missing_front_renderer_input(tmp_path: Path) -> None:
