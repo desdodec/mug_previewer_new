@@ -15,9 +15,10 @@ class MugPreviewError(ValueError):
 
 
 class PreviewOrientation(StrEnum):
-    """Fixed v1 mug orientations; source selection remains extendable."""
+    """Supported physical viewpoints for the fixed preview mug."""
 
     FRONT_HANDLE_RIGHT = "front-handle-right"
+    REAR_HANDLE_LEFT = "rear-handle-left"
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,10 @@ class CanonicalWrapPreviewGeometry:
     @property
     def front_centre_x(self) -> float:
         return self.front_left_px + self.front_width_px / 2
+
+    @property
+    def rear_centre_x(self) -> float:
+        return self.rear_left_px + self.rear_width_px / 2
 
 
 @dataclass(frozen=True)
@@ -64,12 +69,35 @@ class MugPreviewOptions:
     """Preview-only options; none affect canonical or provider artwork."""
 
     layout: MugPreviewLayout = field(default_factory=lambda: DEFAULT_MUG_PREVIEW_LAYOUT)
-    orientation: PreviewOrientation = PreviewOrientation.FRONT_HANDLE_RIGHT
+    orientation: PreviewOrientation | str = PreviewOrientation.FRONT_HANDLE_RIGHT
     show_debug_guides: bool = False
 
 
 CANONICAL_WRAP_PREVIEW_GEOMETRY = CanonicalWrapPreviewGeometry()
 DEFAULT_MUG_PREVIEW_LAYOUT = MugPreviewLayout()
+
+
+@dataclass(frozen=True)
+class _OrientationGeometry:
+    """Source-centre and owned-mug treatment for one physical viewpoint."""
+
+    source_centre_x: float
+    mirror_mug: bool
+
+
+def _resolve_orientation(
+    orientation: PreviewOrientation | str,
+    geometry: CanonicalWrapPreviewGeometry = CANONICAL_WRAP_PREVIEW_GEOMETRY,
+) -> _OrientationGeometry:
+    """Return shared-projection settings without ever mirroring artwork."""
+    try:
+        resolved = PreviewOrientation(orientation)
+    except ValueError as error:
+        values = ", ".join(member.value for member in PreviewOrientation)
+        raise MugPreviewError(f"Unsupported preview orientation: {orientation!r}. Expected one of: {values}.") from error
+    if resolved is PreviewOrientation.FRONT_HANDLE_RIGHT:
+        return _OrientationGeometry(source_centre_x=geometry.front_centre_x, mirror_mug=False)
+    return _OrientationGeometry(source_centre_x=geometry.rear_centre_x, mirror_mug=True)
 
 
 def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = None) -> Image.Image:
@@ -80,22 +108,26 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     """
     options = options or MugPreviewOptions()
     _validate_wrap(wrap)
-    if options.orientation is not PreviewOrientation.FRONT_HANDLE_RIGHT:
-        raise MugPreviewError(f"Unsupported preview orientation: {options.orientation}.")
+    orientation = _resolve_orientation(options.orientation)
     base, body_mask = _load_owned_mug_assets(options.layout)
-    left, top, right, bottom = options.layout.body_bounds_xyxy
+    layout = options.layout
+    if orientation.mirror_mug:
+        base = base.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        body_mask = body_mask.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        layout = _mirrored_layout(layout)
+    left, top, right, bottom = layout.body_bounds_xyxy
     projected = project_canonical_wrap(
         wrap, target_size=(right - left, bottom - top), visible_angle_degrees=options.layout.visible_angle_degrees,
-        mesh_segments=options.layout.mesh_segments,
+        mesh_segments=options.layout.mesh_segments, source_centre_x=orientation.source_centre_x,
     )
     local_mask = body_mask.crop((left, top, right, bottom))
     projected.putalpha(ImageChops.multiply(projected.getchannel("A"), local_mask))
     artwork = Image.new("RGBA", base.size, (0, 0, 0, 0))
     artwork.alpha_composite(projected, (left, top))
     result = Image.alpha_composite(base, artwork)
-    result = Image.alpha_composite(result, _ceramic_lighting(body_mask, options.layout))
+    result = Image.alpha_composite(result, _ceramic_lighting(body_mask, layout))
     if options.show_debug_guides:
-        _draw_debug_guides(result, options.layout)
+        _draw_debug_guides(result, layout, handle_on_left=orientation.mirror_mug)
     return result
 
 
@@ -106,12 +138,13 @@ def project_canonical_wrap(
     geometry: CanonicalWrapPreviewGeometry = CANONICAL_WRAP_PREVIEW_GEOMETRY,
     visible_angle_degrees: float = 150.0,
     mesh_segments: int = 64,
+    source_centre_x: float | None = None,
 ) -> Image.Image:
-    """Project a front-centred canonical wrap into a cylindrical body region.
+    """Project a canonical-wrap interval into a cylindrical body region.
 
     Equal source widths increasingly compress toward both cylinder edges. The
-    centre samples the front artwork most faithfully. The continuous source
-    can include a rear-side tail at the left edge and seam at the right edge.
+    selected source centre samples most faithfully. The continuous source can
+    cross the wrap boundary without reversing any artwork.
     """
     if target_size[0] <= 0 or target_size[1] <= 0:
         raise MugPreviewError("Projection target dimensions must be positive.")
@@ -122,7 +155,7 @@ def project_canonical_wrap(
     target_width, target_height = target_size
     angle_limit = radians(visible_angle_degrees / 2)
     sine_limit = sin(angle_limit)
-    centre = geometry.front_centre_x
+    centre = geometry.front_centre_x if source_centre_x is None else source_centre_x
 
     def source_x(output_x: float) -> float:
         midpoint = max((target_width - 1) / 2, 1.0)
@@ -140,6 +173,19 @@ def project_canonical_wrap(
             sx0, sx1 = source_x(x0) - logical_left, source_x(x1 - 1) - logical_left
             mesh.append(((x0, 0, x1, target_height), (sx0, 0, sx0, source.height, sx1, source.height, sx1, 0)))
     return strip.transform(target_size, Image.Transform.MESH, mesh, resample=Image.Resampling.BICUBIC)
+
+
+
+def _mirrored_layout(layout: MugPreviewLayout) -> MugPreviewLayout:
+    """Mirror only the owned mug geometry for the handle-left viewpoint."""
+    left, top, right, bottom = layout.body_bounds_xyxy
+    width, _ = layout.canvas_size
+    return MugPreviewLayout(
+        canvas_size=layout.canvas_size,
+        body_bounds_xyxy=(width - right, top, width - left, bottom),
+        visible_angle_degrees=layout.visible_angle_degrees,
+        mesh_segments=layout.mesh_segments,
+    )
 
 
 def _continuous_wrap_strip(source: Image.Image, logical_left: int, width: int) -> Image.Image:
@@ -188,8 +234,10 @@ def _validate_wrap(wrap: Image.Image, geometry: CanonicalWrapPreviewGeometry = C
         raise MugPreviewError(f"Mug preview requires canonical {geometry.width_px}x{geometry.height_px} artwork, got {wrap.width}x{wrap.height}.")
 
 
-def _draw_debug_guides(image: Image.Image, layout: MugPreviewLayout) -> None:
+def _draw_debug_guides(image: Image.Image, layout: MugPreviewLayout, *, handle_on_left: bool = False) -> None:
     draw = ImageDraw.Draw(image, "RGBA")
     left, top, right, bottom = layout.body_bounds_xyxy
     draw.rectangle((left, top, right - 1, bottom - 1), outline=(255, 132, 36, 220), width=3)
     draw.line(((left + right) // 2, top, (left + right) // 2, bottom), fill=(44, 145, 255, 220), width=2)
+    handle_edge = left if handle_on_left else right - 1
+    draw.line((handle_edge, top, handle_edge, bottom), fill=(80, 220, 125, 220), width=3)

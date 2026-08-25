@@ -11,6 +11,7 @@ from mug_previewer.preview.mockup import (
     DEFAULT_MUG_PREVIEW_LAYOUT,
     MugPreviewError,
     MugPreviewOptions,
+    PreviewOrientation,
     project_canonical_wrap,
     render_mug_preview,
 )
@@ -89,3 +90,43 @@ def test_diagnostic_wrap_and_invalid_size_are_explicit() -> None:
     assert diagnostic.getpixel((1800, 500))[:3] == (77, 116, 199)
     with pytest.raises(MugPreviewError, match="requires canonical"):
         render_mug_preview(Image.new("RGBA", (1, 1)))
+
+
+def test_default_front_orientation_matches_explicit_front() -> None:
+    wrap = _banded_wrap()
+    default = render_mug_preview(wrap)
+    explicit = render_mug_preview(wrap, MugPreviewOptions(orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
+    string_option = render_mug_preview(wrap, MugPreviewOptions(orientation="front-handle-right"))
+
+    assert default.tobytes() == explicit.tobytes() == string_option.tobytes()
+
+
+def test_rear_projection_centres_rear_with_seam_at_left_and_front_at_right() -> None:
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    projected = project_canonical_wrap(
+        _banded_wrap(), target_size=(485, 623), source_centre_x=geometry.rear_centre_x,
+    )
+
+    assert projected.getpixel((242, 311))[:3] == (45, 80, 210)
+    assert projected.getpixel((0, 311))[1] > 100  # seam beside the left handle edge
+    assert projected.getpixel((484, 311))[0] > 150  # front tail only at the opposite edge
+
+
+def test_rear_preview_is_deterministic_masked_and_debuggable() -> None:
+    wrap = _banded_wrap()
+    rear_options = MugPreviewOptions(orientation="rear-handle-left")
+    rear = render_mug_preview(wrap, rear_options)
+
+    assert rear.size == (1024, 1536)
+    assert rear.mode == "RGBA"
+    assert rear.tobytes() == render_mug_preview(wrap, rear_options).tobytes()
+    assert rear.tobytes() != render_mug_preview(wrap, MugPreviewOptions(orientation="rear-handle-left", show_debug_guides=True)).tobytes()
+
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        mirrored_base = opened.convert("RGBA").transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    with Image.open(assets / "white_mug_mask.png") as opened:
+        mirrored_mask = opened.convert("L").transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    for point in ((0, 0), (900, 800), (860, 800)):
+        assert mirrored_mask.getpixel(point) == 0
+        assert rear.getpixel(point) == mirrored_base.getpixel(point)
