@@ -7,9 +7,13 @@ It is a downstream sibling of provider export: it accepts only the canonical
 
 ## Important boundary
 
-The preview applies a cylindrical projection, body mask, lighting, and the
-project-owned white-mug photograph. **Mockup output must never be sent to a
-print provider.** Manufacture uses the flat provider export, not this image.
+The preview applies a sinusoidal cylindrical projection, body mask, and the
+project-owned white-mug photograph. Transparent source pixels leave the
+underlying ceramic unchanged; preview lighting is not applied as an opaque
+rectangular print field. **Mockup output must never be sent to a print
+provider.** Provider export and mockup preview are separate downstream
+consumers of the canonical wrap: manufacture uses the flat provider export,
+not this image.
 
 ## Orientations and output
 
