@@ -10,12 +10,16 @@ from PIL import Image
 from mug_previewer.cli import main
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.rendering.face import (
+    AREA_Y_RATIO,
     FRONT_GROUP_SCALE,
     FRONT_GROUP_Y_OFFSET,
     FRONT_PANEL_PX,
+    FRONT_TITLE_LOCALITY_GAP_DELTA_PX,
+    TITLE_Y_RATIO,
     FaceRenderError,
     FaceRenderOptions,
     _front_group_transform,
+    _front_text_y_positions,
     render_face,
 )
 
@@ -39,6 +43,9 @@ def test_final_front_composition_scale_and_offset_are_shared_and_safe(tmp_path: 
     data = load_dataset(dataset_copy(tmp_path))
     assert FRONT_GROUP_SCALE == pytest.approx(1.18)
     assert FRONT_GROUP_Y_OFFSET == pytest.approx(60.0)
+    assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(4.0)
+    title_y, locality_y = _front_text_y_positions(462, FRONT_TITLE_LOCALITY_GAP_DELTA_PX)
+    assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 4.0)
     transform = _front_group_transform(247.5, FRONT_PANEL_PX[1], FRONT_GROUP_SCALE, FRONT_GROUP_Y_OFFSET)
     assert "translate(247.50 231.00) scale(1.1800) translate(-247.50 -231.00)" in transform
 

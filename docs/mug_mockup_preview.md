@@ -43,6 +43,10 @@ The front title, locality, and face are one physical composition: production app
 
 Rear physical scale remains `1.20`; its map crop, metric framing, map-and-attribution occupied bounds, colour palette, and highlighted-street path geometry are unchanged. Only the highlighted-street stroke is reduced to `0.85` of its incoming width, retaining visible but more restrained road emphasis.
 
+## Task 02N title/locality spacing refinement
+
+Task 02N is a micro-refinement after Task 02M, not a new composition calibration. The front group remains at scale `1.18` with a `60 px` vertical offset. The locality baseline uses one shared `+4 px` adjustment, increasing title/locality separation without changing their font, weight, horizontal centring, face placement, canonical canvas, or rear behaviour.
+
 ```python
 from mug_previewer.preview import MugPreviewOptions, render_mug_preview
 from mug_previewer.rendering.artwork import render_wrap

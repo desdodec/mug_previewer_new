@@ -39,6 +39,9 @@ SUPPORTING_STROKE_WIDTH = 1.68
 # without changing any of the native face or typography relationships.
 FRONT_GROUP_SCALE = 1.18
 FRONT_GROUP_Y_OFFSET = 60.0
+# Task 02N: a small shared locality-baseline adjustment opens the title stack
+# without changing title type, group calibration, or face placement.
+FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 4.0
 
 
 class FaceRenderError(ValueError):
@@ -52,6 +55,7 @@ class FaceRenderOptions:
     area: str = ""
     group_scale: float = FRONT_GROUP_SCALE
     group_y_offset: float = FRONT_GROUP_Y_OFFSET
+    title_locality_gap_delta: float = FRONT_TITLE_LOCALITY_GAP_DELTA_PX
 
 
 def render_face(
@@ -81,6 +85,7 @@ def render_face(
     title_size = min(52.0, max(20.0, width * 0.195 / max(len(street_name) * 0.60, 1)))
     title_size *= TITLE_SCALE_MULTIPLIER
     area = options.area.strip()
+    title_y, area_y = _front_text_y_positions(height, options.title_locality_gap_delta)
     group_transform = _front_group_transform(
         panel_center, height, options.group_scale, options.group_y_offset,
     )
@@ -90,8 +95,8 @@ def render_face(
     .mug-area {{ font:500 18.0px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
   </style></defs>
   <g class="front-composition" transform="{group_transform}">
-    <text class="mug-title" x="{panel_center:.1f}" y="{height * TITLE_Y_RATIO:.1f}">{_escape(street_name)}</text>
-    <text class="mug-area" x="{panel_center:.1f}" y="{height * AREA_Y_RATIO:.1f}">{_escape(area)}</text>
+    <text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text>
+    <text class="mug-area" x="{panel_center:.1f}" y="{area_y:.1f}">{_escape(area)}</text>
     {face_markup}
   </g>
 </svg>'''
@@ -116,6 +121,13 @@ def _front_group_transform(
         f"translate(0 {y_offset:.2f}) translate({panel_center:.2f} {anchor_y:.2f}) "
         f"scale({scale:.4f}) translate({-panel_center:.2f} {-anchor_y:.2f})"
     )
+
+
+def _front_text_y_positions(panel_height: float, locality_gap_delta: float) -> tuple[float, float]:
+    """Return title and locality baselines with the shared Task 02N gap."""
+    if not all(math.isfinite(float(value)) for value in (panel_height, locality_gap_delta)):
+        raise FaceRenderError("Front text layout must be finite.")
+    return panel_height * TITLE_Y_RATIO, panel_height * AREA_Y_RATIO + locality_gap_delta
 
 
 def _render_native_face(glyph: Path, panel_center: float, width: int, height: int) -> str:

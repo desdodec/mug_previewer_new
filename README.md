@@ -49,7 +49,7 @@ python -m mug_previewer render face `
 
 Use `--area "…"` to override display-area text; otherwise the dataset display name is used.
 
-The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Its internal typography and face relationships remain unchanged.
+The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Task 02N adds a shared `+4 px` locality-baseline adjustment to give the title/locality stack more breathing room; title styling, face placement, and all other internal relationships remain unchanged.
 
 ## Rear-context rendering
 
