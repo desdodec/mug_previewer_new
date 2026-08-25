@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import base64
 from dataclasses import replace
+from io import BytesIO
 import shutil
 from pathlib import Path
 
@@ -87,6 +89,30 @@ def test_legacy_context_render_fallback(tmp_path: Path) -> None:
     assert result.framing_mode == "legacy"
     assert not result.metric_metadata_available
     assert result.image.size == REAR_PANEL_PX
+
+
+def test_context_panel_preserves_highlight_over_raster_map(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    assert street.context_path is not None
+    base = Image.new("RGB", (16, 16), "#eeeeee")
+    payload = BytesIO()
+    base.save(payload, format="PNG")
+    uri = base64.b64encode(payload.getvalue()).decode("ascii")
+    street.context_path.write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+        f'<image href="data:image/png;base64,{uri}" width="100" height="100"/>'
+        '<polyline points="50,10 50,90" fill="none" stroke="#e83e8c" stroke-width="8"/>'
+        '</svg>',
+        encoding="utf-8",
+    )
+    result = render_context_map_result(data, replace(street, context_source_bounds=None))
+    assert any(
+        red > 200 and green < 120 and blue > 80
+        for y in range(result.image.height)
+        for x in range(result.image.width)
+        for red, green, blue, _ in (result.image.getpixel((x, y)),)
+    )
 
 
 def test_missing_context_svg_is_clear(tmp_path: Path) -> None:

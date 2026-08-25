@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import io
 import json
 import logging
@@ -283,17 +282,34 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
     map_y = (panel_height - (map_height + ATTRIBUTION_MAP_GAP + ATTRIBUTION_LINE_HEIGHT * 2)) / 2
     map_x = (panel_width - map_width) / 2
     attribution_y = map_y + map_height + ATTRIBUTION_MAP_GAP
-    uri = "data:image/svg+xml;base64," + base64.b64encode(markup.encode("utf-8")).decode("ascii")
-    panel_svg = (
+    # CairoSVG can omit vector overlays (including the highlighted street) when
+    # an SVG containing a raster map is itself used as an SVG ``<image>``.
+    # Rasterise the completed source SVG first, then place that bitmap in the
+    # panel SVG. This keeps the measured panel geometry while preserving the
+    # upstream map and its overlay stack.
+    map_png = cairosvg.svg2png(
+        bytestring=markup.encode("utf-8"),
+        output_width=round(map_width * 3),
+        output_height=round(map_height * 3),
+    )
+    with Image.open(io.BytesIO(map_png)) as rendered:
+        map_image = rendered.convert("RGBA").copy()
+    target_size = (round(map_width), round(map_height))
+    if map_image.size != target_size:
+        map_image = map_image.resize(target_size, Image.Resampling.LANCZOS)
+    attribution_svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{panel_width}" height="{panel_height}" viewBox="0 0 {panel_width} {panel_height}">\n'
         f'  <style>.attribution {{ font:400 {ATTRIBUTION_FONT_SIZE:.1f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}</style>\n'
-        f'  <image class="context-map" href="{uri}" x="{map_x:.1f}" y="{map_y:.1f}" width="{map_width:.1f}" height="{map_height:.1f}" preserveAspectRatio="xMidYMid meet"/>\n'
         f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">Map data: OpenStreetMap</tspan><tspan x="{panel_width / 2:.1f}" dy="{ATTRIBUTION_LINE_HEIGHT:.1f}">openstreetmap.org/copyright</tspan></text>\n'
         '</svg>'
     )
-    png = cairosvg.svg2png(bytestring=panel_svg.encode("utf-8"), output_width=panel_width, output_height=panel_height)
-    with Image.open(io.BytesIO(png)) as rendered:
-        return rendered.convert("RGBA").copy()
+    attribution_png = cairosvg.svg2png(bytestring=attribution_svg.encode("utf-8"), output_width=panel_width, output_height=panel_height)
+    with Image.open(io.BytesIO(attribution_png)) as rendered:
+        attribution = rendered.convert("RGBA").copy()
+    panel = Image.new("RGBA", (panel_width, panel_height), (0, 0, 0, 0))
+    panel.alpha_composite(map_image, (round(map_x), round(map_y)))
+    panel.alpha_composite(attribution)
+    return panel
 
 
 def _dataset_p90(dataset: Dataset) -> float:
