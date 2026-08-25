@@ -19,6 +19,7 @@ from mug_previewer.rendering.artwork import (
 from mug_previewer.rendering.context_map import (
     ATTRIBUTION_LINE_HEIGHT,
     ContextRenderError,
+    REAR_PANEL_SCALE,
     REAR_PANEL_PX,
     _rear_panel_layout,
 )
@@ -78,12 +79,15 @@ def test_enlarged_rear_content_stays_centred_inside_rear_zone() -> None:
     map_right = map_left + map_width * scale
     map_bottom = rear_box.y + (map_y + map_height) * scale
     attribution_bottom = rear_box.y + (attribution_y + ATTRIBUTION_LINE_HEIGHT) * scale
+    assert REAR_PANEL_SCALE == pytest.approx(1.20)
+    assert rear_box.x >= TEMPLATE_V2_WRAP_LAYOUT.rear_box.x
 
     assert rear_box.x >= TEMPLATE_V2_WRAP_LAYOUT.seam_zone.right
     assert map_left >= rear_box.x and map_right <= rear_box.right
     assert map_bottom <= rear_box.bottom and attribution_bottom <= rear_box.bottom
     assert rear_box.right <= TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px
     assert map_left - rear_box.x == pytest.approx(rear_box.right - map_right)
+    assert rear_box.x + rear_box.width / 2 == TEMPLATE_V2_WRAP_LAYOUT.rear_box.x + TEMPLATE_V2_WRAP_LAYOUT.rear_box.width / 2
 
 def test_real_front_and_rear_renderers_compose(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))

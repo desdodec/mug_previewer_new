@@ -22,10 +22,15 @@ LOGGER = logging.getLogger(__name__)
 REAR_PANEL_PX = (495, 462)
 REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
 # Physical composition only: metric framing is calculated before this panel is
-# rasterised. The 20% map increase makes the rear read as an intentional
-# second side while retaining a framed, white-space-led treatment.
-REAR_MAP_HEIGHT_RATIO = 0.84
-ATTRIBUTION_FONT_SIZE = 13.0
+# rasterised. Keep the selected production presentation scale centralised here:
+# it enlarges the map-and-attribution group without changing map geography.
+REAR_PANEL_BASE_SCALE = 1.00
+REAR_PANEL_SCALE = 1.20
+REAR_MAP_BASE_HEIGHT_RATIO = 0.70
+REAR_MAP_HEIGHT_RATIO = REAR_MAP_BASE_HEIGHT_RATIO * (REAR_PANEL_SCALE / REAR_PANEL_BASE_SCALE)
+# A small type-only reduction leaves the required credit plainly legible while
+# keeping it visually tertiary to the highlighted street and map context.
+ATTRIBUTION_FONT_SIZE = 12.0
 ATTRIBUTION_LINE_HEIGHT = 16.5
 ATTRIBUTION_MAP_GAP = 11.0
 ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")

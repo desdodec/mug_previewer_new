@@ -33,6 +33,10 @@ aspect ratio. Attribution remains directly below the map with unchanged required
 text, a `13 px` font, `16.5 px` line height, and an `11 px` gap so it is legible
 but visually tertiary.
 
+The final production rule is rear physical scale `1.20`, which preserves that geographic framing while enlarging only physical presentation. It remains uniformly scaled and centred. The required attribution content is unchanged; its final restrained treatment is `12 px` type with the existing `16.5 px` line height and `11 px` gap. This supersedes the preliminary `13 px` attribution wording above.
+
+The distinction is intentional: do not retune geographic framing when maintaining rear physical scale or attribution placement.
+
 ```python
 from mug_previewer.preview import MugPreviewOptions, render_mug_preview
 from mug_previewer.rendering.artwork import render_wrap
