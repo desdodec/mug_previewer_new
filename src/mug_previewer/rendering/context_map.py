@@ -21,10 +21,14 @@ LOGGER = logging.getLogger(__name__)
 # The rear half of V28's 990 x 462 fast preview.
 REAR_PANEL_PX = (495, 462)
 REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
-REAR_MAP_HEIGHT_RATIO = 0.70
-ATTRIBUTION_FONT_SIZE = 14.5
-ATTRIBUTION_LINE_HEIGHT = 19.0
-ATTRIBUTION_MAP_GAP = 16.5
+# Physical composition only: metric framing is calculated before this panel is
+# rasterised. The 20% map increase makes the rear read as an intentional
+# second side while retaining a framed, white-space-led treatment.
+REAR_MAP_HEIGHT_RATIO = 0.84
+ATTRIBUTION_FONT_SIZE = 13.0
+ATTRIBUTION_LINE_HEIGHT = 16.5
+ATTRIBUTION_MAP_GAP = 11.0
+ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 
 
 class ContextRenderError(ValueError):
@@ -277,11 +281,7 @@ def _legacy_crop_markup(markup: str) -> str:
 
 
 def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> Image.Image:
-    map_height = panel_height * REAR_MAP_HEIGHT_RATIO
-    map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
-    map_y = (panel_height - (map_height + ATTRIBUTION_MAP_GAP + ATTRIBUTION_LINE_HEIGHT * 2)) / 2
-    map_x = (panel_width - map_width) / 2
-    attribution_y = map_y + map_height + ATTRIBUTION_MAP_GAP
+    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
     # CairoSVG can omit vector overlays (including the highlighted street) when
     # an SVG containing a raster map is itself used as an SVG ``<image>``.
     # Rasterise the completed source SVG first, then place that bitmap in the
@@ -300,7 +300,7 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
     attribution_svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{panel_width}" height="{panel_height}" viewBox="0 0 {panel_width} {panel_height}">\n'
         f'  <style>.attribution {{ font:400 {ATTRIBUTION_FONT_SIZE:.1f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}</style>\n'
-        f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">Map data: OpenStreetMap</tspan><tspan x="{panel_width / 2:.1f}" dy="{ATTRIBUTION_LINE_HEIGHT:.1f}">openstreetmap.org/copyright</tspan></text>\n'
+        f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">{ATTRIBUTION_LINES[0]}</tspan><tspan x="{panel_width / 2:.1f}" dy="{ATTRIBUTION_LINE_HEIGHT:.1f}">{ATTRIBUTION_LINES[1]}</tspan></text>\n'
         '</svg>'
     )
     attribution_png = cairosvg.svg2png(bytestring=attribution_svg.encode("utf-8"), output_width=panel_width, output_height=panel_height)
@@ -311,6 +311,17 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
     panel.alpha_composite(attribution)
     return panel
 
+
+def _rear_panel_layout(panel_width: int, panel_height: int) -> tuple[float, float, float, float, float]:
+    """Return centred map bounds and first attribution baseline in panel pixels."""
+    map_height = panel_height * REAR_MAP_HEIGHT_RATIO
+    map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
+    content_height = map_height + ATTRIBUTION_MAP_GAP + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES)
+    if content_height > panel_height:
+        raise ContextRenderError("Rear map and attribution do not fit inside the context panel.")
+    map_y = (panel_height - content_height) / 2
+    map_x = (panel_width - map_width) / 2
+    return map_x, map_y, map_width, map_height, map_y + map_height + ATTRIBUTION_MAP_GAP
 
 def _dataset_p90(dataset: Dataset) -> float:
     value = dataset.statistics.context_scale.get("bbox_span_p90_m")

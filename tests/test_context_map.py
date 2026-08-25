@@ -15,8 +15,11 @@ from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.datasets.models import MetricBounds
 from mug_previewer.datasets.workflow_v6 import metric_bounds_from_raster_crop
 from mug_previewer.rendering.context_map import (
+    ATTRIBUTION_LINES,
     ContextRenderError,
+    REAR_MAP_HEIGHT_RATIO,
     REAR_PANEL_PX,
+    _rear_panel_layout,
     calculate_context_width_m,
     parse_rear_map_metadata,
     render_context_map_result,
@@ -76,6 +79,18 @@ def test_metric_context_render_returns_rear_panel(tmp_path: Path) -> None:
     assert result.metric_metadata_available
     assert result.final_context_width_m == pytest.approx(1400)
 
+
+def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None:
+    panel_width, panel_height = REAR_PANEL_PX
+    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
+
+    assert REAR_MAP_HEIGHT_RATIO == pytest.approx(0.84)
+    assert map_x == pytest.approx((panel_width - map_width) / 2)
+    assert map_x >= 0 and map_y >= 0
+    assert map_x + map_width <= panel_width
+    assert attribution_y > map_y + map_height
+    assert attribution_y + 16.5 <= panel_height
+    assert ATTRIBUTION_LINES == ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 
 def test_legacy_context_render_fallback(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))

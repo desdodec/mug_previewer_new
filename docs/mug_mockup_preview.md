@@ -23,6 +23,16 @@ not this image.
 
 Both orientations use the same cylindrical projection, masking, and lighting. The mask keeps artwork off the handle and background. Output is RGBA `1024 x 1536`, inherited from the owned neutral white-mug studio asset.
 
+## Rear-panel composition
+
+The rear context map keeps its existing geographic crop and metric-framing
+policy; only its physical map-and-attribution group is larger inside the
+existing rear panel. The map height is `0.84` of the context-panel height
+(`1.20` times the previous `0.70`), remains horizontally centred, and keeps its
+aspect ratio. Attribution remains directly below the map with unchanged required
+text, a `13 px` font, `16.5 px` line height, and an `11 px` gap so it is legible
+but visually tertiary.
+
 ```python
 from mug_previewer.preview import MugPreviewOptions, render_mug_preview
 from mug_previewer.rendering.artwork import render_wrap

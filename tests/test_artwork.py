@@ -16,7 +16,12 @@ from mug_previewer.rendering.artwork import (
     render_wrap,
     render_wrap_result,
 )
-from mug_previewer.rendering.context_map import ContextRenderError, REAR_PANEL_PX
+from mug_previewer.rendering.context_map import (
+    ATTRIBUTION_LINE_HEIGHT,
+    ContextRenderError,
+    REAR_PANEL_PX,
+    _rear_panel_layout,
+)
 from mug_previewer.rendering.face import FRONT_PANEL_PX, FaceRenderError
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
@@ -62,6 +67,23 @@ def test_composer_preserves_panel_aspect_ratio() -> None:
     assert front_box.width * FRONT_PANEL_PX[1] == front_box.height * FRONT_PANEL_PX[0]
     assert rear_box.width * REAR_PANEL_PX[1] == rear_box.height * REAR_PANEL_PX[0]
 
+
+def test_enlarged_rear_content_stays_centred_inside_rear_zone() -> None:
+    _, rear_box = WrapComposer().compose(
+        Image.new("RGBA", FRONT_PANEL_PX), Image.new("RGBA", REAR_PANEL_PX),
+    )[1:]
+    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(*REAR_PANEL_PX)
+    scale = rear_box.width / REAR_PANEL_PX[0]
+    map_left = rear_box.x + map_x * scale
+    map_right = map_left + map_width * scale
+    map_bottom = rear_box.y + (map_y + map_height) * scale
+    attribution_bottom = rear_box.y + (attribution_y + ATTRIBUTION_LINE_HEIGHT) * scale
+
+    assert rear_box.x >= TEMPLATE_V2_WRAP_LAYOUT.seam_zone.right
+    assert map_left >= rear_box.x and map_right <= rear_box.right
+    assert map_bottom <= rear_box.bottom and attribution_bottom <= rear_box.bottom
+    assert rear_box.right <= TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px
+    assert map_left - rear_box.x == pytest.approx(rear_box.right - map_right)
 
 def test_real_front_and_rear_renderers_compose(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))
