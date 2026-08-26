@@ -20,6 +20,7 @@ from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap
 DEVELOPMENT_DATASET_ROOT = Path(r"E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6")
 PREVIEW_SIZE = (1024, 1536)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
+PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
 # Export helpers use the production provider profile.
 
 
@@ -204,6 +205,25 @@ def render_preview_pair(
     return PreviewPair(wrap=wrap, front=front, rear=rear, framing_mode=framing_mode)
 
 
+def export_provider_png(
+    dataset: Dataset,
+    street: StreetRecord,
+    destination: Path | str,
+    *,
+    profile_id: str,
+    design_options: DesignOptions | None = None,
+    wrap_renderer: WrapRenderer = render_wrap,
+    profile_lookup: Callable[[str], ProviderProfile] = get_provider_profile,
+    exporter: ProviderExporter = save_provider_export,
+) -> Path:
+    """Freshly render current UI state and save it through one provider profile."""
+    design = design_options or DesignOptions()
+    wrap = wrap_renderer(dataset, street, build_render_options(design, area=dataset.display_name))
+    if isinstance(wrap, WrapRenderResult):
+        wrap = wrap.image
+    return exporter(wrap, profile_lookup(profile_id), Path(destination))
+
+
 def export_inkthreadable_png(
     dataset: Dataset,
     street: StreetRecord,
@@ -215,8 +235,36 @@ def export_inkthreadable_png(
     exporter: ProviderExporter = save_provider_export,
 ) -> Path:
     """Freshly render current UI state and save it through Inkthreadable."""
-    design = design_options or DesignOptions()
-    wrap = wrap_renderer(dataset, street, build_render_options(design, area=dataset.display_name))
-    if isinstance(wrap, WrapRenderResult):
-        wrap = wrap.image
-    return exporter(wrap, profile_lookup(INKTHREADABLE_PROFILE_ID), Path(destination))
+    return export_provider_png(
+        dataset,
+        street,
+        destination,
+        profile_id=INKTHREADABLE_PROFILE_ID,
+        design_options=design_options,
+        wrap_renderer=wrap_renderer,
+        profile_lookup=profile_lookup,
+        exporter=exporter,
+    )
+
+
+def export_printify_png(
+    dataset: Dataset,
+    street: StreetRecord,
+    destination: Path | str,
+    *,
+    design_options: DesignOptions | None = None,
+    wrap_renderer: WrapRenderer = render_wrap,
+    profile_lookup: Callable[[str], ProviderProfile] = get_provider_profile,
+    exporter: ProviderExporter = save_provider_export,
+) -> Path:
+    """Freshly render current UI state and save it through generic Printify."""
+    return export_provider_png(
+        dataset,
+        street,
+        destination,
+        profile_id=PRINTIFY_PROFILE_ID,
+        design_options=design_options,
+        wrap_renderer=wrap_renderer,
+        profile_lookup=profile_lookup,
+        exporter=exporter,
+    )

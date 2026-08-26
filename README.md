@@ -142,10 +142,12 @@ format and saved files carry the profile DPI. PNG preserves alpha. Printify
 JPEG requires an explicit `ExportOptions(jpeg_background=(r, g, b))` when the
 prepared image contains transparency.
 
-Inkthreadable exports remain 2362x1063 RGBA PNG with no resampling. The generic
-Printify profile produces a 2475x1155 RGBA PNG, containing the full master with
-transparent padding. Batch export and a UI export workflow are not implemented
-yet.
+Inkthreadable exports remain 2362x1063 RGBA PNG with no resampling.
+Export Printify PNG saves a fresh render through the generic
+printify_generic_11oz_ceramic profile, producing a 2475x1155 transparent RGBA
+PNG at 300 DPI with the full master and provider padding. This generic Printify
+11oz ceramic profile is not universal: individual Printify fulfilment providers
+may require different templates.
 
 The older `export_wrap` / `save_provider_png` Gelato API remains an isolated
 compatibility path for its legacy 2362x1134 Gelato specification. New callers

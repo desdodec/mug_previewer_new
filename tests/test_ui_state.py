@@ -170,3 +170,109 @@ def test_display_image_crops_and_fits_without_changing_aspect_ratio() -> None:
     displayed = display_image(source, (300, 200))
     assert displayed.width <= 300 and displayed.height <= 200
     assert abs(displayed.width / displayed.height - 504 / 954) < 0.005
+
+def test_printify_export_uses_current_selection_design_and_profile(tmp_path: Path) -> None:
+    from mug_previewer.ui.state import PRINTIFY_PROFILE_ID, export_printify_png
+
+    data = _dataset(tmp_path)
+    street = data.streets[1]
+    wrap = Image.new("RGBA", (2362, 1063))
+    destination = tmp_path / "current-printify-state.png"
+    calls: list[object] = []
+    profile = get_provider_profile(PRINTIFY_PROFILE_ID)
+
+    def fake_wrap(dataset, selected_street, options=None):
+        calls.append((dataset, selected_street, options))
+        return wrap
+
+    def fake_lookup(profile_id: str):
+        calls.append(profile_id)
+        return profile
+
+    def fake_export(source, resolved_profile, path):
+        calls.append((source, resolved_profile, path))
+        return path
+
+    saved = export_printify_png(
+        data,
+        street,
+        destination,
+        design_options=DesignOptions(front_feature_weight=1.25, rear_highlight_weight=0.90),
+        wrap_renderer=fake_wrap,
+        profile_lookup=fake_lookup,
+        exporter=fake_export,
+    )
+
+    assert saved == destination
+    assert calls == [
+        (data, street, build_render_options(DesignOptions(1.25, 0.90), area=data.display_name)),
+        PRINTIFY_PROFILE_ID,
+        (wrap, profile, destination),
+    ]
+
+
+def test_printify_cancelled_export_uses_png_dialog_and_does_not_start_worker(tmp_path: Path, monkeypatch) -> None:
+    data = _dataset(tmp_path)
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.root = object()
+    controller.state = SimpleNamespace(
+        selected_dataset=data, selected_street=data.streets[0], design_options=DesignOptions(),
+    )
+    dialog: dict[str, object] = {}
+
+    def fake_dialog(**kwargs):
+        dialog.update(kwargs)
+        return ""
+
+    monkeypatch.setattr(ui_app.filedialog, "asksaveasfilename", fake_dialog)
+    controller._start_printify_export()
+
+    assert dialog == {
+        "parent": controller.root,
+        "title": "Export Printify PNG",
+        "initialfile": "st-john-s-road_printify.png",
+        "defaultextension": ".png",
+        "filetypes": [("PNG files", "*.png")],
+    }
+
+
+def test_printify_export_writes_provider_png_with_transparent_padding(tmp_path: Path) -> None:
+    from mug_previewer.ui.state import export_printify_png
+
+    data = _dataset(tmp_path)
+    source = Image.new("RGBA", (2362, 1063), (20, 40, 60, 128))
+    destination = tmp_path / "printify.png"
+
+    saved = export_printify_png(
+        data,
+        data.streets[0],
+        destination,
+        wrap_renderer=lambda *_args: source,
+    )
+
+    assert saved == destination
+    with Image.open(destination) as exported:
+        assert exported.format == "PNG"
+        assert exported.size == (2475, 1155)
+        assert exported.mode == "RGBA"
+        assert round(exported.info["dpi"][0]) == round(exported.info["dpi"][1]) == 300
+        assert exported.getpixel((0, 0))[3] == 0
+        assert exported.getpixel((0, 1154))[3] == 0
+        assert exported.getpixel((0, 20))[3] == 128
+def test_printify_export_without_selection_shows_clear_error_without_save_dialog(monkeypatch) -> None:
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.state = SimpleNamespace(selected_dataset=None, selected_street=None)
+    errors: list[str] = []
+    controller._show_error = errors.append
+    called = False
+
+    def fake_dialog(**_kwargs):
+        nonlocal called
+        called = True
+        return ""
+
+    monkeypatch.setattr(ui_app.filedialog, "asksaveasfilename", fake_dialog)
+    controller._start_printify_export()
+
+    assert errors == ["Select a street before exporting."]
+    assert not called
