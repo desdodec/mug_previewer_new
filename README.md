@@ -79,4 +79,16 @@ python -m mug_previewer render wrap `
   --output output\0246_wrap.png
 ```
 
-`output/` is ignored by Git. Provider-specific exports, curved mug-photo previews, and GUI/web UI remain deferred.
+`output/` is ignored by Git. Provider-specific exports and web UI remain deferred.
+
+## Desktop preview UI
+
+The first desktop UI provides a local workflow for selecting a workflow-v6 dataset, filtering streets, and viewing front/rear production mug mockups. It uses standard-library Tkinter, so no new UI dependency or web server is needed.
+
+```powershell
+python -m mug_previewer.ui
+# or
+python -m mug_previewer --dataset-root "E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6" ui
+```
+
+The dataset root follows the existing precedence: the explicit `--dataset-root` argument, `MUG_PREVIEWER_DATASET_ROOT`, local configuration, then the current development workflow-v6 root. If the resolved root is absent or contains no usable datasets, the UI shows a concise error and remains open. Select a dataset, search/select a street, then choose **Render Preview**.

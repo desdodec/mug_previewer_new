@@ -17,6 +17,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mug-previewer")
     parser.add_argument("--dataset-root", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
     datasets = commands.add_parser("datasets").add_subparsers(dest="operation", required=True)
     datasets.add_parser("list")
     dataset = commands.add_parser("dataset").add_subparsers(dest="operation", required=True)
@@ -43,6 +44,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     wrap.add_argument("--output", type=Path, required=True)
     wrap.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
     args = parser.parse_args(argv)
+
+    if args.command == "ui":
+        from .ui.app import launch
+        return launch(dataset_root=args.dataset_root)
 
     if args.command == "datasets":
         root = load_settings(dataset_root=args.dataset_root).dataset_root
