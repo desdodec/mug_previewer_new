@@ -1,8 +1,8 @@
 """V28-compatible front-face rendering for typed workflow-v6 streets.
 
 The returned PNG is the 495 x 462 front half of V28's 990 x 462 fast-preview
-canvas.  It is a direct crop, so glyph placement, text scale and all V28
-linework retain their legacy pixel geometry.
+canvas. It is a direct crop, so glyph placement and all native face linework
+retain their legacy pixel geometry.
 """
 
 from __future__ import annotations
@@ -30,18 +30,19 @@ FRONT_CENTER_RATIO = 0.25
 TITLE_Y_RATIO = 0.141
 AREA_Y_RATIO = 0.176
 TEXT_CLEARANCE = 20.0
-TITLE_SCALE_MULTIPLIER = 0.96
 TITLE_WEIGHT = 625
+LOCALITY_FONT_SIZE = 18.0
+TITLE_FONT_SIZE_TIERS = (34.0, 30.0, 26.0)
+TITLE_SAFE_WIDTH_PX = 400.0
 STREET_STROKE_MULTIPLIER = 1.18
 SUPPORTING_STROKE_WIDTH = 1.68
-# Keep the title, locality and face as a single physical composition.  The
-# slight enlargement and lower placement use the available ceramic height
-# without changing any of the native face or typography relationships.
+# Keep the established overall front composition frozen.
 FRONT_GROUP_SCALE = 1.18
 FRONT_GROUP_Y_OFFSET = 60.0
-# Task 02N: a small shared locality-baseline adjustment opens the title stack
-# without changing title type, group calibration, or face placement.
+# Task 02N: shared locality-baseline adjustment within the text block.
 FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 4.0
+# Task 02Q: move only the title/locality block in source-panel coordinates.
+FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -12.0
 
 
 class FaceRenderError(ValueError):
@@ -50,12 +51,21 @@ class FaceRenderError(ValueError):
 
 @dataclass(frozen=True)
 class FaceRenderOptions:
-    """Display-area text for the fixed V28 front-panel composition."""
+    """Display-area text and internal typography positioning for one front panel."""
 
     area: str = ""
     group_scale: float = FRONT_GROUP_SCALE
     group_y_offset: float = FRONT_GROUP_Y_OFFSET
     title_locality_gap_delta: float = FRONT_TITLE_LOCALITY_GAP_DELTA_PX
+    typography_block_y_offset: float = FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
+
+
+@dataclass(frozen=True)
+class TitleFontChoice:
+    """One approved title tier and its measured SVG text width."""
+
+    size_px: float
+    rendered_width_px: int
 
 
 def render_face(
@@ -82,17 +92,18 @@ def render_face(
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
-    title_size = min(52.0, max(20.0, width * 0.195 / max(len(street_name) * 0.60, 1)))
-    title_size *= TITLE_SCALE_MULTIPLIER
+    title = select_title_font(street_name, font_stack)
     area = options.area.strip()
-    title_y, area_y = _front_text_y_positions(height, options.title_locality_gap_delta)
+    title_y, area_y = _front_text_y_positions(
+        height, options.title_locality_gap_delta, options.typography_block_y_offset,
+    )
     group_transform = _front_group_transform(
         panel_center, height, options.group_scale, options.group_y_offset,
     )
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <defs><style>
-    .mug-title {{ font-family:{font_stack}; font-size:{title_size:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
-    .mug-area {{ font:500 18.0px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
+    .mug-title {{ font-family:{font_stack}; font-size:{title.size_px:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
+    .mug-area {{ font:500 {LOCALITY_FONT_SIZE:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
   </style></defs>
   <g class="front-composition" transform="{group_transform}">
     <text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text>
@@ -111,7 +122,7 @@ def _front_group_transform(
     scale: float,
     y_offset: float,
 ) -> str:
-    """Return the shared front-group transform around its panel centre."""
+    """Return the frozen shared front-group transform around its panel centre."""
     if scale <= 0:
         raise FaceRenderError("Front composition scale must be positive.")
     if not all(math.isfinite(float(value)) for value in (scale, y_offset)):
@@ -123,11 +134,53 @@ def _front_group_transform(
     )
 
 
-def _front_text_y_positions(panel_height: float, locality_gap_delta: float) -> tuple[float, float]:
-    """Return title and locality baselines with the shared Task 02N gap."""
-    if not all(math.isfinite(float(value)) for value in (panel_height, locality_gap_delta)):
+def _front_text_y_positions(
+    panel_height: float,
+    locality_gap_delta: float,
+    typography_block_y_offset: float = 0.0,
+) -> tuple[float, float]:
+    """Return unified title/locality baselines with shared gap and top anchor."""
+    if not all(
+        math.isfinite(float(value))
+        for value in (panel_height, locality_gap_delta, typography_block_y_offset)
+    ):
         raise FaceRenderError("Front text layout must be finite.")
-    return panel_height * TITLE_Y_RATIO, panel_height * AREA_Y_RATIO + locality_gap_delta
+    return (
+        panel_height * TITLE_Y_RATIO + typography_block_y_offset,
+        panel_height * AREA_Y_RATIO + locality_gap_delta + typography_block_y_offset,
+    )
+
+
+def select_title_font(
+    text: str,
+    font_stack: str,
+    *,
+    safe_width_px: float = TITLE_SAFE_WIDTH_PX,
+) -> TitleFontChoice:
+    """Choose the first approved title tier whose measured SVG text fits."""
+    if safe_width_px <= 0 or not math.isfinite(safe_width_px):
+        raise FaceRenderError("Title safe width must be positive and finite.")
+    for size_px in TITLE_FONT_SIZE_TIERS:
+        rendered_width_px = _measure_title_width(text, font_stack, size_px)
+        if rendered_width_px <= safe_width_px:
+            return TitleFontChoice(size_px=size_px, rendered_width_px=rendered_width_px)
+    raise FaceRenderError(
+        f'Title cannot fit safely at the minimum approved size: "{text}" exceeds {safe_width_px:.0f}px.'
+    )
+
+
+def _measure_title_width(text: str, font_stack: str, size_px: float) -> int:
+    """Measure the same SVG/Cairo text used by the production front renderer."""
+    markup = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="120">
+  <style>.title {{ font-family:{font_stack}; font-size:{size_px:.1f}px; font-weight:{TITLE_WEIGHT}; }}</style>
+  <text class="title" x="20" y="80">{_escape(text)}</text>
+</svg>'''
+    png = cairosvg.svg2png(bytestring=markup.encode("utf-8"), output_width=1200, output_height=120)
+    with Image.open(io.BytesIO(png)) as rendered:
+        bounds = rendered.getchannel("A").getbbox()
+    if bounds is None:
+        raise FaceRenderError("Street title produced no visible text.")
+    return bounds[2] - bounds[0]
 
 
 def _render_native_face(glyph: Path, panel_center: float, width: int, height: int) -> str:
@@ -176,7 +229,10 @@ def _render_native_face(glyph: Path, panel_center: float, width: int, height: in
     face_height = height * FACE_HEIGHT_RATIO
     face_x = panel_center - face_width / 2
     top_text_bottom = height * AREA_Y_RATIO + TEXT_CLEARANCE
-    face_y = _face_y_between_text(_face_content_bbox(face_asset), face_width, face_height, top_text_bottom, height - top_text_bottom)
+    face_y = _face_y_between_text(
+        _face_content_bbox(face_asset), face_width, face_height,
+        top_text_bottom, height - top_text_bottom,
+    )
     face_y = min(max(face_y, 0.0), height - face_height)
     return (
         f'<image class="v28-face" href="{href}" x="{face_x:.1f}" y="{face_y:.1f}" '
@@ -185,7 +241,9 @@ def _render_native_face(glyph: Path, panel_center: float, width: int, height: in
 
 
 def _face_content_bbox(face_asset: str) -> tuple[int, int, int, int]:
-    png = cairosvg.svg2png(bytestring=face_asset.encode("utf-8"), output_width=FACE_ASSET_SIZE[0], output_height=FACE_ASSET_SIZE[1])
+    png = cairosvg.svg2png(
+        bytestring=face_asset.encode("utf-8"), output_width=FACE_ASSET_SIZE[0], output_height=FACE_ASSET_SIZE[1],
+    )
     with Image.open(io.BytesIO(png)) as rendered:
         bbox = rendered.getchannel("A").getbbox()
     if bbox is None:

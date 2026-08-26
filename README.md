@@ -51,6 +51,8 @@ Use `--area "…"` to override display-area text; otherwise the dataset display 
 
 The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Task 02N adds a shared `+4 px` locality-baseline adjustment to give the title/locality stack more breathing room; title styling, face placement, and all other internal relationships remain unchanged.
 
+Task 02Q keeps that face calibration intact while anchoring the title/locality block 12 px upward in the pre-group front-panel coordinate system. Street titles use measured SVG fitting with only three sizes: 34.0 px, 30.0 px, and 26.0 px, selected against a shared 400 px safe width. The locality remains fixed at 18.0 px and the existing +4 px title/locality gap remains unchanged.
+
 ## Rear-context rendering
 
 `mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.

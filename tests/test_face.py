@@ -15,13 +15,19 @@ from mug_previewer.rendering.face import (
     FRONT_GROUP_Y_OFFSET,
     FRONT_PANEL_PX,
     FRONT_TITLE_LOCALITY_GAP_DELTA_PX,
+    FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX,
+    LOCALITY_FONT_SIZE,
+    TITLE_FONT_SIZE_TIERS,
+    TITLE_SAFE_WIDTH_PX,
     TITLE_Y_RATIO,
     FaceRenderError,
     FaceRenderOptions,
     _front_group_transform,
     _front_text_y_positions,
     render_face,
+    select_title_font,
 )
+from mug_previewer.rendering.native import face_policy as native
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
 
@@ -39,12 +45,16 @@ def test_render_face_returns_v28_front_panel(tmp_path: Path) -> None:
     assert image.mode == "RGBA"
 
 
-def test_final_front_composition_scale_and_offset_are_shared_and_safe(tmp_path: Path) -> None:
+def test_final_front_composition_scale_offset_and_text_gap_remain_shared_and_safe(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))
     assert FRONT_GROUP_SCALE == pytest.approx(1.18)
     assert FRONT_GROUP_Y_OFFSET == pytest.approx(60.0)
     assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(4.0)
-    title_y, locality_y = _front_text_y_positions(462, FRONT_TITLE_LOCALITY_GAP_DELTA_PX)
+    assert FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX == pytest.approx(-12.0)
+    title_y, locality_y = _front_text_y_positions(
+        462, FRONT_TITLE_LOCALITY_GAP_DELTA_PX, FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX,
+    )
+    assert title_y == pytest.approx(462 * TITLE_Y_RATIO - 12.0)
     assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 4.0)
     transform = _front_group_transform(247.5, FRONT_PANEL_PX[1], FRONT_GROUP_SCALE, FRONT_GROUP_Y_OFFSET)
     assert "translate(247.50 231.00) scale(1.1800) translate(-247.50 -231.00)" in transform
@@ -57,6 +67,30 @@ def test_final_front_composition_scale_and_offset_are_shared_and_safe(tmp_path: 
         assert 0 < left < right < FRONT_PANEL_PX[0]
         assert 0 < top < bottom < FRONT_PANEL_PX[1]
         assert (left + right) / 2 == pytest.approx(FRONT_PANEL_PX[0] / 2, abs=1.0)
+
+
+def test_title_font_selection_uses_only_approved_bounded_tiers() -> None:
+    font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
+    short = select_title_font("Park Road", font_stack)
+    medium = select_title_font("William Lucy Way", font_stack)
+    long = select_title_font("Victoria Park Gardens North", font_stack)
+    very_long = select_title_font("Stoke Newington Church Street", font_stack)
+
+    assert short.size_px == medium.size_px == TITLE_FONT_SIZE_TIERS[0]
+    assert long.size_px == TITLE_FONT_SIZE_TIERS[1]
+    assert very_long.size_px == TITLE_FONT_SIZE_TIERS[2]
+    choices = (short, medium, long, very_long)
+    assert all(choice.size_px in TITLE_FONT_SIZE_TIERS for choice in choices)
+    assert all(choice.size_px <= TITLE_FONT_SIZE_TIERS[0] for choice in choices)
+    assert all(choice.rendered_width_px <= TITLE_SAFE_WIDTH_PX for choice in choices)
+    assert LOCALITY_FONT_SIZE == pytest.approx(18.0)
+    assert FaceRenderOptions().typography_block_y_offset == FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
+
+
+def test_title_font_selection_refuses_text_that_cannot_fit_at_the_minimum_tier() -> None:
+    font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
+    with pytest.raises(FaceRenderError, match="cannot fit safely"):
+        select_title_font("A Very Long Street Name " * 8, font_stack)
 
 
 def test_render_face_missing_glyph_is_clear(tmp_path: Path) -> None:
