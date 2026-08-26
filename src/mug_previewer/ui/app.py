@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
+from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .state import (
     AppState,
@@ -68,9 +69,19 @@ class MugPreviewerApp(ttk.Frame):
         controls.rowconfigure(5, weight=1)
         controls.columnconfigure(0, weight=1)
         self.render_button = ttk.Button(controls, text="Render Preview", command=self._start_render, state="disabled")
-        self.render_button.grid(row=6, column=0, sticky="ew")
+        design = ttk.LabelFrame(controls, text="Design", padding=8)
+        design.grid(row=6, column=0, sticky="ew", pady=(2, 10))
+        design.columnconfigure(0, weight=1)
+        self.front_weight_var = tk.DoubleVar(value=self.state.design_options.front_feature_weight)
+        self.rear_weight_var = tk.DoubleVar(value=self.state.design_options.rear_highlight_weight)
+        self.front_weight_display = tk.StringVar()
+        self.rear_weight_display = tk.StringVar()
+        self._add_weight_control(design, 0, "Street feature weight", self.front_weight_var, self.front_weight_display)
+        self._add_weight_control(design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display)
+        ttk.Button(design, text="Reset design", command=self._reset_design).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        self.render_button.grid(row=7, column=0, sticky="ew")
         self.framing_var = tk.StringVar(value="Rear framing: —")
-        ttk.Label(controls, textvariable=self.framing_var).grid(row=7, column=0, sticky="w", pady=(13, 0))
+        ttk.Label(controls, textvariable=self.framing_var).grid(row=8, column=0, sticky="w", pady=(13, 0))
 
         self.front_card = self._preview_card("Front")
         self.front_card.grid(row=0, column=1, sticky="nsew", padx=(0, 7))
@@ -78,6 +89,50 @@ class MugPreviewerApp(ttk.Frame):
         self.rear_card.grid(row=0, column=2, sticky="nsew", padx=(7, 0))
         self.status_var = tk.StringVar(value="Loading datasets…")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+    def _add_weight_control(
+        self,
+        parent: ttk.LabelFrame,
+        row: int,
+        label: str,
+        variable: tk.DoubleVar,
+        display: tk.StringVar,
+    ) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+        ttk.Label(parent, textvariable=display).grid(row=row, column=1, sticky="e")
+        scale = tk.Scale(
+            parent,
+            from_=DESIGN_WEIGHT_MIN,
+            to=DESIGN_WEIGHT_MAX,
+            resolution=DESIGN_WEIGHT_STEP,
+            orient=tk.HORIZONTAL,
+            showvalue=False,
+            variable=variable,
+            command=self._design_changed,
+            highlightthickness=0,
+        )
+        scale.grid(row=row + 1, column=0, columnspan=2, sticky="ew")
+        self._update_weight_displays()
+
+    def _update_weight_displays(self) -> None:
+        self.front_weight_display.set(f"{self.front_weight_var.get():.2f}×")
+        self.rear_weight_display.set(f"{self.rear_weight_var.get():.2f}×")
+
+    def _design_changed(self, _value: str | None = None) -> None:
+        self.state.set_design_options(
+            round(self.front_weight_var.get(), 2), round(self.rear_weight_var.get(), 2),
+        )
+        self._update_weight_displays()
+        if self.state.current_wrap is not None:
+            self.status_var.set("Design settings changed — render to update preview.")
+
+    def _reset_design(self) -> None:
+        self.state.reset_design_options()
+        self.front_weight_var.set(self.state.design_options.front_feature_weight)
+        self.rear_weight_var.set(self.state.design_options.rear_highlight_weight)
+        self._update_weight_displays()
+        if self.state.current_wrap is not None:
+            self.status_var.set("Design reset — render to update preview.")
 
     def _preview_card(self, title: str) -> ttk.Frame:
         card = ttk.LabelFrame(self, text=title, padding=8)
@@ -144,11 +199,15 @@ class MugPreviewerApp(ttk.Frame):
         self.render_button.configure(state="disabled")
         self.status_var.set(f"Rendering {street.id} — {street.display_name}…")
         self.state.render_status = "Rendering"
-        threading.Thread(target=self._render_worker, args=(data, street), daemon=True).start()
+        threading.Thread(
+            target=self._render_worker,
+            args=(data, street, self.state.design_options),
+            daemon=True,
+        ).start()
 
-    def _render_worker(self, data: Dataset, street: StreetRecord) -> None:
+    def _render_worker(self, data: Dataset, street: StreetRecord, design_options: DesignOptions) -> None:
         try:
-            pair = render_preview_pair(data, street)
+            pair = render_preview_pair(data, street, design_options=design_options)
         except Exception as error:
             LOGGER.exception("Preview rendering failed")
             self.root.after(0, lambda: self._render_failed(str(error)))

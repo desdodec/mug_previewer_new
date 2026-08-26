@@ -6,6 +6,7 @@ import shutil
 from PIL import Image
 
 from mug_previewer.datasets.discovery import DatasetCandidate
+from mug_previewer.design import DesignOptions, build_render_options
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.preview.mockup import PreviewOrientation
 from mug_previewer.ui.state import PREVIEW_SIZE, dataset_options, display_image, filter_streets, render_preview_pair
@@ -40,8 +41,8 @@ def test_preview_rendering_uses_one_wrap_and_both_production_orientations(tmp_pa
     calls: list[object] = []
     wrap = Image.new("RGBA", (2362, 1063))
 
-    def fake_wrap(dataset, street):
-        calls.append((dataset, street))
+    def fake_wrap(dataset, street, options=None):
+        calls.append((dataset, street, options))
         return wrap
 
     def fake_preview(source, options):
@@ -53,7 +54,7 @@ def test_preview_rendering_uses_one_wrap_and_both_production_orientations(tmp_pa
     assert result.wrap is wrap
     assert result.front.size == result.rear.size == PREVIEW_SIZE
     assert calls == [
-        (data, data.streets[0]),
+        (data, data.streets[0], build_render_options(DesignOptions(), area=data.display_name)),
         PreviewOrientation.FRONT_HANDLE_RIGHT,
         PreviewOrientation.REAR_HANDLE_LEFT,
     ]

@@ -58,6 +58,7 @@ class FaceRenderOptions:
     group_y_offset: float = FRONT_GROUP_Y_OFFSET
     title_locality_gap_delta: float = FRONT_TITLE_LOCALITY_GAP_DELTA_PX
     typography_block_y_offset: float = FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
+    street_feature_stroke_multiplier: float = STREET_STROKE_MULTIPLIER
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,9 @@ def render_face(
 
     width, height = SOURCE_CANVAS_PX
     panel_center = width * FRONT_CENTER_RATIO
-    face_markup = _render_native_face(glyph, panel_center, width, height)
+    face_markup = _render_native_face(
+        glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
+    )
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
@@ -183,7 +186,15 @@ def _measure_title_width(text: str, font_stack: str, size_px: float) -> int:
     return bounds[2] - bounds[0]
 
 
-def _render_native_face(glyph: Path, panel_center: float, width: int, height: int) -> str:
+def _render_native_face(
+    glyph: Path,
+    panel_center: float,
+    width: int,
+    height: int,
+    street_feature_stroke_multiplier: float,
+) -> str:
+    if not math.isfinite(street_feature_stroke_multiplier) or street_feature_stroke_multiplier <= 0:
+        raise FaceRenderError("Front street feature stroke multiplier must be positive and finite.")
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     specs = native.build_specs([glyph], palette=palette)
     native.apply_gallery_context_to_single_spec(specs, [glyph], palette, None)
@@ -191,7 +202,7 @@ def _render_native_face(glyph: Path, panel_center: float, width: int, height: in
         native_path = Path(temporary) / "face.svg"
         native.render_grid(
             specs, native_path, cols=1, show_blush=False, ear_mode="varied",
-            presentation_mode="varied", street_stroke_multiplier=STREET_STROKE_MULTIPLIER,
+            presentation_mode="varied", street_stroke_multiplier=street_feature_stroke_multiplier,
             palette=palette, paper_key="a6", show_note=False, show_title=False,
             single_svg_mode=True,
         )

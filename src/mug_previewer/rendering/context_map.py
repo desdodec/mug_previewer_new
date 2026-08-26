@@ -279,8 +279,12 @@ def _scale_highlight_stroke(markup: str, scale: float) -> str:
         tag = match.group(0)
         classes = tag.split('class="', 1)[1].split('"', 1)[0].split() if 'class="' in tag else []
         stroke = re.search(r'\bstroke="(#[0-9A-Fa-f]{6})"', tag)
-        marked = "highlighted-street" in classes or (
-            legacy_colour is not None and stroke is not None and stroke.group(1).casefold() == legacy_colour
+        marked = (
+            "highlighted-street" in classes
+            or "highlighted-street-halo" in classes
+            or (
+                legacy_colour is not None and stroke is not None and stroke.group(1).casefold() == legacy_colour
+            )
         )
         if not marked:
             return tag

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from PIL import Image, ImageDraw
 
 from ..datasets.models import Dataset, StreetRecord
-from .context_map import ContextRenderResult, render_context_map_result
+from .context_map import ContextRenderOptions, ContextRenderResult, render_context_map_result
 from .face import FaceRenderOptions, render_face
 
 
@@ -71,6 +71,7 @@ class WrapRenderOptions:
 
     layout: WrapLayout = TEMPLATE_V2_WRAP_LAYOUT
     face_options: FaceRenderOptions | None = None
+    context_options: ContextRenderOptions | None = None
     debug_guides: bool = False
 
 
@@ -134,7 +135,7 @@ def render_wrap_result(
     options = options or WrapRenderOptions()
     face_options = options.face_options or FaceRenderOptions(area=dataset.display_name)
     front_panel = render_face(street, face_options)
-    context = render_context_map_result(dataset, street)
+    context = render_context_map_result(dataset, street, options.context_options)
     rear_panel = context.image
     image, front_box, rear_box = WrapComposer(options.layout).compose(
         front_panel, rear_panel, debug_guides=options.debug_guides,

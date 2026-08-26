@@ -287,3 +287,17 @@ def test_metric_rendering_does_not_populate_legacy_framing_diagnostics(tmp_path:
     assert result.framing_mode == "metric"
     assert result.legacy_final_context_span is None
     assert result.effective_raster_magnification is None
+
+
+def test_rear_highlight_and_supplied_halo_scale_together() -> None:
+    markup = (
+        '<svg viewBox="0 0 100 100">'
+        '<polyline class="highlighted-street-halo" points="10,20 30,40" fill="none" stroke="#ffffff" stroke-width="20"/>'
+        '<polyline class="highlighted-street" points="10,20 30,40" fill="none" stroke="#e83e8c" stroke-width="10"/>'
+        '</svg>'
+    )
+
+    adjusted = _scale_highlight_stroke(markup, 1.25)
+
+    assert 'stroke="#ffffff" stroke-width="25.00"' in adjusted
+    assert 'stroke="#e83e8c" stroke-width="12.50"' in adjusted

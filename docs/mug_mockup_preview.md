@@ -37,6 +37,17 @@ The final production rule is rear physical scale `1.20`, which preserves that ge
 
 The distinction is intentional: do not retune geographic framing when maintaining rear physical scale or attribution placement.
 
+## Design controls
+
+The desktop previewer exposes only two restrained style controls: **Street feature
+weight** and **Map highlight weight**. Both are relative multipliers from
+`0.75×` to `1.50×` in `0.05` steps; `1.00×` is the validated production
+default. They affect only the front extracted-street feature and rear selected
+street treatment respectively, not composition, typography, map framing, or
+mockup geometry. **Reset design** restores both multipliers to `1.00×` without
+changing the selected dataset, street, or search filter; use **Render Preview**
+to apply a changed setting.
+
 ## Task 02M composition calibration
 
 The front title, locality, and face are one physical composition: production applies a uniform `1.18` scale around the front-panel centre plus a downward offset of `60 px`. This improves use of the lower ceramic while preserving the original internal face and type relationships, horizontal centring, front zone, seam exclusion, and canonical canvas.

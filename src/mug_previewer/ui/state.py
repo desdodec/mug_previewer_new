@@ -9,10 +9,11 @@ from typing import Protocol
 from PIL import Image
 
 from ..config import load_settings
+from ..design import DesignOptions, build_render_options
 from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset, StreetRecord
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview
-from ..rendering.artwork import WrapRenderResult, render_wrap_result
+from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap_result
 
 DEVELOPMENT_DATASET_ROOT = Path(r"E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6")
 PREVIEW_SIZE = (1024, 1536)
@@ -53,10 +54,21 @@ class AppState:
     render_status: str = "Ready"
     error: str | None = None
     framing_mode: str | None = None
+    design_options: DesignOptions = field(default_factory=DesignOptions)
+
+    def set_design_options(self, front_feature_weight: float, rear_highlight_weight: float) -> None:
+        """Validate and retain the current style selections for this app session."""
+        self.design_options = DesignOptions(front_feature_weight, rear_highlight_weight)
+
+    def reset_design_options(self) -> None:
+        """Restore only user-adjustable design values, preserving selection state."""
+        self.design_options = DesignOptions()
 
 
 class WrapRenderer(Protocol):
-    def __call__(self, dataset: Dataset, street: StreetRecord) -> Image.Image | WrapRenderResult: ...
+    def __call__(
+        self, dataset: Dataset, street: StreetRecord, options: WrapRenderOptions | None = None,
+    ) -> Image.Image | WrapRenderResult: ...
 
 
 class PreviewRenderer(Protocol):
@@ -158,11 +170,17 @@ def render_preview_pair(
     dataset: Dataset,
     street: StreetRecord,
     *,
+    design_options: DesignOptions | None = None,
     wrap_renderer: WrapRenderer = render_wrap_result,
     preview_renderer: PreviewRenderer = render_mug_preview,
 ) -> PreviewPair:
     """Render one canonical wrap, then derive both fixed production mockups."""
-    rendered = wrap_renderer(dataset, street)
+    design = design_options or DesignOptions()
+    rendered = wrap_renderer(
+        dataset,
+        street,
+        build_render_options(design, area=dataset.display_name),
+    )
     if isinstance(rendered, WrapRenderResult):
         wrap, framing_mode = rendered.image, rendered.context.framing_mode
     else:
