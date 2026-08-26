@@ -115,6 +115,12 @@ dimensions and requirements can vary by fulfilment provider.
 
 ## Single-design production export
 
+### Desktop Inkthreadable export
+
+**Export Inkthreadable PNG** saves a fresh render of the selected street using
+the current design controls and the production Inkthreadable profile. It writes
+a `2362 x 1063` RGBA PNG at 300 DPI, leaving any already stale on-screen preview unchanged.
+
 `mug_previewer.exporting.prepare_provider_image(wrap, profile)` turns one
 completed canonical master into a provider delivery image. It is deliberately
 downstream of rendering:

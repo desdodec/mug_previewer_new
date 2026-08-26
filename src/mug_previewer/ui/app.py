@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
@@ -18,6 +19,7 @@ from .state import (
     UIDataError,
     dataset_options,
     display_image,
+    export_inkthreadable_png,
     filter_streets,
     render_preview_pair,
     resolve_dataset_root,
@@ -79,6 +81,13 @@ class MugPreviewerApp(ttk.Frame):
         self._add_weight_control(design, 0, "Street feature weight", self.front_weight_var, self.front_weight_display)
         self._add_weight_control(design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display)
         ttk.Button(design, text="Reset design", command=self._reset_design).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        self.export_button = ttk.Button(
+            controls,
+            text='Export Inkthreadable PNG',
+            command=self._start_inkthreadable_export,
+            state='disabled',
+        )
+        self.export_button.grid(row=9, column=0, sticky='ew', pady=(6, 0))
         self.render_button.grid(row=7, column=0, sticky="ew")
         self.framing_var = tk.StringVar(value="Rear framing: —")
         ttk.Label(controls, textvariable=self.framing_var).grid(row=8, column=0, sticky="w", pady=(13, 0))
@@ -181,6 +190,7 @@ class MugPreviewerApp(ttk.Frame):
             self.street_list.insert(tk.END, f"{street.id} — {street.display_name}")
         self.state.selected_street = None
         self.render_button.configure(state="disabled")
+        self.export_button.configure(state='disabled')
 
     def _select_street(self, _event: object | None = None) -> None:
         selection = self.street_list.curselection()
@@ -190,6 +200,7 @@ class MugPreviewerApp(ttk.Frame):
         street = self.state.selected_street
         self.status_var.set(f"Selected: {street.id} — {street.display_name}")
         self.render_button.configure(state="normal")
+        self.export_button.configure(state='normal')
 
     def _start_render(self) -> None:
         data, street = self.state.selected_dataset, self.state.selected_street
@@ -230,6 +241,57 @@ class MugPreviewerApp(ttk.Frame):
         self.render_button.configure(state="normal" if self.state.selected_street else "disabled")
         self._show_error(f"Could not render the selected street. {detail}")
 
+
+    def _start_inkthreadable_export(self) -> None:
+        data, street = self.state.selected_dataset, self.state.selected_street
+        if data is None or street is None:
+            self._show_error('Select a street before exporting.')
+            return
+        destination = filedialog.asksaveasfilename(
+            parent=self.root,
+            title='Export Inkthreadable PNG',
+            initialfile=self._inkthreadable_filename(street),
+            defaultextension='.png',
+            filetypes=[('PNG files', '*.png')],
+        )
+        if not destination:
+            return
+        self.export_button.configure(state='disabled')
+        self.status_var.set(f'Exporting {street.id} - {street.display_name} for Inkthreadable...')
+        threading.Thread(
+            target=self._export_worker,
+            args=(data, street, self.state.design_options, Path(destination)),
+            daemon=True,
+        ).start()
+
+    def _export_worker(
+        self,
+        data: Dataset,
+        street: StreetRecord,
+        design_options: DesignOptions,
+        destination: Path,
+    ) -> None:
+        try:
+            saved = export_inkthreadable_png(data, street, destination, design_options=design_options)
+        except Exception as error:
+            LOGGER.exception('Inkthreadable export failed')
+            self.root.after(0, lambda: self._export_failed(str(error)))
+            return
+        self.root.after(0, lambda: self._export_finished(saved))
+
+    def _export_finished(self, destination: Path) -> None:
+        self.export_button.configure(state='normal' if self.state.selected_street else 'disabled')
+        self.status_var.set(f'Inkthreadable PNG exported: {destination}')
+
+    def _export_failed(self, detail: str) -> None:
+        self.export_button.configure(state='normal' if self.state.selected_street else 'disabled')
+        self._show_error(f'Could not export the selected street. {detail}')
+
+    @staticmethod
+    def _inkthreadable_filename(street: StreetRecord) -> str:
+        slug = re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-', street.display_name.casefold())).strip('-')
+        stem = slug or 'street'
+        return f'{stem}_inkthreadable.png'
     def _preview_resized(self, _event: object) -> None:
         if self._resize_pending is not None:
             self.root.after_cancel(self._resize_pending)

@@ -12,11 +12,15 @@ from ..config import load_settings
 from ..design import DesignOptions, build_render_options
 from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset, StreetRecord
+from ..exporting import save_provider_export
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview
-from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap_result
+from ..providers import ProviderProfile, get_provider_profile
+from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
 
 DEVELOPMENT_DATASET_ROOT = Path(r"E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6")
 PREVIEW_SIZE = (1024, 1536)
+INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
+# Export helpers use the production provider profile.
 
 
 class UIDataError(ValueError):
@@ -73,6 +77,10 @@ class WrapRenderer(Protocol):
 
 class PreviewRenderer(Protocol):
     def __call__(self, wrap: Image.Image, options: MugPreviewOptions) -> Image.Image: ...
+
+
+class ProviderExporter(Protocol):
+    def __call__(self, wrap: Image.Image, profile: ProviderProfile, destination: Path) -> Path: ...
 
 
 def resolve_dataset_root(dataset_root: Path | str | None = None) -> Path:
@@ -194,3 +202,21 @@ def render_preview_pair(
                 f"{name} preview renderer returned {preview.mode} {preview.size}; expected RGBA {PREVIEW_SIZE}."
             )
     return PreviewPair(wrap=wrap, front=front, rear=rear, framing_mode=framing_mode)
+
+
+def export_inkthreadable_png(
+    dataset: Dataset,
+    street: StreetRecord,
+    destination: Path | str,
+    *,
+    design_options: DesignOptions | None = None,
+    wrap_renderer: WrapRenderer = render_wrap,
+    profile_lookup: Callable[[str], ProviderProfile] = get_provider_profile,
+    exporter: ProviderExporter = save_provider_export,
+) -> Path:
+    """Freshly render current UI state and save it through Inkthreadable."""
+    design = design_options or DesignOptions()
+    wrap = wrap_renderer(dataset, street, build_render_options(design, area=dataset.display_name))
+    if isinstance(wrap, WrapRenderResult):
+        wrap = wrap.image
+    return exporter(wrap, profile_lookup(INKTHREADABLE_PROFILE_ID), Path(destination))

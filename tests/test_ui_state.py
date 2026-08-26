@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -10,6 +11,10 @@ from mug_previewer.design import DesignOptions, build_render_options
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.preview.mockup import PreviewOrientation
 from mug_previewer.ui.state import PREVIEW_SIZE, dataset_options, display_image, filter_streets, render_preview_pair
+from mug_previewer.providers import get_provider_profile
+from mug_previewer.ui.state import INKTHREADABLE_PROFILE_ID, export_inkthreadable_png
+import mug_previewer.ui.app as ui_app
+from mug_previewer.ui.app import MugPreviewerApp
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
 
@@ -52,6 +57,103 @@ def test_preview_rendering_uses_one_wrap_and_both_production_orientations(tmp_pa
 
     result = render_preview_pair(data, data.streets[0], wrap_renderer=fake_wrap, preview_renderer=fake_preview)
     assert result.wrap is wrap
+    assert result.front.size == result.rear.size == PREVIEW_SIZE
+    assert calls == [
+        (data, data.streets[0], build_render_options(DesignOptions(), area=data.display_name)),
+        PreviewOrientation.FRONT_HANDLE_RIGHT,
+        PreviewOrientation.REAR_HANDLE_LEFT,
+    ]
+
+
+def test_inkthreadable_export_uses_current_selection_design_and_profile(tmp_path: Path) -> None:
+    data = _dataset(tmp_path)
+    street = data.streets[1]
+    wrap = Image.new('RGBA', (2362, 1063))
+    destination = tmp_path / 'current-state.png'
+    calls: list[object] = []
+    profile = get_provider_profile(INKTHREADABLE_PROFILE_ID)
+
+    def fake_wrap(dataset, selected_street, options=None):
+        calls.append((dataset, selected_street, options))
+        return wrap
+
+    def fake_lookup(profile_id: str):
+        calls.append(profile_id)
+        return profile
+
+    def fake_export(source, resolved_profile, path):
+        calls.append((source, resolved_profile, path))
+        return path
+
+    saved = export_inkthreadable_png(
+        data, street, destination,
+        design_options=DesignOptions(front_feature_weight=1.25, rear_highlight_weight=0.90),
+        wrap_renderer=fake_wrap, profile_lookup=fake_lookup, exporter=fake_export,
+    )
+
+    assert saved == destination
+    assert calls == [
+        (data, street, build_render_options(DesignOptions(1.25, 0.90), area=data.display_name)),
+        INKTHREADABLE_PROFILE_ID,
+        (wrap, profile, destination),
+    ]
+
+
+
+def test_export_without_selection_shows_clear_error_without_save_dialog(monkeypatch) -> None:
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.state = SimpleNamespace(selected_dataset=None, selected_street=None)
+    errors: list[str] = []
+    controller._show_error = errors.append
+    called = False
+
+    def fake_dialog(**_kwargs):
+        nonlocal called
+        called = True
+        return ''
+
+    monkeypatch.setattr(ui_app.filedialog, 'asksaveasfilename', fake_dialog)
+    controller._start_inkthreadable_export()
+
+    assert errors == ['Select a street before exporting.']
+    assert not called
+
+
+def test_cancelled_export_dialog_does_not_start_render_or_export(tmp_path: Path, monkeypatch) -> None:
+    data = _dataset(tmp_path)
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.root = object()
+    controller.state = SimpleNamespace(
+        selected_dataset=data, selected_street=data.streets[0], design_options=DesignOptions(),
+    )
+    dialog: dict[str, object] = {}
+
+    def fake_dialog(**kwargs):
+        dialog.update(kwargs)
+        return ''
+
+    monkeypatch.setattr(ui_app.filedialog, 'asksaveasfilename', fake_dialog)
+    controller._start_inkthreadable_export()
+
+    assert dialog['defaultextension'] == '.png'
+
+
+def test_inkthreadable_export_writes_provider_png_at_profile_dimensions(tmp_path: Path) -> None:
+    data = _dataset(tmp_path)
+    source = Image.new('RGBA', (2362, 1063), (20, 40, 60, 128))
+    destination = tmp_path / 'inkthreadable.png'
+
+    saved = export_inkthreadable_png(
+        data, data.streets[0], destination, wrap_renderer=lambda *_args: source,
+    )
+
+    assert saved == destination
+    with Image.open(destination) as exported:
+        assert exported.format == 'PNG'
+        assert exported.size == (2362, 1063)
+        assert exported.mode == 'RGBA'
+        assert round(exported.info['dpi'][0]) == round(exported.info['dpi'][1]) == 300
+    return
     assert result.front.size == result.rear.size == PREVIEW_SIZE
     assert calls == [
         (data, data.streets[0], build_render_options(DesignOptions(), area=data.display_name)),
