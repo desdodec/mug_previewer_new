@@ -60,6 +60,13 @@ TEMPLATE_V2_WRAP_LAYOUT = WrapLayout(
     seam_zone=PixelBox(945, 0, 472, 1063),
 )
 
+# The shared provider-neutral master size. Downstream export services validate
+# against this rather than repeating the template dimensions.
+CANONICAL_WRAP_SIZE = (
+    TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px,
+    TEMPLATE_V2_WRAP_LAYOUT.canvas_height_px,
+)
+
 
 @dataclass(frozen=True)
 class WrapRenderOptions:

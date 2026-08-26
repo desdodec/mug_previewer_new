@@ -110,10 +110,41 @@ future production exporter
 ```
 
 Profiles are downstream metadata only: they do not change canonical artwork or
-mug-preview rendering. Task 03C provides the registry and validation layer;
-it does not yet perform new image conversion or export. The Printify profile
-is explicitly generic because dimensions and requirements can vary by
-fulfilment provider.
+mug-preview rendering. The Printify profile is explicitly generic because
+dimensions and requirements can vary by fulfilment provider.
+
+## Single-design production export
+
+`mug_previewer.exporting.prepare_provider_image(wrap, profile)` turns one
+completed canonical master into a provider delivery image. It is deliberately
+downstream of rendering:
+
+```text
+render_wrap(...)
+  canonical 2362x1063 RGBA
+  ProviderProfile
+  prepare_provider_image(...)
+  save_provider_export(...)
+```
+
+The source must be the canonical 2362x1063 master. Provider dimensions never
+feed back into the renderer. A matching target takes a copy-only fast path;
+otherwise the exporter uses uniform contain scaling, integer-centred placement
+(extra pixels fall right/bottom), and transparent padding for profiles whose
+background policy supports it. The default format is each profile's preferred
+format and saved files carry the profile DPI. PNG preserves alpha. Printify
+JPEG requires an explicit `ExportOptions(jpeg_background=(r, g, b))` when the
+prepared image contains transparency.
+
+Inkthreadable exports remain 2362x1063 RGBA PNG with no resampling. The generic
+Printify profile produces a 2475x1155 RGBA PNG, containing the full master with
+transparent padding. Batch export and a UI export workflow are not implemented
+yet.
+
+The older `export_wrap` / `save_provider_png` Gelato API remains an isolated
+compatibility path for its legacy 2362x1134 Gelato specification. New callers
+should use the ProviderProfile API above. A future Gelato ProviderProfile can
+migrate that path without changing canonical artwork.
 
 ## Desktop preview UI
 

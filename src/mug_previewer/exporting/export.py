@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 import unicodedata
+from typing import Optional
 
 from PIL import Image
 
+from ..providers import ProviderProfile
+from ..rendering.artwork import CANONICAL_WRAP_SIZE
 from .providers import AlphaHandling, CroppingPolicy, PaddingPolicy, ProviderExportSpec, ScalingPolicy
 
 
@@ -21,6 +24,32 @@ class ProviderExportOptions:
     """Export behaviour that is independent of a provider requirement."""
 
     resampling: Image.Resampling = Image.Resampling.LANCZOS
+
+
+@dataclass(frozen=True)
+class ExportOptions:
+    # Options for one provider export.
+    format: Optional[str] = None
+    jpeg_background: Optional[tuple[int, int, int]] = None
+
+
+@dataclass(frozen=True)
+class ContainGeometry:
+    source_size: tuple[int, int]
+    target_size: tuple[int, int]
+    scale_factor: float
+    scaled_size: tuple[int, int]
+    left: int
+    top: int
+
+    @property
+    def padding_ltrb(self) -> tuple[int, int, int, int]:
+        return (
+            self.left,
+            self.top,
+            self.target_size[0] - self.scaled_size[0] - self.left,
+            self.target_size[1] - self.scaled_size[1] - self.top,
+        )
 
 
 @dataclass(frozen=True)
@@ -86,6 +115,53 @@ def save_provider_png(
     path.parent.mkdir(parents=True, exist_ok=True)
     result.image.save(path, format="PNG", dpi=(spec.dpi, spec.dpi))
     return result
+
+
+def prepare_provider_image(
+    wrap: Image.Image,
+    profile: ProviderProfile,
+    options: Optional[ExportOptions] = None,
+) -> Image.Image:
+    _validate_profile_wrap(wrap, profile)
+    options = options or ExportOptions()
+    export_format = _resolve_profile_format(profile, options.format)
+    image = _prepare_profile_rgba(wrap, profile)
+    if export_format == 'JPEG':
+        return _flatten_jpeg(image, options.jpeg_background)
+    return image
+
+
+def save_provider_export(
+    wrap: Image.Image,
+    profile: ProviderProfile,
+    destination: Path,
+    options: Optional[ExportOptions] = None,
+) -> Path:
+    options = options or ExportOptions()
+    export_format = _resolve_profile_format(profile, options.format)
+    destination = Path(destination)
+    _validate_destination(destination, export_format)
+    image = prepare_provider_image(wrap, profile, options)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    image.save(destination, format=export_format, dpi=(profile.dpi, profile.dpi))
+    return destination
+
+
+def calculate_contain_geometry(
+    source_size: tuple[int, int], target_size: tuple[int, int],
+) -> ContainGeometry:
+    source_width, source_height = source_size
+    target_width, target_height = target_size
+    if not source_width:
+        raise ProviderExportError('Source image dimensions must be positive.')
+    if not source_height or not target_width or not target_height:
+        raise ProviderExportError('Image and target dimensions must be positive.')
+    scale_factor = min(target_width / source_width, target_height / source_height)
+    scaled_size = (round(source_width * scale_factor), round(source_height * scale_factor))
+    return ContainGeometry(
+        source_size, target_size, scale_factor, scaled_size,
+        (target_width - scaled_size[0]) // 2, (target_height - scaled_size[1]) // 2,
+    )
 
 
 def provider_export_filename(street_id: str, street_name: str, spec: ProviderExportSpec) -> str:
@@ -160,6 +236,77 @@ def _compose_output(
     flattened = Image.new("RGBA", target_size, (*spec.background_rgb, 255))
     flattened.alpha_composite(artwork, placement)
     return flattened.convert("RGB")
+
+
+def _validate_profile_wrap(wrap: Image.Image, profile: ProviderProfile) -> None:
+    if not isinstance(wrap, Image.Image):
+        raise ProviderExportError('Provider export requires a PIL Image canonical wrap.')
+    if not wrap.width or not wrap.height:
+        raise ProviderExportError('Source image dimensions must be positive.')
+    if wrap.size != CANONICAL_WRAP_SIZE:
+        raise ProviderExportError(
+            f'Provider export requires canonical {CANONICAL_WRAP_SIZE[0]}x{CANONICAL_WRAP_SIZE[1]} artwork, '
+            f'got {wrap.width}x{wrap.height}.'
+        )
+    if not isinstance(profile, ProviderProfile):
+        raise ProviderExportError('Provider export requires a ProviderProfile.')
+    if not profile.canvas_width_px or not profile.canvas_height_px:
+        raise ProviderExportError('Provider target canvas dimensions must be positive.')
+
+
+def _resolve_profile_format(profile: ProviderProfile, requested: Optional[str]) -> str:
+    if requested is None:
+        return profile.preferred_format
+    if not isinstance(requested, str) or not requested.strip():
+        raise ProviderExportError('Requested export format must be a non-empty string.')
+    export_format = requested.strip().upper()
+    if export_format not in profile.accepted_formats:
+        accepted = ', '.join(profile.accepted_formats)
+        raise ProviderExportError(
+            f'Format {export_format!r} is not accepted by provider profile {profile.id!r}; accepted formats: {accepted}.'
+        )
+    return export_format
+
+
+def _prepare_profile_rgba(wrap: Image.Image, profile: ProviderProfile) -> Image.Image:
+    target_size = (profile.canvas_width_px, profile.canvas_height_px)
+    if wrap.size == target_size:
+        output = wrap.copy()
+        output.info['dpi'] = (profile.dpi, profile.dpi)
+        return output
+    if not profile.background_policy.startswith('transparent-'):
+        raise ProviderExportError(f'Provider profile {profile.id!r} does not define transparent padding.')
+    geometry = calculate_contain_geometry(wrap.size, target_size)
+    artwork = wrap.convert('RGBA')
+    if artwork.size != geometry.scaled_size:
+        artwork = artwork.resize(geometry.scaled_size, Image.Resampling.LANCZOS)
+    output = Image.new('RGBA', target_size, (0, 0, 0, 0))
+    output.alpha_composite(artwork, (geometry.left, geometry.top))
+    output.info['dpi'] = (profile.dpi, profile.dpi)
+    return output
+
+
+def _flatten_jpeg(image: Image.Image, background: Optional[tuple[int, int, int]]) -> Image.Image:
+    rgba = image.convert('RGBA')
+    alpha_min, _ = rgba.getchannel('A').getextrema()
+    if alpha_min != 255:
+        if background is None:
+            raise ProviderExportError('JPEG export with transparency requires an explicit jpeg_background.')
+        if len(background) != 3 or any(channel not in range(256) for channel in background):
+            raise ProviderExportError('jpeg_background must be an RGB tuple with values from 0 to 255.')
+        flattened = Image.new('RGBA', rgba.size, (*background, 255))
+        flattened.alpha_composite(rgba)
+        return flattened.convert('RGB')
+    return rgba.convert('RGB')
+
+
+def _validate_destination(destination: Path, export_format: str) -> None:
+    extensions = {'PNG': {'.png'}, 'JPEG': {'.jpg', '.jpeg'}}
+    if destination.suffix.lower() not in extensions[export_format]:
+        expected = '/'.join(sorted(extensions[export_format]))
+        raise ProviderExportError(
+            f'Destination extension {destination.suffix!r} conflicts with {export_format}; expected {expected}.'
+        )
 
 
 def _slug(value: str) -> str:
