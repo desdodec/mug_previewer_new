@@ -1,0 +1,21 @@
+{
+  "id": "inkthreadable_11oz_white",
+  "provider_name": "Inkthreadable",
+  "product_name": "11oz White Mug",
+  "variant_name": null,
+  "canvas_width_px": 2362,
+  "canvas_height_px": 1063,
+  "dpi": 300,
+  "physical_width_mm": 200.0,
+  "physical_height_mm": 90.0,
+  "colour_mode": "RGB",
+  "colour_profile": null,
+  "accepted_formats": ["PNG"],
+  "preferred_format": "PNG",
+  "printable_bounds": {"x": 0, "y": 0, "width": 2362, "height": 1063},
+  "safe_bounds": null,
+  "background_policy": "transparent-supported",
+  "profile_version": "1.0",
+  "verified_date": null,
+  "source_description": "Supplied Inkthreadable 11oz White Mug specification: 200 x 90 mm at 300 PPI; RGB PNG with transparent PNG support and full bleed."
+}

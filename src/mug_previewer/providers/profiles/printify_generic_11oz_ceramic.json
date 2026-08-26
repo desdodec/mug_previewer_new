@@ -1,0 +1,21 @@
+{
+  "id": "printify_generic_11oz_ceramic",
+  "provider_name": "Printify",
+  "product_name": "Generic Brand 11oz Ceramic Mug",
+  "variant_name": "Generic network profile; fulfilment provider may vary",
+  "canvas_width_px": 2475,
+  "canvas_height_px": 1155,
+  "dpi": 300,
+  "physical_width_mm": null,
+  "physical_height_mm": null,
+  "colour_mode": "RGB",
+  "colour_profile": "sRGB",
+  "accepted_formats": ["PNG", "JPEG"],
+  "preferred_format": "PNG",
+  "printable_bounds": null,
+  "safe_bounds": null,
+  "background_policy": "transparent-preferred",
+  "profile_version": "1.0",
+  "verified_date": null,
+  "source_description": "Supplied generic Printify 11oz ceramic mug starting specification. It is not universal across Printify fulfilment providers."
+}

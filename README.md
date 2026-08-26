@@ -83,6 +83,38 @@ python -m mug_previewer render wrap `
 
 `output/` is ignored by Git. Provider-specific exports and web UI remain deferred.
 
+## Provider profiles
+
+`mug_previewer.providers` contains data-driven provider/product delivery
+specifications for future production export. A `ProviderProfile` describes a
+provider canvas, DPI, colour metadata, accepted formats, and only those
+printable or safe bounds the provider actually specifies. Built-in JSON files
+live in `src/mug_previewer/providers/profiles/` and are loaded through package
+resources:
+
+```python
+from mug_previewer.providers import get_provider_profile, list_provider_profiles
+
+profile = get_provider_profile("inkthreadable_11oz_white")
+profiles = list_provider_profiles()
+```
+
+```text
+DesignOptions
+      ↓
+canonical 2362×1063 artwork
+      ↓
+ProviderProfile
+      ↓
+future production exporter
+```
+
+Profiles are downstream metadata only: they do not change canonical artwork or
+mug-preview rendering. Task 03C provides the registry and validation layer;
+it does not yet perform new image conversion or export. The Printify profile
+is explicitly generic because dimensions and requirements can vary by
+fulfilment provider.
+
 ## Desktop preview UI
 
 The first desktop UI provides a local workflow for selecting a workflow-v6 dataset, filtering streets, and viewing front/rear production mug mockups. It uses standard-library Tkinter, so no new UI dependency or web server is needed.
