@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import math
+
+import pytest
 from PIL import Image
 
 from mug_previewer.diagnostics.front_candidates import (
     Candidate,
     CandidateGrid,
+    DiagnosticMaskError,
     FaceMasks,
     ProximityThresholds,
     generate_candidates,
+    nearest_foreground_distance,
     overlap_pixels,
     score_candidate,
     transform_street_mask,
@@ -29,8 +34,10 @@ def _masks() -> FaceMasks:
 
 
 def _blank_masks(street: Image.Image, *, left: Image.Image | None = None, mouth: Image.Image | None = None) -> FaceMasks:
-    empty = Image.new("L", street.size, 0)
-    return FaceMasks(street, left or empty, empty, mouth or empty, empty, Image.new("RGBA", street.size))
+    return FaceMasks(
+        street, left or _mask({(38, 38)}, street.size), _mask({(39, 39)}, street.size),
+        mouth or _mask({(1, 38)}, street.size), _mask({(1, 39)}, street.size), Image.new("RGBA", street.size),
+    )
 
 
 def test_candidate_grid_is_deterministic_and_has_only_allowed_orientations() -> None:
@@ -71,10 +78,26 @@ def test_larger_clear_candidate_and_original_orientation_are_preferred() -> None
 def test_clipping_is_detected_and_severely_penalised() -> None:
     masks = _masks()
     clipped_mask, clipped = transform_street_mask(masks.street, Candidate(0, 1.0, -40, 0))
-    result = score_candidate(masks, Candidate(0, 1.0, -40, 0))
     assert clipped and clipped_mask.getbbox() is None
-    assert result.clipped
-    assert result.score < -50
+    with pytest.raises(DiagnosticMaskError, match="empty street mask"):
+        score_candidate(masks, Candidate(0, 1.0, -40, 0))
+
+
+@pytest.mark.parametrize(
+    ("street", "protected", "expected"),
+    [({(100, 100)}, {(110, 100)}, 10.0), ({(100, 100)}, {(100, 110)}, 10.0), ({(100, 100)}, {(103, 104)}, 5.0), ({(100, 100)}, {(100, 100)}, 0.0)],
+)
+def test_foreground_distance_is_exact(street: set[tuple[int, int]], protected: set[tuple[int, int]], expected: float) -> None:
+    distance, street_point, protected_point = nearest_foreground_distance(_mask(street, (120, 120)), _mask(protected, (120, 120)))
+    assert distance == expected
+    assert math.dist(street_point, protected_point) == expected
+
+
+def test_foreground_distance_reports_nearest_pixels_and_rejects_empty_masks() -> None:
+    distance, street_point, protected_point = nearest_foreground_distance(_mask({(1, 1), (10, 10)}), _mask({(14, 13)}))
+    assert (distance, street_point, protected_point) == (5.0, (10, 10), (14, 13))
+    with pytest.raises(DiagnosticMaskError, match="empty protected"):
+        nearest_foreground_distance(_mask({(1, 1)}), Image.new("L", (40, 40)))
 
 
 def test_mouth_proximity_penalises_without_overlap_and_is_monotonic() -> None:
@@ -108,10 +131,10 @@ def test_edge_penalty_is_graded_and_clipping_is_severe() -> None:
     masks = _blank_masks(street)
     safe = score_candidate(masks, Candidate(0, 1.0, 0, 0))
     small_margin = score_candidate(masks, Candidate(0, 1.0, 0, -17))
-    clipped = score_candidate(masks, Candidate(0, 1.0, 0, -25))
     assert safe.edge_penalty == 0
-    assert 0 < small_margin.edge_penalty < clipped.collision_penalty
-    assert clipped.clipped
+    assert 0 < small_margin.edge_penalty
+    with pytest.raises(DiagnosticMaskError, match="empty street mask"):
+        score_candidate(masks, Candidate(0, 1.0, 0, -25))
 
 
 def test_large_safe_feature_is_not_rewarded_for_recentering() -> None:

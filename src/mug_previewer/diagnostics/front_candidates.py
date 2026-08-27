@@ -25,6 +25,22 @@ from ..rendering.native import face_policy as native
 
 MASK_ALPHA_THRESHOLD = 16
 _DISTANCE_FIELD_CACHE: dict[tuple[bytes, tuple[int, int]], tuple[float, ...]] = {}
+
+class DiagnosticMaskError(ValueError):
+    """Raised when masks cannot support a mathematically valid diagnostic."""
+
+
+@dataclass(frozen=True)
+class MaskAudit:
+    """Thresholded-mask evidence in final front-panel pixel coordinates."""
+
+    name: str
+    size: tuple[int, int]
+    foreground_pixels: int
+    bounds: tuple[int, int, int, int] | None
+    alpha_threshold: int = MASK_ALPHA_THRESHOLD
+
+
 @dataclass(frozen=True)
 class ProximityThresholds:
     """Pixel spacing zones on the 495 x 462 front panel."""
@@ -117,6 +133,18 @@ class CandidateResult:
     mouth_min_distance_px: float
     left_eye_min_distance_px: float
     right_eye_min_distance_px: float
+    mouth_street_nearest_x: int
+    mouth_street_nearest_y: int
+    mouth_nearest_x: int
+    mouth_nearest_y: int
+    left_eye_street_nearest_x: int
+    left_eye_street_nearest_y: int
+    left_eye_nearest_x: int
+    left_eye_nearest_y: int
+    right_eye_street_nearest_x: int
+    right_eye_street_nearest_y: int
+    right_eye_nearest_x: int
+    right_eye_nearest_y: int
     mouth_min_distance_ratio: float
     left_eye_min_distance_ratio: float
     right_eye_min_distance_ratio: float
@@ -183,6 +211,7 @@ def generate_candidates(grid: CandidateGrid = CandidateGrid()) -> tuple[Candidat
 
 def overlap_pixels(street_mask: Image.Image, protected_mask: Image.Image) -> int:
     """Return thresholded alpha-mask intersections, avoiding bbox false positives."""
+    _require_same_size(street_mask, protected_mask)
     return sum(left > 0 and right > 0 for left, right in zip(_binary(street_mask).getdata(), _binary(protected_mask).getdata()))
 
 
@@ -215,6 +244,7 @@ def score_candidate(
     proximity: ProximityThresholds = ProximityThresholds(),
 ) -> CandidateResult:
     """Score a diagnostic candidate using collisions, spacing, margins, and shape."""
+    _validate_face_masks(masks)
     street, clipped = transform_street_mask(masks.street, candidate)
     bounds = street.getbbox()
     pixels = _pixel_count(street)
@@ -222,9 +252,9 @@ def score_candidate(
     right = overlap_pixels(street, masks.right_eye)
     mouth = overlap_pixels(street, masks.mouth)
     typography = overlap_pixels(street, masks.typography)
-    mouth_distance = _robust_distance(street, masks.mouth)
-    left_distance = _robust_distance(street, masks.left_eye)
-    right_distance = _robust_distance(street, masks.right_eye)
+    mouth_distance, mouth_street, mouth_point = nearest_foreground_distance(street, masks.mouth)
+    left_distance, left_street, left_point = nearest_foreground_distance(street, masks.left_eye)
+    right_distance, right_street, right_point = nearest_foreground_distance(street, masks.right_eye)
     mouth_proximity = _spacing_penalty(mouth_distance, proximity.mouth_hard_min_px, proximity.mouth_comfortable_px, weights.mouth_proximity)
     left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
     right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
@@ -254,6 +284,9 @@ def score_candidate(
         left_eye_overlap_ratio=_ratio(left, pixels), right_eye_overlap_ratio=_ratio(right, pixels), mouth_overlap_ratio=_ratio(mouth, pixels), typography_overlap_ratio=_ratio(typography, pixels),
         clipped=clipped, edge_proximity=edge_proximity,
         mouth_min_distance_px=round(mouth_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
+        mouth_street_nearest_x=mouth_street[0], mouth_street_nearest_y=mouth_street[1], mouth_nearest_x=mouth_point[0], mouth_nearest_y=mouth_point[1],
+        left_eye_street_nearest_x=left_street[0], left_eye_street_nearest_y=left_street[1], left_eye_nearest_x=left_point[0], left_eye_nearest_y=left_point[1],
+        right_eye_street_nearest_x=right_street[0], right_eye_street_nearest_y=right_street[1], right_eye_nearest_x=right_point[0], right_eye_nearest_y=right_point[1],
         mouth_min_distance_ratio=_ratio_float(mouth_distance, street.height), left_eye_min_distance_ratio=_ratio_float(left_distance, street.height), right_eye_min_distance_ratio=_ratio_float(right_distance, street.height),
         top_margin_px=top_margin, bottom_margin_px=bottom_margin, left_margin_px=left_margin, right_margin_px=right_margin, min_edge_margin_px=min_margin,
         vertical_centroid_ratio=round(centroid_ratio, 6), upper_half_ratio=round(upper_ratio, 6), lower_half_ratio=round(lower_ratio, 6), top_band_width=top_width, bottom_band_width=bottom_width,
@@ -306,8 +339,10 @@ def write_diagnostic_report(analysis: CandidateAnalysis, output_dir: Path, *, to
         for result in analysis.results:
             writer.writerow({"street_id": analysis.street.id, "street_name": analysis.street.display_name, **asdict(result)})
     masks = render_production_masks(analysis.street, area=analysis.area)
+    _write_mask_audit(masks, output_dir / "mask_integrity.csv")
     _write_image(masks, analysis.current, output_dir / "current.png")
     _write_image(masks, analysis.best, output_dir / "best.png")
+    _write_alignment_image(masks, analysis.current, output_dir / "alignment.png")
     for index, result in enumerate(analysis.results[:top_count], 1):
         _write_image(masks, result, output_dir / f"top_{index:02d}.png")
     return report
@@ -323,11 +358,13 @@ def render_production_masks(street: StreetRecord, *, area: str = "") -> FaceMask
     if len(components) != 2:
         raise ValueError(f"Expected two native eye masks, found {len(components)}.")
     typography = _typography_mask(street, area)
-    return FaceMasks(
+    masks = FaceMasks(
         street_mask, _box_mask(eyes, components[0]), _box_mask(eyes, components[1]),
         _asset_mask(markup, {"mouth"}), typography,
         face.render_face(street, face.FaceRenderOptions(area=area)),
     )
+    _validate_face_masks(masks, expected_size=face.FRONT_PANEL_PX)
+    return masks
 
 
 def _asset_mask(markup: str, classes: set[str]) -> Image.Image:
@@ -397,6 +434,36 @@ def _pixel_count(mask: Image.Image) -> int:
     return sum(value > 0 for value in _binary(mask).getdata())
 
 
+def audit_masks(masks: FaceMasks) -> tuple[MaskAudit, ...]:
+    """Return reproducible integrity evidence for final-coordinate masks."""
+    return tuple(
+        MaskAudit(name, _binary(mask).size, _pixel_count(mask), _binary(mask).getbbox())
+        for name, mask in (
+            ("street", masks.street), ("left_eye", masks.left_eye), ("right_eye", masks.right_eye),
+            ("mouth", masks.mouth), ("typography", masks.typography),
+        )
+    )
+
+
+def _validate_face_masks(masks: FaceMasks, *, expected_size: tuple[int, int] | None = None) -> None:
+    """Reject mismatched or empty masks instead of disguising bad geometry as spacing."""
+    audits = audit_masks(masks)
+    sizes = {item.size for item in audits}
+    if len(sizes) != 1 or masks.base.size not in sizes:
+        raise DiagnosticMaskError(f"Diagnostic masks must share one coordinate space; got {[item.size for item in audits]} and base {masks.base.size}.")
+    size = audits[0].size
+    if expected_size is not None and size != expected_size:
+        raise DiagnosticMaskError(f"Diagnostic masks must use {expected_size}, got {size}.")
+    empty = [item.name for item in audits if item.foreground_pixels == 0]
+    if empty:
+        raise DiagnosticMaskError(f"Required diagnostic mask(s) are empty: {', '.join(empty)}.")
+
+
+def _require_same_size(left: Image.Image, right: Image.Image) -> None:
+    if left.size != right.size:
+        raise DiagnosticMaskError(f"Masks must share a coordinate space, got {left.size} and {right.size}.")
+
+
 def _ratio(value: int, pixels: int) -> float:
     return round(value / pixels, 6) if pixels else 0.0
 
@@ -429,6 +496,8 @@ def _box_mask(mask: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
 def _distance_field(mask: Image.Image) -> tuple[float, ...]:
     """Exact Euclidean distance transform of a thresholded protected mask."""
     binary = _binary(mask)
+    if binary.getbbox() is None:
+        raise DiagnosticMaskError("Cannot calculate proximity to an empty protected mask.")
     cache_key = (binary.tobytes(), binary.size)
     cached = _DISTANCE_FIELD_CACHE.get(cache_key)
     if cached is not None:
@@ -469,13 +538,36 @@ def _edt_1d(values: list[int]) -> list[int]:
     return output
 
 
-def _robust_distance(street: Image.Image, protected: Image.Image, percentile: float = 0.05) -> float:
-    """Return the fifth-percentile Euclidean protected-mask spacing under street pixels."""
-    points = [index for index, value in enumerate(_binary(street).getdata()) if value]
-    if not points:
-        return float(max(street.size))
-    distances = sorted(_distance_field(protected)[index] for index in points)
-    return distances[round((len(distances) - 1) * percentile)]
+def nearest_foreground_distance(
+    street: Image.Image, protected: Image.Image,
+) -> tuple[float, tuple[int, int], tuple[int, int]]:
+    """Return exact foreground minimum and its deterministic ``(x, y)`` pair.
+
+    Overlap is distance zero; ties choose street then protected pixels in
+    row-major order. Both masks must be non-empty and share final coordinates.
+    """
+    _require_same_size(street, protected)
+    street_binary, protected_binary = _binary(street), _binary(protected)
+    if street_binary.getbbox() is None:
+        raise DiagnosticMaskError("Cannot calculate proximity from an empty street mask.")
+    if protected_binary.getbbox() is None:
+        raise DiagnosticMaskError("Cannot calculate proximity to an empty protected mask.")
+    field, width = _distance_field(protected_binary), street_binary.width
+    distance, street_x, street_y = min(
+        (field[index], index % width, index // width)
+        for index, value in enumerate(street_binary.getdata()) if value
+    )
+    radius, pixels = math.ceil(distance), protected_binary.load()
+    nearest = min(
+        (math.hypot(protected_x - street_x, protected_y - street_y), protected_x, protected_y)
+        for protected_y in range(max(0, street_y - radius), min(protected_binary.height, street_y + radius + 1))
+        for protected_x in range(max(0, street_x - radius), min(protected_binary.width, street_x + radius + 1))
+        if pixels[protected_x, protected_y]
+    )
+    maximum = math.hypot(street_binary.width - 1, street_binary.height - 1)
+    if not (0 <= nearest[0] <= maximum) or not math.isclose(nearest[0], distance, abs_tol=1e-9):
+        raise DiagnosticMaskError("Proximity distance is outside panel bounds or lacks a matching foreground pixel.")
+    return nearest[0], (street_x, street_y), (nearest[1], nearest[2])
 
 
 def _spacing_penalty(distance: float, hard_minimum: float, comfortable: float, weight: float) -> float:
@@ -536,6 +628,14 @@ def _conservative_best(results: Sequence[CandidateResult], thresholds: Classific
     return best if best.score - original.score >= thresholds.orientation_change_threshold else original
 
 
+def _write_mask_audit(masks: FaceMasks, path: Path) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=("name", "size", "foreground_pixels", "bounds", "alpha_threshold"))
+        writer.writeheader()
+        for item in audit_masks(masks):
+            writer.writerow({**asdict(item), "size": f"{item.size[0]}x{item.size[1]}", "bounds": item.bounds or ""})
+
+
 def _write_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
     street, _clipped = transform_street_mask(masks.street, result.candidate)
     image = Image.new("RGBA", masks.base.size, "white")
@@ -546,4 +646,27 @@ def _write_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
         overlay.alpha_composite(Image.composite(layer, Image.new("RGBA", image.size), mask))
     image.alpha_composite(overlay)
     ImageDraw.Draw(image).text((8, image.height - 18), f"{result.orientation_deg}deg scale={result.scale:.2f} dx={result.x_offset} dy={result.y_offset} score={result.score:.1f}", fill="black")
+    image.save(path, format="PNG")
+
+
+def _write_alignment_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
+    """Write a production-face overlay with mouth-distance geometry evidence."""
+    street, _clipped = transform_street_mask(masks.street, result.candidate)
+    image = Image.new("RGBA", masks.base.size, "white")
+    image.alpha_composite(masks.base)
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    for mask, colour in ((masks.left_eye, (50, 120, 255, 100)), (masks.right_eye, (50, 120, 255, 100)), (masks.mouth, (255, 70, 70, 130)), (masks.typography, (255, 190, 30, 80)), (street, (30, 180, 80, 210))):
+        overlay.alpha_composite(Image.composite(Image.new("RGBA", image.size, colour), Image.new("RGBA", image.size), mask))
+    image.alpha_composite(overlay)
+    draw = ImageDraw.Draw(image)
+    for mask, colour in ((street, "green"), (masks.mouth, "red")):
+        bounds = _binary(mask).getbbox()
+        if bounds is not None:
+            draw.rectangle((bounds[0], bounds[1], bounds[2] - 1, bounds[3] - 1), outline=colour, width=1)
+    street_point = (result.mouth_street_nearest_x, result.mouth_street_nearest_y)
+    mouth_point = (result.mouth_nearest_x, result.mouth_nearest_y)
+    draw.line((street_point, mouth_point), fill="magenta", width=2)
+    draw.ellipse((street_point[0] - 2, street_point[1] - 2, street_point[0] + 2, street_point[1] + 2), fill="green")
+    draw.ellipse((mouth_point[0] - 2, mouth_point[1] - 2, mouth_point[0] + 2, mouth_point[1] + 2), fill="red")
+    draw.text((8, image.height - 18), f"mouth {result.mouth_min_distance_px:.3f}px: street={street_point} mouth={mouth_point}", fill="black")
     image.save(path, format="PNG")
