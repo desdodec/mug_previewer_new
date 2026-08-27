@@ -271,12 +271,23 @@ def score_candidate(
     right = overlap_pixels(street, masks.right_eye)
     nose = overlap_pixels(street, masks.static_nose)
     typography = overlap_pixels(street, masks.typography)
-    nose_distance, nose_street, nose_point = nearest_foreground_distance(street, masks.static_nose)
-    left_distance, left_street, left_point = nearest_foreground_distance(street, masks.left_eye)
-    right_distance, right_street, right_point = nearest_foreground_distance(street, masks.right_eye)
-    nose_proximity = _spacing_penalty(nose_distance, proximity.nose_hard_min_px, proximity.nose_comfortable_px, weights.nose_proximity)
-    left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
-    right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
+    if street.getbbox() is None:
+        if not clipped:
+            raise DiagnosticMaskError("Transformed street mask is unexpectedly empty.")
+        # A wholly clipped candidate is invalid, not a safely distant feature.
+        # Keep it in the grid so one impossible transform cannot abort a real
+        # validation run; its clipping penalty makes it noncompetitive and the
+        # unavailable proximity evidence remains explicit in the CSV.
+        nose_distance = left_distance = right_distance = math.inf
+        nose_street = nose_point = left_street = left_point = right_street = right_point = (-1, -1)
+        nose_proximity = left_proximity = right_proximity = 0.0
+    else:
+        nose_distance, nose_street, nose_point = nearest_foreground_distance(street, masks.static_nose)
+        left_distance, left_street, left_point = nearest_foreground_distance(street, masks.left_eye)
+        right_distance, right_street, right_point = nearest_foreground_distance(street, masks.right_eye)
+        nose_proximity = _spacing_penalty(nose_distance, proximity.nose_hard_min_px, proximity.nose_comfortable_px, weights.nose_proximity)
+        left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
+        right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
     proximity_penalty = nose_proximity + left_proximity + right_proximity
     top_margin, bottom_margin, left_margin, right_margin = _edge_margins(street)
     min_margin = min(top_margin, bottom_margin, left_margin, right_margin)

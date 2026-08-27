@@ -87,8 +87,11 @@ def test_clipping_is_detected_and_severely_penalised() -> None:
     masks = _masks()
     clipped_mask, clipped = transform_street_mask(masks.street_mouth, Candidate(0, 1.0, -40, 0))
     assert clipped and clipped_mask.getbbox() is None
-    with pytest.raises(DiagnosticMaskError, match="empty street mask"):
-        score_candidate(masks, Candidate(0, 1.0, -40, 0))
+    result = score_candidate(masks, Candidate(0, 1.0, -40, 0))
+    assert result.clipped
+    assert math.isinf(result.nose_min_distance_px)
+    assert result.street_nose_nearest_pair == ((-1, -1), (-1, -1))
+    assert result.score <= -100
 
 
 @pytest.mark.parametrize(
@@ -141,8 +144,8 @@ def test_edge_penalty_is_graded_and_clipping_is_severe() -> None:
     small_margin = score_candidate(masks, Candidate(0, 1.0, 0, -17))
     assert safe.edge_penalty == 0
     assert 0 < small_margin.edge_penalty
-    with pytest.raises(DiagnosticMaskError, match="empty street mask"):
-        score_candidate(masks, Candidate(0, 1.0, 0, -25))
+    clipped = score_candidate(masks, Candidate(0, 1.0, 0, -25))
+    assert clipped.clipped and clipped.score <= -100
 
 
 def test_large_safe_feature_is_not_rewarded_for_recentering() -> None:
