@@ -23,6 +23,7 @@ from mug_previewer.rendering.face import (
     FaceRenderError,
     FaceRenderOptions,
     _front_group_transform,
+    _render_face_standard,
     _front_text_y_positions,
     render_face,
     select_title_font,
@@ -113,3 +114,10 @@ def test_cli_renders_fixture_face(tmp_path: Path) -> None:
     assert output.is_file()
     with Image.open(output) as image:
         assert image.size == FRONT_PANEL_PX
+
+
+def test_healthy_fixture_render_remains_byte_identical_to_standard_rendering(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street('0001')
+    options = FaceRenderOptions(area=data.display_name)
+    assert render_face(street, options).tobytes() == _render_face_standard(street, options).tobytes()

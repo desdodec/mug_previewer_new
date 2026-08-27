@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import cairosvg
-from PIL import Image
+from PIL import Image, ImageColor
 
 from ..datasets.models import StreetRecord
 from .native import face_policy as native
@@ -73,6 +73,47 @@ def render_face(
     street: StreetRecord,
     options: FaceRenderOptions | None = None,
 ) -> Image.Image:
+    # Public API: the placement decision remains internal.
+    image, _decision = _render_face_with_decision(street, options)
+    return image
+
+def _render_face_with_decision(
+    street: StreetRecord,
+    options: FaceRenderOptions | None = None,
+) -> tuple[Image.Image, object]:
+    # Render standard artwork unless the shared conservative decision adapts it.
+    options = options or FaceRenderOptions()
+    glyph = street.glyph_path
+    if not glyph.is_file():
+        raise FaceRenderError(f'Cannot render street {street.id} "{street.display_name}": glyph file does not exist: {glyph}')
+    if glyph.suffix.casefold() != '.svg':
+        raise FaceRenderError(f'Cannot render street {street.id}: glyph is not an SVG file: {glyph}')
+    width, height = SOURCE_CANVAS_PX
+    panel_center = width * FRONT_CENTER_RATIO
+    face_markup = _render_native_face(glyph, panel_center, width, height, options.street_feature_stroke_multiplier)
+    standard = _render_face_standard(street, options, face_markup=face_markup)
+    from ..diagnostics.front_candidates import render_production_masks, select_front_placement_from_masks, transform_street_mask
+
+    masks = render_production_masks(street, area=options.area, face_markup=face_markup, base=standard)
+    decision, _ranked = select_front_placement_from_masks(masks)
+    if not decision.adapted:
+        return standard, decision
+    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
+    feature = ImageColor.getrgb(palette.feature) + (255,)
+    adapted = standard.copy()
+    adapted.paste((255, 255, 255, 255), mask=masks.street_mouth)
+    for protected in (masks.left_eye, masks.right_eye, masks.static_nose, masks.typography):
+        adapted.paste(feature, mask=protected)
+    street_mask, _clipped = transform_street_mask(masks.street_mouth, decision.rendered.candidate)
+    adapted.paste(feature, mask=street_mask)
+    return adapted, decision
+
+def _render_face_standard(
+    street: StreetRecord,
+    options: FaceRenderOptions | None = None,
+    *,
+    face_markup: str | None = None,
+) -> Image.Image:
     """Return V28 front artwork for ``street`` as an RGBA 495 x 462 image."""
     options = options or FaceRenderOptions()
     glyph = street.glyph_path
@@ -89,7 +130,7 @@ def render_face(
 
     width, height = SOURCE_CANVAS_PX
     panel_center = width * FRONT_CENTER_RATIO
-    face_markup = _render_native_face(
+    face_markup = face_markup or _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
     )
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)

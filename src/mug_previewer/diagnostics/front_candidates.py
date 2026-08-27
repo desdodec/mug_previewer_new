@@ -243,6 +243,29 @@ class CandidateAnalysis:
         return self.best.score - self.current.score
 
 
+@dataclass(frozen=True)
+class FrontPlacementDecision:
+    # Conservative shared decision for diagnostic and production consumers.
+    classification: str
+    reason: str
+    adapted: bool
+    standard: CandidateResult
+    diagnostic_selected: CandidateResult
+    rendered: CandidateResult
+
+    @property
+    def orientation_deg(self) -> int:
+        return self.rendered.orientation_deg
+
+    @property
+    def scale(self) -> float:
+        return self.rendered.scale
+
+    @property
+    def y_offset(self) -> int:
+        return self.rendered.y_offset
+
+
 def generate_candidates(grid: CandidateGrid = CandidateGrid()) -> tuple[Candidate, ...]:
     """Generate reproducible candidates in lexical transform order."""
     return tuple(
@@ -270,15 +293,52 @@ def analyse_front_candidates(
 ) -> CandidateAnalysis:
     """Score the grid, rank it deterministically, and classify diagnostic evidence."""
     masks = render_production_masks(street, area=area)
+    decision, ranked = select_front_placement_from_masks(masks, grid=grid, weights=weights, thresholds=thresholds)
+    return CandidateAnalysis(street, area, grid, ranked, decision.standard, decision.diagnostic_selected, decision.classification)
+
+
+def select_front_placement(
+    street: StreetRecord,
+    *,
+    area: str = "",
+    face_markup: str | None = None,
+    base: Image.Image | None = None,
+    grid: CandidateGrid = CandidateGrid(),
+    weights: ScoringWeights = ScoringWeights(),
+    thresholds: ClassificationThresholds = ClassificationThresholds(),
+) -> FrontPlacementDecision:
+    # Return the validated conservative decision without changing rendering.
+    masks = render_production_masks(street, area=area, face_markup=face_markup, base=base)
+    decision, _ranked = select_front_placement_from_masks(masks, grid=grid, weights=weights, thresholds=thresholds)
+    return decision
+
+
+def select_front_placement_from_masks(
+    masks: FaceAnatomyMasks,
+    *,
+    grid: CandidateGrid = CandidateGrid(),
+    weights: ScoringWeights = ScoringWeights(),
+    thresholds: ClassificationThresholds = ClassificationThresholds(),
+) -> tuple[FrontPlacementDecision, tuple[CandidateResult, ...]]:
+    # Score the standard grid once and retain standard for uncertain outcomes.
     results = [score_candidate(masks, item, weights=weights) for item in generate_candidates(grid)]
     ordered = sorted(
         results,
         key=lambda item: (-item.score, item.orientation_deg, -item.scale, abs(item.y_offset), abs(item.x_offset), item.y_offset, item.x_offset),
     )
-    ranked = tuple(CandidateResult(**{**asdict(item), "rank": index}) for index, item in enumerate(ordered, 1))
-    current = next(item for item in ranked if item.candidate == Candidate(0, 1.0, 0, 0))
-    best = _conservative_best(ranked, thresholds)
-    return CandidateAnalysis(street, area, grid, ranked, current, best, classify_candidate(current, best, thresholds))
+    ranked = tuple(CandidateResult(**dict(asdict(item), rank=index)) for index, item in enumerate(ordered, 1))
+    standard = next(item for item in ranked if item.candidate == Candidate(0, 1.0, 0, 0))
+    diagnostic_selected = _conservative_best(ranked, thresholds)
+    classification = classify_candidate(standard, diagnostic_selected, thresholds)
+    rendered = diagnostic_selected if classification == "ADAPTED" else standard
+    reason = (
+        "standard candidate satisfies validated eligibility constraints"
+        if classification == "STANDARD"
+        else "eligible candidate provides a modest validated rescue"
+        if classification == "ADAPTED"
+        else "standard needs rescue but no candidate meets validated eligibility constraints"
+    )
+    return FrontPlacementDecision(classification, reason, classification == "ADAPTED", standard, diagnostic_selected, rendered), ranked
 
 
 def score_candidate(
@@ -437,10 +497,16 @@ def write_anatomy_debug_output(
     _write_alignment_image(masks, score_candidate(masks, Candidate(0, 1.0, 0, 0)), output_dir / "anatomy_overlay.png")
     return audit_masks(masks)
 
-def render_production_masks(street: StreetRecord, *, area: str = "") -> FaceAnatomyMasks:
-    """Derive face masks from the exact native asset and production text geometry."""
+def render_production_masks(
+    street: StreetRecord,
+    *,
+    area: str = "",
+    face_markup: str | None = None,
+    base: Image.Image | None = None,
+) -> FaceAnatomyMasks:
+    # Derive masks from exact production markup; callers may reuse it.
     centre = face.SOURCE_CANVAS_PX[0] * face.FRONT_CENTER_RATIO
-    markup = face._render_native_face(street.glyph_path, centre, *face.SOURCE_CANVAS_PX, face.STREET_STROKE_MULTIPLIER)
+    markup = face_markup or face._render_native_face(street.glyph_path, centre, *face.SOURCE_CANVAS_PX, face.STREET_STROKE_MULTIPLIER)
     street_mask = _asset_mask(markup, {"street"}, role="street_mouth")
     eyes = _asset_mask(markup, {"eye"}, role="eyes")
     components = _components(eyes)
@@ -450,7 +516,7 @@ def render_production_masks(street: StreetRecord, *, area: str = "") -> FaceAnat
     masks = FaceAnatomyMasks(
         street_mask, _box_mask(eyes, components[0]), _box_mask(eyes, components[1]),
         _asset_mask(markup, {"v28-nose"}, role="static_nose"), typography,
-        face.render_face(street, face.FaceRenderOptions(area=area)),
+        base if base is not None else face._render_face_standard(street, face.FaceRenderOptions(area=area)),
     )
     _validate_face_masks(masks, expected_size=face.FRONT_PANEL_PX)
     return masks

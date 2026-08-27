@@ -23,6 +23,7 @@ from mug_previewer.diagnostics.front_candidates import (
     transform_street_mask,
     audit_masks,
     classify_candidate,
+    select_front_placement_from_masks,
     _asset_mask,
     _render_mask,
     render_production_masks,
@@ -286,3 +287,44 @@ def test_missing_production_anatomy_role_raises_clearly() -> None:
     production = f'<svg xmlns="http://www.w3.org/2000/svg" width="990" height="462"><image href="{href}" x="0" y="0" width="337" height="315"/></svg>'
     with pytest.raises(DiagnosticMaskError, match='static_nose'):
         _asset_mask(production, {"v28-nose"}, role="static_nose")
+
+
+def test_shared_decision_keeps_a_healthy_standard_candidate() -> None:
+    street = _mask({(100, 120)}, (200, 200))
+    decision, _results = select_front_placement_from_masks(_blank_masks(street, nose=_mask({(100, 100)}, (200, 200))))
+    assert decision.classification == "STANDARD"
+    assert decision.rendered.candidate == Candidate(0, 1.0, 0, 0)
+
+
+def test_shared_decision_adapts_a_real_nose_collision_to_an_eligible_candidate() -> None:
+    street = _mask({(100, 100)}, (200, 200))
+    decision, _results = select_front_placement_from_masks(
+        _blank_masks(street, nose=_mask({(100, 100)}, (200, 200))),
+        grid=CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0, 20)),
+    )
+    assert decision.classification == "ADAPTED"
+    assert decision.rendered.candidate == Candidate(0, 1.0, 0, 20)
+    assert decision.standard.nose_overlap_pixels == 1
+    assert decision.rendered.nose_overlap_pixels == 0
+
+
+def test_shared_decision_retains_standard_when_no_candidate_is_eligible() -> None:
+    street = _mask({(100, 10)}, (200, 200))
+    decision, _results = select_front_placement_from_masks(
+        _blank_masks(street, nose=_mask({(100, 150)}, (200, 200))),
+        grid=CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0,)),
+    )
+    assert decision.classification == "UNRESOLVED"
+    assert decision.diagnostic_selected.candidate == Candidate(0, 1.0, 0, 0)
+    assert decision.rendered.candidate == Candidate(0, 1.0, 0, 0)
+
+
+def test_shared_decision_is_deterministic_and_preserves_effective_tie_standard() -> None:
+    street = _mask({(100, 120)}, (200, 200))
+    masks = _blank_masks(street, nose=_mask({(100, 100)}, (200, 200)))
+    grid = CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0, 20))
+    first, _ = select_front_placement_from_masks(masks, grid=grid)
+    second, _ = select_front_placement_from_masks(masks, grid=grid)
+    assert first == second
+    assert first.classification == "STANDARD"
+    assert first.rendered.candidate == Candidate(0, 1.0, 0, 0)
