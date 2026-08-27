@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -23,6 +24,16 @@ from ..rendering import face
 from ..rendering.native import face_policy as native
 
 MASK_ALPHA_THRESHOLD = 16
+_DISTANCE_FIELD_CACHE: dict[tuple[bytes, tuple[int, int]], tuple[float, ...]] = {}
+@dataclass(frozen=True)
+class ProximityThresholds:
+    """Pixel spacing zones on the 495 x 462 front panel."""
+
+    mouth_hard_min_px: float = 12.0
+    mouth_comfortable_px: float = 32.0
+    eye_hard_min_px: float = 9.0
+    eye_comfortable_px: float = 24.0
+    edge_soft_margin_px: float = 4.0
 
 
 @dataclass(frozen=True)
@@ -56,11 +67,13 @@ class ScoringWeights:
     eye_overlap_pixel: float = 1.0
     mouth_overlap_pixel: float = 0.8
     clipping: float = 200.0
-    edge_proximity: float = 8.0
+    mouth_proximity: float = 9.0
+    eye_proximity: float = 5.0
+    edge_proximity: float = 2.0
     scale_reduction: float = 30.0
     displacement_per_pixel: float = 0.05
     rotation_180: float = 3.0
-
+    orientation_plausibility: float = 7.0
 
 @dataclass(frozen=True)
 class ClassificationThresholds:
@@ -101,6 +114,29 @@ class CandidateResult:
     typography_overlap_ratio: float
     clipped: bool
     edge_proximity: bool
+    mouth_min_distance_px: float
+    left_eye_min_distance_px: float
+    right_eye_min_distance_px: float
+    mouth_min_distance_ratio: float
+    left_eye_min_distance_ratio: float
+    right_eye_min_distance_ratio: float
+    top_margin_px: int
+    bottom_margin_px: int
+    left_margin_px: int
+    right_margin_px: int
+    min_edge_margin_px: int
+    vertical_centroid_ratio: float
+    upper_half_ratio: float
+    lower_half_ratio: float
+    top_band_width: int
+    bottom_band_width: int
+    collision_penalty: float
+    proximity_penalty: float
+    edge_penalty: float
+    scale_penalty: float
+    offset_penalty: float
+    rotation_penalty: float
+    orientation_penalty_or_bonus: float
     score: float
     rank: int = 0
 
@@ -176,8 +212,9 @@ def score_candidate(
     candidate: Candidate,
     *,
     weights: ScoringWeights = ScoringWeights(),
+    proximity: ProximityThresholds = ProximityThresholds(),
 ) -> CandidateResult:
-    """Calculate raw overlap, normalised overlap, bounds, clipping, and score."""
+    """Score a diagnostic candidate using collisions, spacing, margins, and shape."""
     street, clipped = transform_street_mask(masks.street, candidate)
     bounds = street.getbbox()
     pixels = _pixel_count(street)
@@ -185,25 +222,43 @@ def score_candidate(
     right = overlap_pixels(street, masks.right_eye)
     mouth = overlap_pixels(street, masks.mouth)
     typography = overlap_pixels(street, masks.typography)
-    edge_proximity = _edge_proximity(street)
-    score = (
-        weights.base_score
-        - typography * weights.typography_overlap_pixel
-        - (left + right) * weights.eye_overlap_pixel
-        - mouth * weights.mouth_overlap_pixel
-        - (weights.clipping if clipped else 0)
-        - (weights.edge_proximity if edge_proximity else 0)
-        - (1 - candidate.scale) * weights.scale_reduction
-        - (abs(candidate.x_offset) + abs(candidate.y_offset)) * weights.displacement_per_pixel
-        - (weights.rotation_180 if candidate.orientation_deg == 180 else 0)
+    mouth_distance = _robust_distance(street, masks.mouth)
+    left_distance = _robust_distance(street, masks.left_eye)
+    right_distance = _robust_distance(street, masks.right_eye)
+    mouth_proximity = _spacing_penalty(mouth_distance, proximity.mouth_hard_min_px, proximity.mouth_comfortable_px, weights.mouth_proximity)
+    left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
+    right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
+    proximity_penalty = mouth_proximity + left_proximity + right_proximity
+    top_margin, bottom_margin, left_margin, right_margin = _edge_margins(street)
+    min_margin = min(top_margin, bottom_margin, left_margin, right_margin)
+    edge_penalty = _edge_penalty(min_margin, proximity.edge_soft_margin_px, weights.edge_proximity)
+    edge_proximity = edge_penalty > 0
+    centroid_ratio, upper_ratio, lower_ratio, top_width, bottom_width = _shape_descriptors(street)
+    width_reference = max(top_width, bottom_width, 1)
+    orientation_signal = 0.7 * ((top_width - bottom_width) / width_reference) + 0.3 * (upper_ratio - lower_ratio)
+    orientation_bonus = weights.orientation_plausibility * orientation_signal
+    collision_penalty = (
+        typography * weights.typography_overlap_pixel
+        + (left + right) * weights.eye_overlap_pixel
+        + mouth * weights.mouth_overlap_pixel
+        + (weights.clipping if clipped else 0)
     )
+    scale_penalty = (1 - candidate.scale) * weights.scale_reduction
+    offset_penalty = (abs(candidate.x_offset) + abs(candidate.y_offset)) * weights.displacement_per_pixel
+    rotation_penalty = weights.rotation_180 if candidate.orientation_deg == 180 else 0.0
+    score = weights.base_score - collision_penalty - proximity_penalty - edge_penalty - scale_penalty - offset_penalty - rotation_penalty + orientation_bonus
     return CandidateResult(
-        candidate.orientation_deg, candidate.scale, candidate.x_offset, candidate.y_offset,
-        0 if bounds is None else bounds[2] - bounds[0], 0 if bounds is None else bounds[3] - bounds[1],
-        pixels, left, right, mouth, typography, _ratio(left, pixels), _ratio(right, pixels),
-        _ratio(mouth, pixels), _ratio(typography, pixels), clipped, edge_proximity, round(score, 3),
+        orientation_deg=candidate.orientation_deg, scale=candidate.scale, x_offset=candidate.x_offset, y_offset=candidate.y_offset,
+        street_width=0 if bounds is None else bounds[2] - bounds[0], street_height=0 if bounds is None else bounds[3] - bounds[1],
+        street_pixels=pixels, left_eye_overlap=left, right_eye_overlap=right, mouth_overlap=mouth, typography_overlap=typography,
+        left_eye_overlap_ratio=_ratio(left, pixels), right_eye_overlap_ratio=_ratio(right, pixels), mouth_overlap_ratio=_ratio(mouth, pixels), typography_overlap_ratio=_ratio(typography, pixels),
+        clipped=clipped, edge_proximity=edge_proximity,
+        mouth_min_distance_px=round(mouth_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
+        mouth_min_distance_ratio=_ratio_float(mouth_distance, street.height), left_eye_min_distance_ratio=_ratio_float(left_distance, street.height), right_eye_min_distance_ratio=_ratio_float(right_distance, street.height),
+        top_margin_px=top_margin, bottom_margin_px=bottom_margin, left_margin_px=left_margin, right_margin_px=right_margin, min_edge_margin_px=min_margin,
+        vertical_centroid_ratio=round(centroid_ratio, 6), upper_half_ratio=round(upper_ratio, 6), lower_half_ratio=round(lower_ratio, 6), top_band_width=top_width, bottom_band_width=bottom_width,
+        collision_penalty=round(collision_penalty, 3), proximity_penalty=round(proximity_penalty, 3), edge_penalty=round(edge_penalty, 3), scale_penalty=round(scale_penalty, 3), offset_penalty=round(offset_penalty, 3), rotation_penalty=round(rotation_penalty, 3), orientation_penalty_or_bonus=round(orientation_bonus, 3), score=round(score, 3),
     )
-
 
 def transform_street_mask(mask: Image.Image, candidate: Candidate) -> tuple[Image.Image, bool]:
     """Transform only the real street mask: no mirroring or arbitrary rotation."""
@@ -371,10 +426,97 @@ def _box_mask(mask: Image.Image, box: tuple[int, int, int, int]) -> Image.Image:
     return output
 
 
-def _edge_proximity(mask: Image.Image, margin: int = 8) -> bool:
-    bounds = _binary(mask).getbbox()
-    return bool(bounds and (bounds[0] < margin or bounds[1] < margin or bounds[2] > mask.width - margin or bounds[3] > mask.height - margin))
+def _distance_field(mask: Image.Image) -> tuple[float, ...]:
+    """Exact Euclidean distance transform of a thresholded protected mask."""
+    binary = _binary(mask)
+    cache_key = (binary.tobytes(), binary.size)
+    cached = _DISTANCE_FIELD_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    width, height = binary.size
+    source = binary.load()
+    infinity = width * width + height * height
+    columns = [[0 if source[x, y] else infinity for y in range(height)] for x in range(width)]
+    vertical = [_edt_1d(column) for column in columns]
+    result = [0.0] * (width * height)
+    for y in range(height):
+        row = _edt_1d([vertical[x][y] for x in range(width)])
+        for x, squared_distance in enumerate(row):
+            result[y * width + x] = math.sqrt(squared_distance)
+    field = tuple(result)
+    _DISTANCE_FIELD_CACHE[cache_key] = field
+    return field
 
+
+def _edt_1d(values: list[int]) -> list[int]:
+    """Felzenszwalb-Huttenlocher one-dimensional squared distance transform."""
+    count = len(values)
+    sites, boundaries, output = [0] * count, [0.0] * (count + 1), [0] * count
+    low, high = 0, 0
+    sites[0], boundaries[0], boundaries[1] = 0, float('-inf'), float('inf')
+    for query in range(1, count):
+        intersection = ((values[query] + query * query) - (values[sites[high]] + sites[high] * sites[high])) / (2 * query - 2 * sites[high])
+        while intersection <= boundaries[high]:
+            high -= 1
+            intersection = ((values[query] + query * query) - (values[sites[high]] + sites[high] * sites[high])) / (2 * query - 2 * sites[high])
+        high += 1
+        sites[high], boundaries[high], boundaries[high + 1] = query, intersection, float('inf')
+    for query in range(count):
+        while boundaries[low + 1] < query:
+            low += 1
+        nearest = sites[low]
+        output[query] = (query - nearest) * (query - nearest) + values[nearest]
+    return output
+
+
+def _robust_distance(street: Image.Image, protected: Image.Image, percentile: float = 0.05) -> float:
+    """Return the fifth-percentile Euclidean protected-mask spacing under street pixels."""
+    points = [index for index, value in enumerate(_binary(street).getdata()) if value]
+    if not points:
+        return float(max(street.size))
+    distances = sorted(_distance_field(protected)[index] for index in points)
+    return distances[round((len(distances) - 1) * percentile)]
+
+
+def _spacing_penalty(distance: float, hard_minimum: float, comfortable: float, weight: float) -> float:
+    if distance >= comfortable:
+        return 0.0
+    if distance >= hard_minimum:
+        return weight * (comfortable - distance) / (comfortable - hard_minimum)
+    return weight * (1 + (hard_minimum - distance) / hard_minimum)
+
+
+def _edge_margins(mask: Image.Image) -> tuple[int, int, int, int]:
+    bounds = _binary(mask).getbbox()
+    if bounds is None:
+        return mask.height, mask.height, mask.width, mask.width
+    return bounds[1], mask.height - bounds[3], bounds[0], mask.width - bounds[2]
+
+
+def _edge_penalty(margin: int, soft_margin: float, weight: float) -> float:
+    return 0.0 if margin >= soft_margin else weight * (soft_margin - margin) / soft_margin
+
+
+def _shape_descriptors(mask: Image.Image) -> tuple[float, float, float, int, int]:
+    bounds = _binary(mask).getbbox()
+    if bounds is None:
+        return 0.5, 0.5, 0.5, 0, 0
+    pixels = _binary(mask).load()
+    left, top, right, bottom = bounds
+    height = bottom - top
+    points = [(x, y) for y in range(top, bottom) for x in range(left, right) if pixels[x, y]]
+    midpoint = top + height / 2
+    upper = sum(y < midpoint for _x, y in points)
+    lower = len(points) - upper
+    band = max(1, math.ceil(height * 0.2))
+    top_width = len({x for x, y in points if y < top + band})
+    bottom_width = len({x for x, y in points if y >= bottom - band})
+    centroid = sum(y for _x, y in points) / len(points)
+    return (centroid - top) / max(1, height - 1), upper / len(points), lower / len(points), top_width, bottom_width
+
+
+def _ratio_float(value: float, denominator: int) -> float:
+    return round(value / denominator, 6) if denominator else 0.0
 
 def _acceptable(item: CandidateResult, thresholds: ClassificationThresholds) -> bool:
     return (
