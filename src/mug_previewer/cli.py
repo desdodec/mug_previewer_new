@@ -43,6 +43,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     wrap.add_argument("--street-id", required=True)
     wrap.add_argument("--output", type=Path, required=True)
     wrap.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
+    diagnostics = commands.add_parser("diagnostics", help="Run experimental developer diagnostics.")
+    diagnostic_front = diagnostics.add_subparsers(dest="operation", required=True).add_parser(
+        "front-candidates", help="Score bounded street-feature candidates; does not alter rendering.",
+    )
+    diagnostic_front.add_argument("--dataset", type=Path, required=True)
+    diagnostic_front.add_argument("--street-id", action="append", required=True)
+    diagnostic_front.add_argument("--output-dir", type=Path, required=True)
+    diagnostic_front.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
     args = parser.parse_args(argv)
 
     if args.command == "ui":
@@ -58,6 +66,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Datasets found: {len(found)}")
         for index, item in enumerate(found, 1):
             print(f"\n{index}. {item.dataset.display_name}\n   {item.dataset.id}")
+        return 0
+
+    if args.command == "diagnostics":
+        try:
+            data = load_dataset(args.dataset)
+        except DatasetLoadError as error:
+            print(f"Dataset error: {error}")
+            return 2
+        from .diagnostics.front_candidates import analyse_front_candidates, write_diagnostic_report
+
+        area = args.area if args.area is not None else data.display_name
+        missing = [street_id for street_id in args.street_id if data.get_street(street_id) is None]
+        if missing:
+            print(f"Street not found: {', '.join(missing)}")
+            return 2
+        print("Street | Current | Best | Orientation | Scale | Y offset | Classification")
+        for street_id in args.street_id:
+            street = data.get_street(street_id)
+            assert street is not None
+            analysis = analyse_front_candidates(street, area=area)
+            output = args.output_dir / _diagnostic_slug(street.display_name)
+            write_diagnostic_report(analysis, output)
+            print(
+                f"{street.display_name} | {analysis.current.score:.1f} | {analysis.best.score:.1f} | "
+                f"{analysis.best.orientation_deg} | {analysis.best.scale:.2f} | {analysis.best.y_offset} | "
+                f"{analysis.classification}"
+            )
+        print(f"Diagnostic output: {args.output_dir}")
         return 0
 
     if args.command == "render":
@@ -136,3 +172,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for item in results[:max(0, args.limit)]:
         print(f"{item.id:<6}  {item.display_name}")
     return 0
+
+
+def _diagnostic_slug(value: str) -> str:
+    """Use a predictable folder name without adding a diagnostics dependency."""
+    return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_") or "street"
