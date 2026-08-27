@@ -45,8 +45,8 @@ class MaskAudit:
 class ProximityThresholds:
     """Pixel spacing zones on the 495 x 462 front panel."""
 
-    mouth_hard_min_px: float = 12.0
-    mouth_comfortable_px: float = 32.0
+    nose_hard_min_px: float = 12.0
+    nose_comfortable_px: float = 32.0
     eye_hard_min_px: float = 9.0
     eye_comfortable_px: float = 24.0
     edge_soft_margin_px: float = 4.0
@@ -81,9 +81,9 @@ class ScoringWeights:
     base_score: float = 100.0
     typography_overlap_pixel: float = 2.0
     eye_overlap_pixel: float = 1.0
-    mouth_overlap_pixel: float = 0.8
+    nose_overlap_pixel: float = 0.8
     clipping: float = 200.0
-    mouth_proximity: float = 9.0
+    nose_proximity: float = 9.0
     eye_proximity: float = 5.0
     edge_proximity: float = 2.0
     scale_reduction: float = 30.0
@@ -94,7 +94,7 @@ class ScoringWeights:
 @dataclass(frozen=True)
 class ClassificationThresholds:
     max_eye_overlap_ratio: float = 0.015
-    max_mouth_overlap_ratio: float = 0.020
+    max_nose_overlap_ratio: float = 0.020
     max_typography_overlap_ratio: float = 0.005
     min_scale: float = 0.80
     minimum_score: float = 80.0
@@ -122,21 +122,21 @@ class CandidateResult:
     street_pixels: int
     left_eye_overlap: int
     right_eye_overlap: int
-    mouth_overlap: int
+    nose_overlap_pixels: int
     typography_overlap: int
     left_eye_overlap_ratio: float
     right_eye_overlap_ratio: float
-    mouth_overlap_ratio: float
+    nose_overlap_ratio: float
     typography_overlap_ratio: float
     clipped: bool
     edge_proximity: bool
-    mouth_min_distance_px: float
+    nose_min_distance_px: float
     left_eye_min_distance_px: float
     right_eye_min_distance_px: float
-    mouth_street_nearest_x: int
-    mouth_street_nearest_y: int
-    mouth_nearest_x: int
-    mouth_nearest_y: int
+    nose_nearest_street_x: int
+    nose_nearest_street_y: int
+    nose_nearest_nose_x: int
+    nose_nearest_nose_y: int
     left_eye_street_nearest_x: int
     left_eye_street_nearest_y: int
     left_eye_nearest_x: int
@@ -145,7 +145,7 @@ class CandidateResult:
     right_eye_street_nearest_y: int
     right_eye_nearest_x: int
     right_eye_nearest_y: int
-    mouth_min_distance_ratio: float
+    nose_min_distance_ratio: float
     left_eye_min_distance_ratio: float
     right_eye_min_distance_ratio: float
     top_margin_px: int
@@ -171,14 +171,33 @@ class CandidateResult:
     @property
     def candidate(self) -> Candidate:
         return Candidate(self.orientation_deg, self.scale, self.x_offset, self.y_offset)
+    @property
+    def street_nose_overlap_pixels(self) -> int:
+        """Exact street-mouth to static-nose overlap in final pixels."""
+        return self.nose_overlap_pixels
+
+    @property
+    def street_nose_overlap_ratio(self) -> float:
+        return self.nose_overlap_ratio
+
+    @property
+    def street_nose_min_distance_px(self) -> float:
+        return self.nose_min_distance_px
+
+    @property
+    def street_nose_nearest_pair(self) -> tuple[tuple[int, int], tuple[int, int]]:
+        return (
+            (self.nose_nearest_street_x, self.nose_nearest_street_y),
+            (self.nose_nearest_nose_x, self.nose_nearest_nose_y),
+        )
 
 
 @dataclass(frozen=True)
-class FaceMasks:
-    street: Image.Image
+class FaceAnatomyMasks:
+    street_mouth: Image.Image
     left_eye: Image.Image
     right_eye: Image.Image
-    mouth: Image.Image
+    static_nose: Image.Image
     typography: Image.Image
     base: Image.Image
 
@@ -237,7 +256,7 @@ def analyse_front_candidates(
 
 
 def score_candidate(
-    masks: FaceMasks,
+    masks: FaceAnatomyMasks,
     candidate: Candidate,
     *,
     weights: ScoringWeights = ScoringWeights(),
@@ -245,20 +264,20 @@ def score_candidate(
 ) -> CandidateResult:
     """Score a diagnostic candidate using collisions, spacing, margins, and shape."""
     _validate_face_masks(masks)
-    street, clipped = transform_street_mask(masks.street, candidate)
+    street, clipped = transform_street_mask(masks.street_mouth, candidate)
     bounds = street.getbbox()
     pixels = _pixel_count(street)
     left = overlap_pixels(street, masks.left_eye)
     right = overlap_pixels(street, masks.right_eye)
-    mouth = overlap_pixels(street, masks.mouth)
+    nose = overlap_pixels(street, masks.static_nose)
     typography = overlap_pixels(street, masks.typography)
-    mouth_distance, mouth_street, mouth_point = nearest_foreground_distance(street, masks.mouth)
+    nose_distance, nose_street, nose_point = nearest_foreground_distance(street, masks.static_nose)
     left_distance, left_street, left_point = nearest_foreground_distance(street, masks.left_eye)
     right_distance, right_street, right_point = nearest_foreground_distance(street, masks.right_eye)
-    mouth_proximity = _spacing_penalty(mouth_distance, proximity.mouth_hard_min_px, proximity.mouth_comfortable_px, weights.mouth_proximity)
+    nose_proximity = _spacing_penalty(nose_distance, proximity.nose_hard_min_px, proximity.nose_comfortable_px, weights.nose_proximity)
     left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
     right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
-    proximity_penalty = mouth_proximity + left_proximity + right_proximity
+    proximity_penalty = nose_proximity + left_proximity + right_proximity
     top_margin, bottom_margin, left_margin, right_margin = _edge_margins(street)
     min_margin = min(top_margin, bottom_margin, left_margin, right_margin)
     edge_penalty = _edge_penalty(min_margin, proximity.edge_soft_margin_px, weights.edge_proximity)
@@ -270,7 +289,7 @@ def score_candidate(
     collision_penalty = (
         typography * weights.typography_overlap_pixel
         + (left + right) * weights.eye_overlap_pixel
-        + mouth * weights.mouth_overlap_pixel
+        + nose * weights.nose_overlap_pixel
         + (weights.clipping if clipped else 0)
     )
     scale_penalty = (1 - candidate.scale) * weights.scale_reduction
@@ -280,14 +299,14 @@ def score_candidate(
     return CandidateResult(
         orientation_deg=candidate.orientation_deg, scale=candidate.scale, x_offset=candidate.x_offset, y_offset=candidate.y_offset,
         street_width=0 if bounds is None else bounds[2] - bounds[0], street_height=0 if bounds is None else bounds[3] - bounds[1],
-        street_pixels=pixels, left_eye_overlap=left, right_eye_overlap=right, mouth_overlap=mouth, typography_overlap=typography,
-        left_eye_overlap_ratio=_ratio(left, pixels), right_eye_overlap_ratio=_ratio(right, pixels), mouth_overlap_ratio=_ratio(mouth, pixels), typography_overlap_ratio=_ratio(typography, pixels),
+        street_pixels=pixels, left_eye_overlap=left, right_eye_overlap=right, nose_overlap_pixels=nose, typography_overlap=typography,
+        left_eye_overlap_ratio=_ratio(left, pixels), right_eye_overlap_ratio=_ratio(right, pixels), nose_overlap_ratio=_ratio(nose, pixels), typography_overlap_ratio=_ratio(typography, pixels),
         clipped=clipped, edge_proximity=edge_proximity,
-        mouth_min_distance_px=round(mouth_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
-        mouth_street_nearest_x=mouth_street[0], mouth_street_nearest_y=mouth_street[1], mouth_nearest_x=mouth_point[0], mouth_nearest_y=mouth_point[1],
+        nose_min_distance_px=round(nose_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
+        nose_nearest_street_x=nose_street[0], nose_nearest_street_y=nose_street[1], nose_nearest_nose_x=nose_point[0], nose_nearest_nose_y=nose_point[1],
         left_eye_street_nearest_x=left_street[0], left_eye_street_nearest_y=left_street[1], left_eye_nearest_x=left_point[0], left_eye_nearest_y=left_point[1],
         right_eye_street_nearest_x=right_street[0], right_eye_street_nearest_y=right_street[1], right_eye_nearest_x=right_point[0], right_eye_nearest_y=right_point[1],
-        mouth_min_distance_ratio=_ratio_float(mouth_distance, street.height), left_eye_min_distance_ratio=_ratio_float(left_distance, street.height), right_eye_min_distance_ratio=_ratio_float(right_distance, street.height),
+        nose_min_distance_ratio=_ratio_float(nose_distance, street.height), left_eye_min_distance_ratio=_ratio_float(left_distance, street.height), right_eye_min_distance_ratio=_ratio_float(right_distance, street.height),
         top_margin_px=top_margin, bottom_margin_px=bottom_margin, left_margin_px=left_margin, right_margin_px=right_margin, min_edge_margin_px=min_margin,
         vertical_centroid_ratio=round(centroid_ratio, 6), upper_half_ratio=round(upper_ratio, 6), lower_half_ratio=round(lower_ratio, 6), top_band_width=top_width, bottom_band_width=bottom_width,
         collision_penalty=round(collision_penalty, 3), proximity_penalty=round(proximity_penalty, 3), edge_penalty=round(edge_penalty, 3), scale_penalty=round(scale_penalty, 3), offset_penalty=round(offset_penalty, 3), rotation_penalty=round(rotation_penalty, 3), orientation_penalty_or_bonus=round(orientation_bonus, 3), score=round(score, 3),
@@ -348,44 +367,87 @@ def write_diagnostic_report(analysis: CandidateAnalysis, output_dir: Path, *, to
     return report
 
 
-def render_production_masks(street: StreetRecord, *, area: str = "") -> FaceMasks:
+def write_anatomy_debug_output(
+    street: StreetRecord,
+    output_dir: Path,
+    *,
+    area: str = "",
+) -> tuple[MaskAudit, ...]:
+    """Write proof images for the corrected production anatomy outside normal outputs."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    masks = render_production_masks(street, area=area)
+    for filename, mask in (
+        ("final_face.png", masks.base),
+        ("street_mouth.png", masks.street_mouth),
+        ("static_nose.png", masks.static_nose),
+        ("left_eye.png", masks.left_eye),
+        ("right_eye.png", masks.right_eye),
+        ("typography.png", masks.typography),
+    ):
+        mask.save(output_dir / filename, format="PNG")
+    combined = Image.new("L", masks.street_mouth.size, 0)
+    for mask in (masks.static_nose, masks.left_eye, masks.right_eye, masks.typography):
+        combined = Image.frombytes("L", combined.size, bytes(max(left, right) for left, right in zip(combined.getdata(), _binary(mask).getdata())))
+    combined.save(output_dir / "protected_combined.png", format="PNG")
+    _write_alignment_image(masks, score_candidate(masks, Candidate(0, 1.0, 0, 0)), output_dir / "anatomy_overlay.png")
+    return audit_masks(masks)
+
+def render_production_masks(street: StreetRecord, *, area: str = "") -> FaceAnatomyMasks:
     """Derive face masks from the exact native asset and production text geometry."""
     centre = face.SOURCE_CANVAS_PX[0] * face.FRONT_CENTER_RATIO
     markup = face._render_native_face(street.glyph_path, centre, *face.SOURCE_CANVAS_PX, face.STREET_STROKE_MULTIPLIER)
-    street_mask = _asset_mask(markup, {"street"})
-    eyes = _asset_mask(markup, {"eye"})
+    street_mask = _asset_mask(markup, {"street"}, role="street_mouth")
+    eyes = _asset_mask(markup, {"eye"}, role="eyes")
     components = _components(eyes)
     if len(components) != 2:
         raise ValueError(f"Expected two native eye masks, found {len(components)}.")
     typography = _typography_mask(street, area)
-    masks = FaceMasks(
+    masks = FaceAnatomyMasks(
         street_mask, _box_mask(eyes, components[0]), _box_mask(eyes, components[1]),
-        _asset_mask(markup, {"mouth"}), typography,
+        _asset_mask(markup, {"v28-nose"}, role="static_nose"), typography,
         face.render_face(street, face.FaceRenderOptions(area=area)),
     )
     _validate_face_masks(masks, expected_size=face.FRONT_PANEL_PX)
     return masks
 
 
-def _asset_mask(markup: str, classes: set[str]) -> Image.Image:
+def _asset_mask(markup: str, classes: set[str], *, role: str) -> Image.Image:
+    """Render one production role while retaining every inherited SVG transform.
+
+    The native face is embedded as an asset.  Its selected ``face-content``
+    group may be nested under translated, scaled, rotated, or matrix-transformed
+    ancestors, so serialising the group alone changes its rendered location.
+    This rebuilds its complete ancestor chain rather than composing transform
+    strings, preserving SVG's native transform order generically.
+    """
     asset, placement = _decode_asset(markup)
     root = ET.fromstring(asset)
     namespace = "{http://www.w3.org/2000/svg}"
+    parent_by_child = {child: parent for parent in root.iter() for child in parent}
     content = next((node for node in root.iter(f"{namespace}g") if "face-content" in _classes(node)), None)
     if content is None:
-        raise ValueError("Native face asset did not provide face content.")
+        raise DiagnosticMaskError("Native face asset did not provide face content.")
     _retain(content, classes)
+    selected = content
+    ancestor = parent_by_child.get(content)
+    while ancestor is not None and ancestor is not root:
+        wrapper = ET.Element(ancestor.tag, ancestor.attrib)
+        wrapper.append(selected)
+        selected = wrapper
+        ancestor = parent_by_child.get(ancestor)
     defs = root.find(f"{namespace}defs")
     defs_markup = "" if defs is None else ET.tostring(defs, encoding="unicode")
     filtered = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{face.FACE_ASSET_SIZE[0]}" height="{face.FACE_ASSET_SIZE[1]}" '
-        f'viewBox="0 0 {face.FACE_ASSET_SIZE[0]} {face.FACE_ASSET_SIZE[1]}">{defs_markup}{ET.tostring(content, encoding="unicode")}</svg>'
+        f'viewBox="0 0 {face.FACE_ASSET_SIZE[0]} {face.FACE_ASSET_SIZE[1]}">{defs_markup}{ET.tostring(selected, encoding="unicode")}</svg>'
     )
     href = "data:image/svg+xml;base64," + base64.b64encode(filtered.encode("utf-8")).decode("ascii")
     width, height = face.SOURCE_CANVAS_PX
     transform = face._front_group_transform(width * face.FRONT_CENTER_RATIO, height, face.FRONT_GROUP_SCALE, face.FRONT_GROUP_Y_OFFSET)
-    return _render_mask(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><g transform="{transform}"><image href="{href}" {placement}/></g></svg>')
-
+    mask = _render_mask(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}"><g transform="{transform}"><image href="{href}" {placement}/></g></svg>')
+    if mask.getbbox() is None:
+        raise DiagnosticMaskError(f'Expected production anatomy role "{role}" was not rendered.')
+    return mask
 
 def _typography_mask(street: StreetRecord, area: str) -> Image.Image:
     width, height = face.SOURCE_CANVAS_PX
@@ -434,18 +496,18 @@ def _pixel_count(mask: Image.Image) -> int:
     return sum(value > 0 for value in _binary(mask).getdata())
 
 
-def audit_masks(masks: FaceMasks) -> tuple[MaskAudit, ...]:
+def audit_masks(masks: FaceAnatomyMasks) -> tuple[MaskAudit, ...]:
     """Return reproducible integrity evidence for final-coordinate masks."""
     return tuple(
         MaskAudit(name, _binary(mask).size, _pixel_count(mask), _binary(mask).getbbox())
         for name, mask in (
-            ("street", masks.street), ("left_eye", masks.left_eye), ("right_eye", masks.right_eye),
-            ("mouth", masks.mouth), ("typography", masks.typography),
+            ("street_mouth", masks.street_mouth), ("left_eye", masks.left_eye), ("right_eye", masks.right_eye),
+            ("static_nose", masks.static_nose), ("typography", masks.typography),
         )
     )
 
 
-def _validate_face_masks(masks: FaceMasks, *, expected_size: tuple[int, int] | None = None) -> None:
+def _validate_face_masks(masks: FaceAnatomyMasks, *, expected_size: tuple[int, int] | None = None) -> None:
     """Reject mismatched or empty masks instead of disguising bad geometry as spacing."""
     audits = audit_masks(masks)
     sizes = {item.size for item in audits}
@@ -615,7 +677,7 @@ def _acceptable(item: CandidateResult, thresholds: ClassificationThresholds) -> 
         not item.clipped and item.scale >= thresholds.min_scale and item.score >= thresholds.minimum_score
         and item.left_eye_overlap_ratio <= thresholds.max_eye_overlap_ratio
         and item.right_eye_overlap_ratio <= thresholds.max_eye_overlap_ratio
-        and item.mouth_overlap_ratio <= thresholds.max_mouth_overlap_ratio
+        and item.nose_overlap_ratio <= thresholds.max_nose_overlap_ratio
         and item.typography_overlap_ratio <= thresholds.max_typography_overlap_ratio
     )
 
@@ -628,7 +690,7 @@ def _conservative_best(results: Sequence[CandidateResult], thresholds: Classific
     return best if best.score - original.score >= thresholds.orientation_change_threshold else original
 
 
-def _write_mask_audit(masks: FaceMasks, path: Path) -> None:
+def _write_mask_audit(masks: FaceAnatomyMasks, path: Path) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=("name", "size", "foreground_pixels", "bounds", "alpha_threshold"))
         writer.writeheader()
@@ -636,12 +698,12 @@ def _write_mask_audit(masks: FaceMasks, path: Path) -> None:
             writer.writerow({**asdict(item), "size": f"{item.size[0]}x{item.size[1]}", "bounds": item.bounds or ""})
 
 
-def _write_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
-    street, _clipped = transform_street_mask(masks.street, result.candidate)
+def _write_image(masks: FaceAnatomyMasks, result: CandidateResult, path: Path) -> None:
+    street, _clipped = transform_street_mask(masks.street_mouth, result.candidate)
     image = Image.new("RGBA", masks.base.size, "white")
     image.alpha_composite(masks.base)
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    for mask, colour in ((masks.left_eye, (50, 120, 255, 100)), (masks.right_eye, (50, 120, 255, 100)), (masks.mouth, (255, 70, 70, 100)), (masks.typography, (255, 190, 30, 80)), (street, (30, 180, 80, 210))):
+    for mask, colour in ((masks.left_eye, (50, 120, 255, 100)), (masks.right_eye, (50, 120, 255, 100)), (masks.static_nose, (255, 70, 70, 100)), (masks.typography, (255, 190, 30, 80)), (street, (30, 180, 80, 210))):
         layer = Image.new("RGBA", image.size, colour)
         overlay.alpha_composite(Image.composite(layer, Image.new("RGBA", image.size), mask))
     image.alpha_composite(overlay)
@@ -649,24 +711,24 @@ def _write_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
     image.save(path, format="PNG")
 
 
-def _write_alignment_image(masks: FaceMasks, result: CandidateResult, path: Path) -> None:
-    """Write a production-face overlay with mouth-distance geometry evidence."""
-    street, _clipped = transform_street_mask(masks.street, result.candidate)
+def _write_alignment_image(masks: FaceAnatomyMasks, result: CandidateResult, path: Path) -> None:
+    """Write a production-face overlay with street-to-nose geometry evidence."""
+    street, _clipped = transform_street_mask(masks.street_mouth, result.candidate)
     image = Image.new("RGBA", masks.base.size, "white")
     image.alpha_composite(masks.base)
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    for mask, colour in ((masks.left_eye, (50, 120, 255, 100)), (masks.right_eye, (50, 120, 255, 100)), (masks.mouth, (255, 70, 70, 130)), (masks.typography, (255, 190, 30, 80)), (street, (30, 180, 80, 210))):
+    for mask, colour in ((masks.left_eye, (50, 120, 255, 100)), (masks.right_eye, (50, 120, 255, 100)), (masks.static_nose, (255, 70, 70, 130)), (masks.typography, (255, 190, 30, 80)), (street, (30, 180, 80, 210))):
         overlay.alpha_composite(Image.composite(Image.new("RGBA", image.size, colour), Image.new("RGBA", image.size), mask))
     image.alpha_composite(overlay)
     draw = ImageDraw.Draw(image)
-    for mask, colour in ((street, "green"), (masks.mouth, "red")):
+    for mask, colour in ((street, "green"), (masks.static_nose, "red")):
         bounds = _binary(mask).getbbox()
         if bounds is not None:
             draw.rectangle((bounds[0], bounds[1], bounds[2] - 1, bounds[3] - 1), outline=colour, width=1)
-    street_point = (result.mouth_street_nearest_x, result.mouth_street_nearest_y)
-    mouth_point = (result.mouth_nearest_x, result.mouth_nearest_y)
-    draw.line((street_point, mouth_point), fill="magenta", width=2)
+    street_point = (result.nose_nearest_street_x, result.nose_nearest_street_y)
+    nose_point = (result.nose_nearest_nose_x, result.nose_nearest_nose_y)
+    draw.line((street_point, nose_point), fill="magenta", width=2)
     draw.ellipse((street_point[0] - 2, street_point[1] - 2, street_point[0] + 2, street_point[1] + 2), fill="green")
-    draw.ellipse((mouth_point[0] - 2, mouth_point[1] - 2, mouth_point[0] + 2, mouth_point[1] + 2), fill="red")
-    draw.text((8, image.height - 18), f"mouth {result.mouth_min_distance_px:.3f}px: street={street_point} mouth={mouth_point}", fill="black")
+    draw.ellipse((nose_point[0] - 2, nose_point[1] - 2, nose_point[0] + 2, nose_point[1] + 2), fill="red")
+    draw.text((8, image.height - 18), f"nose {result.nose_min_distance_px:.3f}px: street={street_point} nose={nose_point}", fill="black")
     image.save(path, format="PNG")
