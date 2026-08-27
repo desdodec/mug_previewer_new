@@ -113,13 +113,13 @@ def test_foreground_distance_reports_nearest_pixels_and_rejects_empty_masks() ->
 
 def test_nose_proximity_penalises_without_overlap_and_is_monotonic() -> None:
     street = _mask({(20, 16), (20, 17)})
-    nose = _mask({(20, 25)})
+    nose = _mask({(20, 23)})
     masks = _blank_masks(street, nose=nose)
     far = score_candidate(masks, Candidate(0, 1.0, 0, -10))
     near = score_candidate(masks, Candidate(0, 1.0, 0, 0))
     closer = score_candidate(masks, Candidate(0, 1.0, 0, 4))
-    assert near.nose_overlap_pixels == 0 and near.proximity_penalty > 0
-    assert far.proximity_penalty < near.proximity_penalty < closer.proximity_penalty
+    assert near.nose_overlap_pixels == 0 and near.nose_clearance_penalty > 0
+    assert far.nose_clearance_penalty < near.nose_clearance_penalty < closer.nose_clearance_penalty
 
 
 def test_comfortable_nose_spacing_has_no_penalty() -> None:
@@ -129,12 +129,79 @@ def test_comfortable_nose_spacing_has_no_penalty() -> None:
     assert result.proximity_penalty == 0
 
 
+def test_nose_clearance_saturates_after_healthy_gap() -> None:
+    street = _mask({(20, 10), (20, 11)})
+    masks = _blank_masks(street, nose=_mask({(20, 30)}))
+    healthy = score_candidate(masks, Candidate(0, 1.0, 0, 0))
+    distant = score_candidate(masks, Candidate(0, 1.0, 0, -8))
+    assert healthy.nose_min_distance_px >= ProximityThresholds().nose_comfortable_px
+    assert healthy.nose_clearance_penalty == distant.nose_clearance_penalty == 0
+
+
+def test_nose_overlap_remains_a_severe_penalty() -> None:
+    street = _mask({(20, 20), (20, 21)})
+    result = score_candidate(_blank_masks(street, nose=_mask({(20, 20)})), Candidate(0, 1.0, 0, 0))
+    assert result.nose_overlap_pixels == 1
+    assert result.collision_penalty >= 3.0
+
+
 def test_eye_proximity_without_overlap_is_measured() -> None:
     street = _mask({(20, 16), (20, 17)})
     result = score_candidate(_blank_masks(street, left=_mask({(20, 23)})), Candidate(0, 1.0, 0, 0))
     assert result.left_eye_overlap == 0
     assert result.left_eye_min_distance_px < ProximityThresholds().eye_comfortable_px
     assert result.proximity_penalty > 0
+
+
+def test_mouth_role_soft_band_distinguishes_high_and_low_placement() -> None:
+    street = _mask({(20, 20), (21, 20)}, (60, 60))
+    nose = _mask({(20, 18), (20, 19)}, (60, 60))
+    masks = _blank_masks(street, nose=nose)
+    thresholds = ProximityThresholds(mouth_tolerance_px=3.0)
+    centred = score_candidate(masks, Candidate(0, 1.0, 0, 0), proximity=thresholds)
+    high = score_candidate(masks, Candidate(0, 1.0, 0, -10), proximity=thresholds)
+    low = score_candidate(masks, Candidate(0, 1.0, 0, 10), proximity=thresholds)
+    assert centred.mouth_role_penalty == 0
+    assert high.mouth_role_penalty > 0
+    assert low.mouth_role_penalty > 0
+
+
+def test_mouth_role_tolerance_does_not_punish_small_movement() -> None:
+    street = _mask({(20, 20), (21, 20)}, (60, 60))
+    nose = _mask({(20, 18), (20, 19)}, (60, 60))
+    masks = _blank_masks(street, nose=nose)
+    thresholds = ProximityThresholds(mouth_tolerance_px=8.0)
+    current = score_candidate(masks, Candidate(0, 1.0, 0, 0), proximity=thresholds)
+    nearby = score_candidate(masks, Candidate(0, 1.0, 0, 4), proximity=thresholds)
+    assert current.mouth_role_penalty == nearby.mouth_role_penalty == 0
+
+
+def test_typography_clearance_saturates_after_healthy_gap() -> None:
+    street = _mask({(20, 10), (20, 11)})
+    typography = _mask({(20, 30)})
+    masks = FaceAnatomyMasks(street, _mask({(1, 1)}), _mask({(2, 1)}), _mask({(1, 35)}), typography, Image.new('RGBA', (40, 40)))
+    healthy = score_candidate(masks, Candidate(0, 1.0, 0, 0))
+    distant = score_candidate(masks, Candidate(0, 1.0, 0, -8))
+    assert healthy.typography_min_distance_px >= ProximityThresholds().typography_comfortable_px
+    assert healthy.typography_clearance_penalty == distant.typography_clearance_penalty == 0
+
+
+def test_safe_transform_beats_nose_collision_despite_movement_cost() -> None:
+    street = _mask({(20, 20), (20, 21)}, (80, 80))
+    masks = _blank_masks(street, nose=_mask({(20, 20)}, (80, 80)))
+    collided = score_candidate(masks, Candidate(0, 1.0, 0, 0))
+    safe = score_candidate(masks, Candidate(0, 1.0, 0, -20))
+    assert safe.nose_overlap_pixels == 0
+    assert safe.score > collided.score
+
+
+def test_conservative_y_zero_beats_unnecessary_safe_y_twenty() -> None:
+    street = _mask({(50, 30), (51, 30)}, (100, 100))
+    masks = FaceAnatomyMasks(street, _mask({(1, 1)}, (100, 100)), _mask({(2, 1)}, (100, 100)), _mask({(1, 30)}, (100, 100)), _mask({(98, 98)}, (100, 100)), Image.new('RGBA', (100, 100)))
+    current = score_candidate(masks, Candidate(0, 1.0, 0, 0))
+    moved = score_candidate(masks, Candidate(0, 1.0, 0, 20))
+    assert current.nose_clearance_penalty == moved.nose_clearance_penalty == 0
+    assert current.score > moved.score
 
 
 def test_edge_penalty_is_graded_and_clipping_is_severe() -> None:

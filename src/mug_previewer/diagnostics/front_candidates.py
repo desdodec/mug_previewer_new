@@ -45,10 +45,18 @@ class MaskAudit:
 class ProximityThresholds:
     """Pixel spacing zones on the 495 x 462 front panel."""
 
-    nose_hard_min_px: float = 12.0
-    nose_comfortable_px: float = 32.0
+    # The clean controls contain 8 px gaps, while Burnley's 14 px gap is also
+    # healthy. Anything at least 8 px apart therefore satisfies clearance.
+    nose_hard_min_px: float = 4.0
+    nose_comfortable_px: float = 8.0
     eye_hard_min_px: float = 9.0
     eye_comfortable_px: float = 24.0
+    typography_hard_min_px: float = 6.0
+    typography_comfortable_px: float = 16.0
+    # The lower two thirds of the fixed nose bounds is the lower-face anchor.
+    mouth_target_nose_bounds_ratio: float = 0.67
+    # A 70 px half-band accommodates the observed production street-mass span.
+    mouth_tolerance_px: float = 70.0
     edge_soft_margin_px: float = 4.0
 
 
@@ -81,15 +89,17 @@ class ScoringWeights:
     base_score: float = 100.0
     typography_overlap_pixel: float = 2.0
     eye_overlap_pixel: float = 1.0
-    nose_overlap_pixel: float = 0.8
+    nose_overlap_pixel: float = 3.0
     clipping: float = 200.0
-    nose_proximity: float = 9.0
+    nose_proximity: float = 16.0
     eye_proximity: float = 5.0
+    typography_proximity: float = 6.0
     edge_proximity: float = 2.0
     scale_reduction: float = 30.0
     displacement_per_pixel: float = 0.05
     rotation_180: float = 3.0
     orientation_plausibility: float = 7.0
+    mouth_role_placement: float = 12.0
 
 @dataclass(frozen=True)
 class ClassificationThresholds:
@@ -101,6 +111,7 @@ class ClassificationThresholds:
     modest_min_scale: float = 0.90
     modest_max_offset: int = 40
     orientation_change_threshold: float = 5.0
+    effective_tie_score: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -131,6 +142,7 @@ class CandidateResult:
     clipped: bool
     edge_proximity: bool
     nose_min_distance_px: float
+    typography_min_distance_px: float
     left_eye_min_distance_px: float
     right_eye_min_distance_px: float
     nose_nearest_street_x: int
@@ -153,6 +165,9 @@ class CandidateResult:
     left_margin_px: int
     right_margin_px: int
     min_edge_margin_px: int
+    mouth_role_centroid_y: float
+    mouth_role_target_y: float
+    mouth_role_offset_px: float
     vertical_centroid_ratio: float
     upper_half_ratio: float
     lower_half_ratio: float
@@ -160,6 +175,9 @@ class CandidateResult:
     bottom_band_width: int
     collision_penalty: float
     proximity_penalty: float
+    nose_clearance_penalty: float
+    typography_clearance_penalty: float
+    mouth_role_penalty: float
     edge_penalty: float
     scale_penalty: float
     offset_penalty: float
@@ -190,6 +208,10 @@ class CandidateResult:
             (self.nose_nearest_street_x, self.nose_nearest_street_y),
             (self.nose_nearest_nose_x, self.nose_nearest_nose_y),
         )
+
+    @property
+    def nose_clearance_contribution(self) -> float:
+        return -self.nose_clearance_penalty
 
 
 @dataclass(frozen=True)
@@ -279,16 +301,23 @@ def score_candidate(
         # validation run; its clipping penalty makes it noncompetitive and the
         # unavailable proximity evidence remains explicit in the CSV.
         nose_distance = left_distance = right_distance = math.inf
+        typography_distance = math.inf
         nose_street = nose_point = left_street = left_point = right_street = right_point = (-1, -1)
-        nose_proximity = left_proximity = right_proximity = 0.0
+        nose_proximity = left_proximity = right_proximity = typography_proximity = 0.0
+        mouth_centroid = mouth_target = mouth_offset = 0.0
+        mouth_penalty = 0.0
     else:
         nose_distance, nose_street, nose_point = nearest_foreground_distance(street, masks.static_nose)
         left_distance, left_street, left_point = nearest_foreground_distance(street, masks.left_eye)
         right_distance, right_street, right_point = nearest_foreground_distance(street, masks.right_eye)
+        typography_distance, _typography_street, _typography_point = nearest_foreground_distance(street, masks.typography)
         nose_proximity = _spacing_penalty(nose_distance, proximity.nose_hard_min_px, proximity.nose_comfortable_px, weights.nose_proximity)
         left_proximity = _spacing_penalty(left_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
         right_proximity = _spacing_penalty(right_distance, proximity.eye_hard_min_px, proximity.eye_comfortable_px, weights.eye_proximity)
-    proximity_penalty = nose_proximity + left_proximity + right_proximity
+        typography_proximity = _spacing_penalty(typography_distance, proximity.typography_hard_min_px, proximity.typography_comfortable_px, weights.typography_proximity)
+        mouth_centroid, mouth_target, mouth_offset = _mouth_role_descriptor(street, masks.static_nose, proximity)
+        mouth_penalty = _mouth_role_penalty(mouth_offset, proximity.mouth_tolerance_px, weights.mouth_role_placement)
+    proximity_penalty = left_proximity + right_proximity
     top_margin, bottom_margin, left_margin, right_margin = _edge_margins(street)
     min_margin = min(top_margin, bottom_margin, left_margin, right_margin)
     edge_penalty = _edge_penalty(min_margin, proximity.edge_soft_margin_px, weights.edge_proximity)
@@ -306,21 +335,22 @@ def score_candidate(
     scale_penalty = (1 - candidate.scale) * weights.scale_reduction
     offset_penalty = (abs(candidate.x_offset) + abs(candidate.y_offset)) * weights.displacement_per_pixel
     rotation_penalty = weights.rotation_180 if candidate.orientation_deg == 180 else 0.0
-    score = weights.base_score - collision_penalty - proximity_penalty - edge_penalty - scale_penalty - offset_penalty - rotation_penalty + orientation_bonus
+    score = weights.base_score - collision_penalty - proximity_penalty - nose_proximity - typography_proximity - mouth_penalty - edge_penalty - scale_penalty - offset_penalty - rotation_penalty + orientation_bonus
     return CandidateResult(
         orientation_deg=candidate.orientation_deg, scale=candidate.scale, x_offset=candidate.x_offset, y_offset=candidate.y_offset,
         street_width=0 if bounds is None else bounds[2] - bounds[0], street_height=0 if bounds is None else bounds[3] - bounds[1],
         street_pixels=pixels, left_eye_overlap=left, right_eye_overlap=right, nose_overlap_pixels=nose, typography_overlap=typography,
         left_eye_overlap_ratio=_ratio(left, pixels), right_eye_overlap_ratio=_ratio(right, pixels), nose_overlap_ratio=_ratio(nose, pixels), typography_overlap_ratio=_ratio(typography, pixels),
         clipped=clipped, edge_proximity=edge_proximity,
-        nose_min_distance_px=round(nose_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
+        nose_min_distance_px=round(nose_distance, 3), typography_min_distance_px=round(typography_distance, 3), left_eye_min_distance_px=round(left_distance, 3), right_eye_min_distance_px=round(right_distance, 3),
         nose_nearest_street_x=nose_street[0], nose_nearest_street_y=nose_street[1], nose_nearest_nose_x=nose_point[0], nose_nearest_nose_y=nose_point[1],
         left_eye_street_nearest_x=left_street[0], left_eye_street_nearest_y=left_street[1], left_eye_nearest_x=left_point[0], left_eye_nearest_y=left_point[1],
         right_eye_street_nearest_x=right_street[0], right_eye_street_nearest_y=right_street[1], right_eye_nearest_x=right_point[0], right_eye_nearest_y=right_point[1],
         nose_min_distance_ratio=_ratio_float(nose_distance, street.height), left_eye_min_distance_ratio=_ratio_float(left_distance, street.height), right_eye_min_distance_ratio=_ratio_float(right_distance, street.height),
         top_margin_px=top_margin, bottom_margin_px=bottom_margin, left_margin_px=left_margin, right_margin_px=right_margin, min_edge_margin_px=min_margin,
+        mouth_role_centroid_y=round(mouth_centroid, 3), mouth_role_target_y=round(mouth_target, 3), mouth_role_offset_px=round(mouth_offset, 3),
         vertical_centroid_ratio=round(centroid_ratio, 6), upper_half_ratio=round(upper_ratio, 6), lower_half_ratio=round(lower_ratio, 6), top_band_width=top_width, bottom_band_width=bottom_width,
-        collision_penalty=round(collision_penalty, 3), proximity_penalty=round(proximity_penalty, 3), edge_penalty=round(edge_penalty, 3), scale_penalty=round(scale_penalty, 3), offset_penalty=round(offset_penalty, 3), rotation_penalty=round(rotation_penalty, 3), orientation_penalty_or_bonus=round(orientation_bonus, 3), score=round(score, 3),
+        collision_penalty=round(collision_penalty, 3), proximity_penalty=round(proximity_penalty, 3), nose_clearance_penalty=round(nose_proximity, 3), typography_clearance_penalty=round(typography_proximity, 3), mouth_role_penalty=round(mouth_penalty, 3), edge_penalty=round(edge_penalty, 3), scale_penalty=round(scale_penalty, 3), offset_penalty=round(offset_penalty, 3), rotation_penalty=round(rotation_penalty, 3), orientation_penalty_or_bonus=round(orientation_bonus, 3), score=round(score, 3),
     )
 
 def transform_street_mask(mask: Image.Image, candidate: Candidate) -> tuple[Image.Image, bool]:
@@ -651,6 +681,27 @@ def _spacing_penalty(distance: float, hard_minimum: float, comfortable: float, w
     return weight * (1 + (hard_minimum - distance) / hard_minimum)
 
 
+def _mouth_role_penalty(offset: float, tolerance: float, weight: float) -> float:
+    excess = max(0.0, abs(offset) - tolerance)
+    return weight * min(1.0, excess / tolerance)
+
+
+def _mouth_role_descriptor(
+    street: Image.Image, nose: Image.Image, thresholds: ProximityThresholds,
+) -> tuple[float, float, float]:
+    street_pixels = _binary(street)
+    nose_bounds = _binary(nose).getbbox()
+    ys = [
+        y for y in range(street_pixels.height) for x in range(street_pixels.width)
+        if street_pixels.getpixel((x, y))
+    ]
+    if not ys or nose_bounds is None:
+        raise DiagnosticMaskError('Cannot evaluate mouth-role placement from an empty mask.')
+    centroid = sum(ys) / len(ys)
+    target = nose_bounds[1] + (nose_bounds[3] - nose_bounds[1]) * thresholds.mouth_target_nose_bounds_ratio
+    return centroid, target, centroid - target
+
+
 def _edge_margins(mask: Image.Image) -> tuple[int, int, int, int]:
     bounds = _binary(mask).getbbox()
     if bounds is None:
@@ -694,11 +745,12 @@ def _acceptable(item: CandidateResult, thresholds: ClassificationThresholds) -> 
 
 
 def _conservative_best(results: Sequence[CandidateResult], thresholds: ClassificationThresholds) -> CandidateResult:
-    best = results[0]
-    if best.orientation_deg == 0:
-        return best
-    original = next(item for item in results if item.orientation_deg == 0)
-    return best if best.score - original.score >= thresholds.orientation_change_threshold else original
+    best_score = results[0].score
+    effective_ties = [item for item in results if best_score - item.score <= thresholds.effective_tie_score]
+    return min(
+        effective_ties,
+        key=lambda item: (item.orientation_deg != 0, abs(1.0 - item.scale), abs(item.y_offset), abs(item.x_offset), item.y_offset, item.x_offset),
+    )
 
 
 def _write_mask_audit(masks: FaceAnatomyMasks, path: Path) -> None:
