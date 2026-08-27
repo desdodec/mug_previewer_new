@@ -112,6 +112,10 @@ class ClassificationThresholds:
     modest_max_offset: int = 40
     orientation_change_threshold: float = 5.0
     effective_tie_score: float = 1.0
+    # A small soft-band breach remains visually plausible, but candidates that
+    # consume more than this are not eligible as a diagnostic rescue.  This
+    # keeps a mouth-role failure from being masked by unrelated clearance.
+    max_mouth_role_penalty: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -383,9 +387,9 @@ def classify_candidate(
     if _acceptable(current, thresholds):
         return "STANDARD"
     if not _acceptable(best, thresholds):
-        return "UNSUITABLE"
+        return "UNRESOLVED"
     modest = best.scale >= thresholds.modest_min_scale and max(abs(best.x_offset), abs(best.y_offset)) <= thresholds.modest_max_offset
-    return "ADAPTED" if modest else "EXTREME"
+    return "ADAPTED" if modest else "UNRESOLVED"
 
 
 def write_diagnostic_report(analysis: CandidateAnalysis, output_dir: Path, *, top_count: int = 3) -> Path:
@@ -741,12 +745,15 @@ def _acceptable(item: CandidateResult, thresholds: ClassificationThresholds) -> 
         and item.right_eye_overlap_ratio <= thresholds.max_eye_overlap_ratio
         and item.nose_overlap_ratio <= thresholds.max_nose_overlap_ratio
         and item.typography_overlap_ratio <= thresholds.max_typography_overlap_ratio
+        and item.mouth_role_penalty <= thresholds.max_mouth_role_penalty
     )
 
 
 def _conservative_best(results: Sequence[CandidateResult], thresholds: ClassificationThresholds) -> CandidateResult:
-    best_score = results[0].score
-    effective_ties = [item for item in results if best_score - item.score <= thresholds.effective_tie_score]
+    eligible = [item for item in results if _acceptable(item, thresholds)]
+    pool = eligible or list(results)
+    best_score = max(item.score for item in pool)
+    effective_ties = [item for item in pool if best_score - item.score <= thresholds.effective_tie_score]
     return min(
         effective_ties,
         key=lambda item: (item.orientation_deg != 0, abs(1.0 - item.scale), abs(item.y_offset), abs(item.x_offset), item.y_offset, item.x_offset),

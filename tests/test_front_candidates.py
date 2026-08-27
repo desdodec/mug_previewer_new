@@ -12,6 +12,7 @@ from mug_previewer.rendering import face
 from mug_previewer.diagnostics.front_candidates import (
     Candidate,
     CandidateGrid,
+    ClassificationThresholds,
     DiagnosticMaskError,
     FaceAnatomyMasks,
     ProximityThresholds,
@@ -21,6 +22,7 @@ from mug_previewer.diagnostics.front_candidates import (
     score_candidate,
     transform_street_mask,
     audit_masks,
+    classify_candidate,
     _asset_mask,
     _render_mask,
     render_production_masks,
@@ -174,6 +176,15 @@ def test_mouth_role_tolerance_does_not_punish_small_movement() -> None:
     current = score_candidate(masks, Candidate(0, 1.0, 0, 0), proximity=thresholds)
     nearby = score_candidate(masks, Candidate(0, 1.0, 0, 4), proximity=thresholds)
     assert current.mouth_role_penalty == nearby.mouth_role_penalty == 0
+
+
+def test_severe_mouth_role_failure_is_unresolved_not_an_adaptation() -> None:
+    street = _mask({(20, 10), (21, 10)}, (200, 200))
+    nose = _mask({(20, 150), (20, 151)}, (200, 200))
+    result = score_candidate(_blank_masks(street, nose=nose), Candidate(0, 1.0, 0, 0))
+    assert result.score >= ClassificationThresholds().minimum_score
+    assert result.mouth_role_penalty > ClassificationThresholds().max_mouth_role_penalty
+    assert classify_candidate(result, result) == "UNRESOLVED"
 
 
 def test_typography_clearance_saturates_after_healthy_gap() -> None:

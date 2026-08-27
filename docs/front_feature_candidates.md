@@ -16,4 +16,4 @@ Run this against an external workflow-v6 dataset:
 
 Repeat `--street-id` to create one folder per street. Each folder contains `candidates.csv`, `mask_integrity.csv`, `current.png`, `best.png`, `alignment.png`, and `top_01.png` through `top_03.png`. PNGs are debug-only overlays: blue marks eyes, red mouth, yellow typography, and green transformed street geometry. `alignment.png` also draws street/mouth bounds and the reported nearest pair over the actual production face.
 
-The classification is diagnostic only: STANDARD accepts the current composition, ADAPTED finds an acceptable modest adjustment, EXTREME requires a larger bounded adjustment, and UNSUITABLE finds no acceptable candidate in this grid.
+The classification is diagnostic only: STANDARD accepts the current composition; ADAPTED finds an acceptable modest adjustment; UNRESOLVED means the standard has a material issue but this bounded grid has no sufficiently credible rescue (including when a candidate has excessive mouth-role error). It never changes production output.
