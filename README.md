@@ -55,6 +55,29 @@ Task 02Q keeps that face calibration intact while anchoring the title/locality b
 
 ## Rear-context rendering
 
+## Production placement triage
+
+`STANDARD`, `ADAPTED`, and `UNRESOLVED` remain diagnostic placement concepts.
+Production use adds a conservative decision layer: `AUTO_APPROVED` (with
+either `STANDARD` or `ADAPTED` placement), `MANUAL_REVIEW`, and
+`UNRENDERABLE_INPUT`. A transformed street is only automatically approved
+when canonical placement has a real defect and the bounded transform removes
+it without weakening the facial relationship. Manual review is intentional:
+the system does not attempt to force every street into automatic conversion.
+
+Use the batch command to create a provider-neutral manifest before exporting:
+
+```powershell
+python -m mug_previewer diagnostics production-triage `
+  --dataset 'E:\...\dataset' `
+  --output-dir diagnostics\production_triage
+```
+
+The CSV records the diagnostic class, production status, selected transform,
+and machine-readable reason codes. `MANUAL_REVIEW` and `UNRENDERABLE_INPUT`
+records must be explicitly handled by a caller rather than treated as an
+automatic production result.
+
 `mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.

@@ -13,6 +13,7 @@ import math
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Sequence
 
@@ -266,6 +267,44 @@ class FrontPlacementDecision:
         return self.rendered.y_offset
 
 
+class ProductionTriageStatus(str, Enum):
+    AUTO_APPROVED = 'AUTO_APPROVED'
+    MANUAL_REVIEW = 'MANUAL_REVIEW'
+    UNRENDERABLE_INPUT = 'UNRENDERABLE_INPUT'
+
+
+@dataclass(frozen=True)
+class ProductionTriageThresholds:
+    nose_hard_min_px: float = 4.0
+    nose_healthy_px: float = 8.0
+    typography_hard_min_px: float = 6.0
+    typography_healthy_px: float = 16.0
+    max_mouth_role_penalty: float = 2.0
+    material_score_improvement: float = 20.0
+    max_auto_offset_px: int = 40
+    min_auto_scale: float = 0.90
+    minimum_rotated_orientation_signal: float = 1.0
+
+
+@dataclass(frozen=True)
+class ProductionPlacementDecision:
+    triage_status: ProductionTriageStatus
+    placement_class: str | None
+    transform: CandidateResult | None
+    reason_codes: tuple[str, ...]
+    diagnostic_class: str | None
+    standard: CandidateResult | None = None
+    best_candidate: CandidateResult | None = None
+
+    @property
+    def auto_approved(self) -> bool:
+        return self.triage_status is ProductionTriageStatus.AUTO_APPROVED
+
+    @property
+    def adapted(self) -> bool:
+        return self.auto_approved and self.placement_class == 'ADAPTED'
+
+
 def generate_candidates(grid: CandidateGrid = CandidateGrid()) -> tuple[Candidate, ...]:
     """Generate reproducible candidates in lexical transform order."""
     return tuple(
@@ -339,6 +378,149 @@ def select_front_placement_from_masks(
         else "standard needs rescue but no candidate meets validated eligibility constraints"
     )
     return FrontPlacementDecision(classification, reason, classification == "ADAPTED", standard, diagnostic_selected, rendered), ranked
+
+
+def triage_production_placement(
+    diagnostic: FrontPlacementDecision,
+    ranked: Sequence[CandidateResult],
+    *,
+    thresholds: ProductionTriageThresholds = ProductionTriageThresholds(),
+) -> ProductionPlacementDecision:
+    standard = diagnostic.standard
+    standard_reasons = _production_standard_defects(standard, thresholds)
+    if not standard_reasons:
+        return ProductionPlacementDecision(
+            ProductionTriageStatus.AUTO_APPROVED, 'STANDARD', standard,
+            ('standard_healthy',), diagnostic.classification, standard, diagnostic.diagnostic_selected,
+        )
+    if diagnostic.classification == 'UNRESOLVED':
+        return ProductionPlacementDecision(
+            ProductionTriageStatus.MANUAL_REVIEW, None, None,
+            tuple((*standard_reasons, 'unresolved_geometry')), diagnostic.classification,
+            standard, diagnostic.diagnostic_selected,
+        )
+    eligible = [
+        item for item in ranked
+        if item.candidate != standard.candidate and _production_adaptation_safe(item, thresholds)
+        and _materially_fixes_standard(item, standard, thresholds)
+        and item.score - standard.score >= thresholds.material_score_improvement
+    ]
+    if not eligible:
+        return ProductionPlacementDecision(
+            ProductionTriageStatus.MANUAL_REVIEW, None, None,
+            tuple((*standard_reasons, 'adaptation_low_confidence')), diagnostic.classification,
+            standard, diagnostic.diagnostic_selected,
+        )
+    selected = max(eligible, key=lambda item: (item.score, -item.rank))
+    return ProductionPlacementDecision(
+        ProductionTriageStatus.AUTO_APPROVED, 'ADAPTED', selected,
+        tuple((*standard_reasons, 'adaptation_materially_improved')), diagnostic.classification,
+        standard, selected,
+    )
+
+
+def select_production_placement_from_masks(
+    masks: FaceAnatomyMasks,
+    *,
+    grid: CandidateGrid = CandidateGrid(),
+    weights: ScoringWeights = ScoringWeights(),
+    thresholds: ClassificationThresholds = ClassificationThresholds(),
+    production_thresholds: ProductionTriageThresholds = ProductionTriageThresholds(),
+) -> tuple[ProductionPlacementDecision, tuple[CandidateResult, ...]]:
+    diagnostic, ranked = select_front_placement_from_masks(
+        masks, grid=grid, weights=weights, thresholds=thresholds,
+    )
+    return triage_production_placement(diagnostic, ranked, thresholds=production_thresholds), ranked
+
+
+def select_production_placement(
+    street: StreetRecord,
+    *,
+    area: str = '',
+    face_markup: str | None = None,
+    base: Image.Image | None = None,
+) -> ProductionPlacementDecision:
+    if not street.glyph_path.is_file():
+        return ProductionPlacementDecision(
+            ProductionTriageStatus.UNRENDERABLE_INPUT, None, None,
+            ('missing_glyph',), None,
+        )
+    try:
+        masks = render_production_masks(street, area=area, face_markup=face_markup, base=base)
+    except (DiagnosticMaskError, ValueError) as error:
+        return ProductionPlacementDecision(
+            ProductionTriageStatus.UNRENDERABLE_INPUT, None, None,
+            (_input_failure_reason(error),), None,
+        )
+    decision, _ranked = select_production_placement_from_masks(masks)
+    return decision
+
+
+def _input_failure_reason(error: Exception) -> str:
+    message = str(error).casefold()
+    if 'static_nose' in message or 'static nose' in message:
+        return 'missing_static_nose'
+    if 'cannot fit safely' in message or 'safe width' in message:
+        return 'unsupported_title_width'
+    if 'glyph file does not exist' in message:
+        return 'missing_glyph'
+    return 'unrenderable_input'
+
+
+def _production_standard_defects(
+    item: CandidateResult,
+    thresholds: ProductionTriageThresholds,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if item.clipped:
+        reasons.append('standard_clipped')
+    if item.nose_overlap_pixels:
+        reasons.append('standard_nose_overlap')
+    elif item.nose_min_distance_px < thresholds.nose_hard_min_px:
+        reasons.append('standard_low_nose_clearance')
+    if item.typography_overlap:
+        reasons.append('standard_typography_overlap')
+    elif item.typography_min_distance_px < thresholds.typography_hard_min_px:
+        reasons.append('standard_low_typography_clearance')
+    if item.left_eye_overlap or item.right_eye_overlap:
+        reasons.append('standard_eye_overlap')
+    if item.mouth_role_penalty > thresholds.max_mouth_role_penalty:
+        reasons.append('standard_mouth_role_outlier')
+    return tuple(reasons)
+
+
+def _production_adaptation_safe(
+    item: CandidateResult,
+    thresholds: ProductionTriageThresholds,
+) -> bool:
+    return (
+        not item.clipped
+        and item.scale >= thresholds.min_auto_scale
+        and max(abs(item.x_offset), abs(item.y_offset)) <= thresholds.max_auto_offset_px
+        and not any((item.nose_overlap_pixels, item.typography_overlap, item.left_eye_overlap, item.right_eye_overlap))
+        and item.nose_min_distance_px >= thresholds.nose_healthy_px
+        and item.typography_min_distance_px >= thresholds.typography_healthy_px
+        and item.mouth_role_penalty <= thresholds.max_mouth_role_penalty
+        and (item.orientation_deg == 0 or item.orientation_penalty_or_bonus >= thresholds.minimum_rotated_orientation_signal)
+    )
+
+
+def _materially_fixes_standard(
+    candidate: CandidateResult,
+    standard: CandidateResult,
+    thresholds: ProductionTriageThresholds,
+) -> bool:
+    if abs(candidate.mouth_role_offset_px) > abs(standard.mouth_role_offset_px):
+        return False
+    if standard.nose_overlap_pixels or standard.nose_min_distance_px < thresholds.nose_hard_min_px:
+        return candidate.nose_min_distance_px >= thresholds.nose_healthy_px
+    if standard.typography_overlap or standard.typography_min_distance_px < thresholds.typography_hard_min_px:
+        return candidate.typography_min_distance_px >= thresholds.typography_healthy_px
+    if standard.left_eye_overlap or standard.right_eye_overlap:
+        return not candidate.left_eye_overlap and not candidate.right_eye_overlap
+    if standard.mouth_role_penalty > thresholds.max_mouth_role_penalty:
+        return candidate.mouth_role_penalty <= thresholds.max_mouth_role_penalty / 2
+    return False
 
 
 def score_candidate(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 from typing import Sequence
 
@@ -51,6 +52,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic_front.add_argument("--street-id", action="append", required=True)
     diagnostic_front.add_argument("--output-dir", type=Path, required=True)
     diagnostic_front.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
+    diagnostic_operations = next(action for action in diagnostics._actions if isinstance(action, argparse._SubParsersAction))
+    diagnostic_triage = diagnostic_operations.add_parser(
+        'production-triage', help='Apply conservative production placement triage and write a manifest.',
+    )
+    diagnostic_triage.add_argument('--dataset', type=Path, required=True)
+    diagnostic_triage.add_argument('--street-id', action='append')
+    diagnostic_triage.add_argument('--output-dir', type=Path, required=True)
+    diagnostic_triage.add_argument('--area', help='Display-area text; defaults to the dataset display name.')
     args = parser.parse_args(argv)
 
     if args.command == "ui":
@@ -75,6 +84,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Dataset error: {error}")
             return 2
         from .diagnostics.front_candidates import analyse_front_candidates, write_diagnostic_report
+
+        if args.operation == 'production-triage':
+            area = args.area if args.area is not None else data.display_name
+            requested = args.street_id or [street.id for street in data.streets]
+            streets = [data.get_street(street_id) for street_id in requested]
+            missing = [street_id for street_id, street in zip(requested, streets) if street is None]
+            if missing:
+                print('Street not found: {}'.format(', '.join(missing)))
+                return 2
+            from .diagnostics.front_candidates import ProductionTriageStatus, select_production_placement
+
+            args.output_dir.mkdir(parents=True, exist_ok=True)
+            manifest = args.output_dir / 'production_triage_manifest.csv'
+            counts = {status: 0 for status in ProductionTriageStatus}
+            records = []
+            for street in streets:
+                assert street is not None
+                decision = select_production_placement(street, area=area)
+                counts[decision.triage_status] += 1
+                transform = decision.transform
+                records.append({
+                    'dataset': data.display_name, 'street_id': street.id, 'street_name': street.display_name,
+                    'triage_status': decision.triage_status.value, 'diagnostic_class': decision.diagnostic_class or '',
+                    'placement': decision.placement_class or '', 'orientation': '' if transform is None else transform.orientation_deg,
+                    'scale': '' if transform is None else transform.scale, 'y_offset': '' if transform is None else transform.y_offset,
+                    'reason_codes': ';'.join(decision.reason_codes),
+                })
+            with manifest.open('w', encoding='utf-8', newline='') as handle:
+                fields = ('dataset', 'street_id', 'street_name', 'triage_status', 'diagnostic_class', 'placement', 'orientation', 'scale', 'y_offset', 'reason_codes')
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(records)
+            automatic = counts[ProductionTriageStatus.AUTO_APPROVED]
+            auto_standard = sum(1 for item in records if item.get('placement') == 'STANDARD')
+            auto_adapted = sum(1 for item in records if item.get('placement') == 'ADAPTED')
+            print(f'Processing complete. Successfully converted {automatic} streets automatically.')
+            print('AUTO_APPROVED / STANDARD: {}'.format(auto_standard))
+            print('AUTO_APPROVED / ADAPTED: {}'.format(auto_adapted))
+            print('MANUAL_REVIEW: {}'.format(counts[ProductionTriageStatus.MANUAL_REVIEW]))
+            print('UNRENDERABLE_INPUT: {}'.format(counts[ProductionTriageStatus.UNRENDERABLE_INPUT]))
+            print(f'Manifest: {manifest}')
+            return 0
 
         area = args.area if args.area is not None else data.display_name
         missing = [street_id for street_id in args.street_id if data.get_street(street_id) is None]

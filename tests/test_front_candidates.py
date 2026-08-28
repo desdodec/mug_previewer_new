@@ -16,6 +16,7 @@ from mug_previewer.diagnostics.front_candidates import (
     DiagnosticMaskError,
     FaceAnatomyMasks,
     ProximityThresholds,
+    ProductionTriageStatus,
     generate_candidates,
     nearest_foreground_distance,
     overlap_pixels,
@@ -24,6 +25,9 @@ from mug_previewer.diagnostics.front_candidates import (
     audit_masks,
     classify_candidate,
     select_front_placement_from_masks,
+    select_production_placement_from_masks,
+    triage_production_placement,
+    select_production_placement,
     _asset_mask,
     _render_mask,
     render_production_masks,
@@ -317,6 +321,58 @@ def test_shared_decision_retains_standard_when_no_candidate_is_eligible() -> Non
     assert decision.classification == "UNRESOLVED"
     assert decision.diagnostic_selected.candidate == Candidate(0, 1.0, 0, 0)
     assert decision.rendered.candidate == Candidate(0, 1.0, 0, 0)
+
+
+def test_production_triage_auto_approves_a_healthy_standard() -> None:
+    street = _mask({(100, 120)}, (200, 200))
+    decision, _results = select_production_placement_from_masks(
+        _blank_masks(street, nose=_mask({(100, 100)}, (200, 200))),
+    )
+    assert decision.triage_status is ProductionTriageStatus.AUTO_APPROVED
+    assert decision.placement_class == 'STANDARD'
+    assert decision.reason_codes == ('standard_healthy',)
+
+
+def test_production_triage_requires_material_improvement_before_adapting() -> None:
+    street = _mask({(x, 100) for x in range(100, 105)}, (200, 200))
+    decision, _results = select_production_placement_from_masks(
+        _blank_masks(street, nose=_mask({(x, y) for x in range(100, 105) for y in (100, 160)}, (200, 200))),
+        grid=CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0, 40)),
+    )
+    assert decision.triage_status is ProductionTriageStatus.AUTO_APPROVED
+    assert decision.placement_class == 'ADAPTED'
+    assert decision.transform is not None and decision.transform.y_offset == 40
+    assert 'standard_nose_overlap' in decision.reason_codes
+    assert 'adaptation_materially_improved' in decision.reason_codes
+
+
+def test_production_triage_sends_marginal_rescue_to_manual_review() -> None:
+    street = _mask({(100, 100)}, (200, 200))
+    decision, _results = select_production_placement_from_masks(
+        _blank_masks(street, nose=_mask({(100, 100)}, (200, 200))),
+        grid=CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0, 20)),
+    )
+    assert decision.triage_status is ProductionTriageStatus.MANUAL_REVIEW
+    assert decision.placement_class is None
+    assert decision.reason_codes == ('standard_nose_overlap', 'adaptation_low_confidence')
+
+
+def test_production_triage_surfaces_diagnostic_unresolved_geometry() -> None:
+    street = _mask({(100, 10)}, (200, 200))
+    diagnostic, ranked = select_front_placement_from_masks(
+        _blank_masks(street, nose=_mask({(100, 150)}, (200, 200))),
+        grid=CandidateGrid(orientations_deg=(0,), scales=(1.0,), x_offsets=(0,), y_offsets=(0,)),
+    )
+    decision = triage_production_placement(diagnostic, ranked)
+    assert decision.triage_status is ProductionTriageStatus.MANUAL_REVIEW
+    assert 'unresolved_geometry' in decision.reason_codes
+
+
+def test_production_triage_classifies_missing_glyph_as_unrenderable_input(tmp_path: Path) -> None:
+    street = StreetRecord('missing', None, 'Missing Road', 'Missing Road', tmp_path / 'missing.svg')
+    decision = select_production_placement(street)
+    assert decision.triage_status is ProductionTriageStatus.UNRENDERABLE_INPUT
+    assert decision.reason_codes == ('missing_glyph',)
 
 
 def test_shared_decision_is_deterministic_and_preserves_effective_tie_standard() -> None:
