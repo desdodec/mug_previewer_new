@@ -31,11 +31,11 @@ REAR_PANEL_BASE_SCALE = 1.00
 REAR_PANEL_SCALE = 1.20
 REAR_MAP_BASE_HEIGHT_RATIO = 0.70
 REAR_MAP_HEIGHT_RATIO = REAR_MAP_BASE_HEIGHT_RATIO * (REAR_PANEL_SCALE / REAR_PANEL_BASE_SCALE)
-# A small type-only reduction leaves the required credit plainly legible while
-# keeping it visually tertiary to the highlighted street and map context.
-ATTRIBUTION_FONT_SIZE = 12.0
+# Keep the required credit plainly legible while making it visually secondary
+# to the highlighted street and map context.
+ATTRIBUTION_FONT_SIZE = 9.6
 ATTRIBUTION_LINE_HEIGHT = 16.5
-ATTRIBUTION_MAP_GAP = 11.0
+ATTRIBUTION_MAP_GAP = 17.0
 ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 # Visual-only adjustment to the already-framed highlighted street.  It does
 # not affect the underlying street path, crop, map scale or palette.

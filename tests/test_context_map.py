@@ -16,7 +16,9 @@ from mug_previewer.datasets.models import MetricBounds
 from mug_previewer.datasets.workflow_v6 import metric_bounds_from_raster_crop
 from mug_previewer.rendering.context_map import (
     ATTRIBUTION_FONT_SIZE,
+    ATTRIBUTION_LINE_HEIGHT,
     ATTRIBUTION_LINES,
+    ATTRIBUTION_MAP_GAP,
     ContextRenderError,
     ContextRenderOptions,
     REAR_MAP_BASE_HEIGHT_RATIO,
@@ -110,10 +112,29 @@ def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None
     assert map_x == pytest.approx((panel_width - map_width) / 2)
     assert map_x >= 0 and map_y >= 0
     assert map_x + map_width <= panel_width
-    assert attribution_y > map_y + map_height
-    assert attribution_y + 16.5 <= panel_height
-    assert ATTRIBUTION_FONT_SIZE == pytest.approx(12.0)
+    assert attribution_y - (map_y + map_height) == pytest.approx(17.0)
+    assert attribution_y + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES) <= panel_height
+    assert ATTRIBUTION_FONT_SIZE == pytest.approx(9.6)
+    assert ATTRIBUTION_FONT_SIZE == pytest.approx(12.0 * 0.80)
+    assert ATTRIBUTION_MAP_GAP > 11.0
     assert ATTRIBUTION_LINES == ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
+
+
+def test_attribution_renders_below_the_map_without_clipping(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    image = render_context_map_result(data, data.get_street("0001")).image
+    _, map_y, _, map_height, _ = _rear_panel_layout(*image.size)
+    map_bottom = round(map_y + map_height)
+    attribution_pixels = [
+        (x, y)
+        for y in range(map_bottom, image.height)
+        for x in range(image.width)
+        if image.getpixel((x, y))[3] > 0
+    ]
+
+    assert attribution_pixels
+    assert min(y for _, y in attribution_pixels) > map_bottom
+    assert max(y for _, y in attribution_pixels) < image.height - 1
 
 
 def test_final_rear_highlight_scales_width_without_changing_geometry_or_colour() -> None:
