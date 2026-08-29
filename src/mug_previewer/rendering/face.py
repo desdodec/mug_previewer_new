@@ -19,6 +19,7 @@ import cairosvg
 from PIL import Image, ImageColor
 
 from ..datasets.models import StreetRecord
+from ..manual import ManualPlacementOverride, ManualResolutionStatus
 from .native import face_policy as native
 
 SOURCE_CANVAS_PX = (990, 462)
@@ -59,6 +60,7 @@ class FaceRenderOptions:
     title_locality_gap_delta: float = FRONT_TITLE_LOCALITY_GAP_DELTA_PX
     typography_block_y_offset: float = FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
     street_feature_stroke_multiplier: float = STREET_STROKE_MULTIPLIER
+    manual_override: ManualPlacementOverride | None = None
 
 
 @dataclass(frozen=True)
@@ -92,24 +94,39 @@ def _render_face_with_decision(
     panel_center = width * FRONT_CENTER_RATIO
     face_markup = _render_native_face(glyph, panel_center, width, height, options.street_feature_stroke_multiplier)
     standard = _render_face_standard(street, options, face_markup=face_markup)
-    from ..diagnostics.front_candidates import render_production_masks, select_production_placement_from_masks, transform_street_mask
+    from ..diagnostics.front_candidates import Candidate, render_production_masks, select_production_placement_from_masks, transform_street_mask
 
     masks = render_production_masks(street, area=options.area, face_markup=face_markup, base=standard)
     decision, _ranked = select_production_placement_from_masks(masks)
+    override = options.manual_override
+    if override is not None:
+        if not override.approved:
+            raise FaceRenderError("Only an explicitly approved manual override may be rendered.")
+        if override.status is ManualResolutionStatus.APPROVED_STANDARD:
+            return standard, override
+        candidate = Candidate(override.orientation_deg, override.scale, 0, override.y_offset)
+        return _render_transformed_street(standard, masks, candidate), override
     if not decision.adapted:
         return standard, decision
+    # A production decision stores its approved rescue as ``transform``.
+    # ``rendered`` belongs only to the diagnostic decision type.
+    assert decision.transform is not None
+    return _render_transformed_street(standard, masks, decision.transform.candidate), decision
+
+
+def _render_transformed_street(standard: Image.Image, masks: object, candidate: object) -> Image.Image:
+    """Repaint a constrained placement using the same production mask pipeline."""
+    from ..diagnostics.front_candidates import transform_street_mask
+
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     feature = ImageColor.getrgb(palette.feature) + (255,)
     adapted = standard.copy()
     adapted.paste((255, 255, 255, 255), mask=masks.street_mouth)
     for protected in (masks.left_eye, masks.right_eye, masks.static_nose, masks.typography):
         adapted.paste(feature, mask=protected)
-    # A production decision stores its approved rescue as ``transform``.
-    # ``rendered`` belongs only to the diagnostic decision type.
-    assert decision.transform is not None
-    street_mask, _clipped = transform_street_mask(masks.street_mouth, decision.transform.candidate)
+    street_mask, _clipped = transform_street_mask(masks.street_mouth, candidate)
     adapted.paste(feature, mask=street_mask)
-    return adapted, decision
+    return adapted
 
 def _render_face_standard(
     street: StreetRecord,

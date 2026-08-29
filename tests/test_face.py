@@ -9,6 +9,7 @@ from PIL import Image
 
 from mug_previewer.cli import main
 from mug_previewer.datasets.loader import load_dataset
+from mug_previewer.manual import ManualPlacementOverride
 from mug_previewer.rendering.face import (
     AREA_Y_RATIO,
     FRONT_GROUP_SCALE,
@@ -134,3 +135,15 @@ def test_healthy_fixture_render_remains_byte_identical_to_standard_rendering(tmp
     street = data.get_street('0001')
     options = FaceRenderOptions(area=data.display_name)
     assert render_face(street, options).tobytes() == _render_face_standard(street, options).tobytes()
+
+
+def test_approved_manual_override_uses_exact_constrained_transform(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    standard = render_face(street, FaceRenderOptions(area=data.display_name))
+    override = ManualPlacementOverride.approved_transform(
+        data.id, street.id, street.display_name, orientation_deg=180, scale=0.95, y_offset=20,
+    )
+    edited = render_face(street, FaceRenderOptions(area=data.display_name, manual_override=override))
+    assert edited.size == FRONT_PANEL_PX
+    assert edited.tobytes() != standard.tobytes()

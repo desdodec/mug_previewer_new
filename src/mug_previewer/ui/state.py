@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -13,6 +13,7 @@ from ..design import DesignOptions, build_render_options
 from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset, StreetRecord
 from ..exporting import save_provider_export
+from ..manual import approved_override_for_street, load_manual_overrides
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
@@ -185,10 +186,14 @@ def render_preview_pair(
 ) -> PreviewPair:
     """Render one canonical wrap, then derive both fixed production mockups."""
     design = design_options or DesignOptions()
+    options = build_render_options(design, area=dataset.display_name)
+    override = approved_override_for_street(dataset, street, load_manual_overrides(), area=dataset.display_name)
+    if override is not None:
+        options = replace(options, face_options=replace(options.face_options, manual_override=override))
     rendered = wrap_renderer(
         dataset,
         street,
-        build_render_options(design, area=dataset.display_name),
+        options,
     )
     if isinstance(rendered, WrapRenderResult):
         wrap, framing_mode = rendered.image, rendered.context.framing_mode
@@ -218,7 +223,11 @@ def export_provider_png(
 ) -> Path:
     """Freshly render current UI state and save it through one provider profile."""
     design = design_options or DesignOptions()
-    wrap = wrap_renderer(dataset, street, build_render_options(design, area=dataset.display_name))
+    render_options = build_render_options(design, area=dataset.display_name)
+    override = approved_override_for_street(dataset, street, load_manual_overrides(), area=dataset.display_name)
+    if override is not None:
+        render_options = replace(render_options, face_options=replace(render_options.face_options, manual_override=override))
+    wrap = wrap_renderer(dataset, street, render_options)
     if isinstance(wrap, WrapRenderResult):
         wrap = wrap.image
     return exporter(wrap, profile_lookup(profile_id), Path(destination))

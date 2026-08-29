@@ -12,6 +12,7 @@ from typing import Iterable
 from PIL import Image, ImageColor, ImageDraw
 
 from ..datasets.models import StreetRecord
+from ..manual import ManualOverrideStore, ManualPlacementOverride, ManualResolutionStatus
 from ..rendering import face
 from ..rendering.native import face_policy as native
 from .front_candidates import (
@@ -33,6 +34,7 @@ MANIFEST_FIELDS = (
     "candidate_nose_overlap", "candidate_nose_clearance",
     "standard_typography_clearance", "candidate_typography_clearance",
     "comparison_image",
+    "resolution_status", "manual_orientation", "manual_scale", "manual_y_offset",
 )
 
 
@@ -49,6 +51,7 @@ class ManualReviewItem:
     best_candidate: CandidateResult | None
     reason_codes: tuple[str, ...]
     comparison_artifact: Path | None = None
+    manual_override: ManualPlacementOverride | None = None
 
     @property
     def candidate(self) -> CandidateResult:
@@ -65,10 +68,14 @@ class ManualReviewBatch:
     comparison_dir: Path
     summary_path: Path
     unrenderable_path: Path
+    manual_standard: int = 0
+    manual_override: int = 0
+    pending_manual_review: int = 0
 
 
 def make_manual_review_item(
     dataset: str, street: StreetRecord, decision: ProductionPlacementDecision,
+    manual_override: ManualPlacementOverride | None = None,
 ) -> ManualReviewItem | None:
     """Make a review item only for a genuine MANUAL_REVIEW outcome."""
     if decision.triage_status is not ProductionTriageStatus.MANUAL_REVIEW:
@@ -78,7 +85,7 @@ def make_manual_review_item(
     return ManualReviewItem(
         dataset, street.id, street.display_name, decision.triage_status,
         decision.diagnostic_class, decision.standard, decision.best_candidate,
-        decision.reason_codes,
+        decision.reason_codes, manual_override=manual_override,
     )
 
 
@@ -89,6 +96,7 @@ def comparison_filename(item: ManualReviewItem) -> str:
 
 def write_manual_review_batch(
     dataset: str, streets: Iterable[StreetRecord], output_dir: Path, *, area: str = "",
+    override_store: ManualOverrideStore | None = None, include_resolved: bool = False,
 ) -> ManualReviewBatch:
     """Triage all input, retaining review and unrenderable paths separately."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -97,16 +105,28 @@ def write_manual_review_batch(
     counts = {status: 0 for status in ProductionTriageStatus}
     auto_standard = 0
     auto_adapted = 0
+    manual_standard = 0
+    manual_override = 0
+    pending_manual_review = 0
     items: list[ManualReviewItem] = []
     unrenderable_rows: list[dict[str, str]] = []
 
+    override_store = override_store or ManualOverrideStore()
     for street in streets:
         decision = select_production_placement(street, area=area)
         counts[decision.triage_status] += 1
         auto_standard += decision.placement_class == "STANDARD"
         auto_adapted += decision.placement_class == "ADAPTED"
-        item = make_manual_review_item(dataset, street, decision)
+        item = make_manual_review_item(dataset, street, decision, override_store.get(dataset, street.id))
         if item is not None:
+            if item.manual_override is None or not item.manual_override.approved:
+                pending_manual_review += 1
+            elif item.manual_override.status is ManualResolutionStatus.APPROVED_STANDARD:
+                manual_standard += 1
+            else:
+                manual_override += 1
+            if item.manual_override is not None and item.manual_override.approved and not include_resolved:
+                continue
             artifact = comparison_dir / comparison_filename(item)
             write_comparison_artifact(street, item, artifact, area=area)
             items.append(replace(item, comparison_artifact=artifact))
@@ -132,10 +152,14 @@ def write_manual_review_batch(
         "comparison_artifacts": sum(item.comparison_artifact is not None for item in ordered_items),
         "auto_standard": auto_standard,
         "auto_adapted": auto_adapted,
+        "manual_standard": manual_standard,
+        "manual_override": manual_override,
+        "pending_manual_review": pending_manual_review,
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return ManualReviewBatch(
         ordered_items, counts, auto_standard, auto_adapted,
         manifest_path, comparison_dir, summary_path, unrenderable_path,
+        manual_standard, manual_override, pending_manual_review,
     )
 
 
@@ -196,6 +220,7 @@ def _candidate_text(label: str, result: CandidateResult) -> str:
 
 def _manifest_row(item: ManualReviewItem, output_dir: Path) -> dict[str, str | float | int]:
     standard, candidate = item.standard_candidate, item.candidate
+    override = item.manual_override
     comparison = "" if item.comparison_artifact is None else item.comparison_artifact.relative_to(output_dir).as_posix()
     return {
         "dataset": item.dataset, "street_id": item.street_id, "street_name": item.street_name,
@@ -214,6 +239,10 @@ def _manifest_row(item: ManualReviewItem, output_dir: Path) -> dict[str, str | f
         "standard_typography_clearance": standard.typography_min_distance_px,
         "candidate_typography_clearance": candidate.typography_min_distance_px,
         "comparison_image": comparison,
+        "resolution_status": "pending" if override is None else override.status.value,
+        "manual_orientation": "" if override is None or override.orientation_deg is None else override.orientation_deg,
+        "manual_scale": "" if override is None or override.scale is None else override.scale,
+        "manual_y_offset": "" if override is None or override.y_offset is None else override.y_offset,
     }
 
 

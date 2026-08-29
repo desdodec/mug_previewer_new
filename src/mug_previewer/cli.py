@@ -35,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     face.add_argument("--street-id", required=True)
     face.add_argument("--output", type=Path, required=True)
     face.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
+    face.add_argument("--manual-overrides", type=Path, default=Path("data") / "manual_overrides.json")
     context = render.add_parser("context")
     context.add_argument("--dataset", type=Path, required=True)
     context.add_argument("--street-id", required=True)
@@ -44,6 +45,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     wrap.add_argument("--street-id", required=True)
     wrap.add_argument("--output", type=Path, required=True)
     wrap.add_argument("--area", help="Display-area text; defaults to the dataset display name.")
+    wrap.add_argument("--manual-overrides", type=Path, default=Path("data") / "manual_overrides.json")
     diagnostics = commands.add_parser("diagnostics", help="Run experimental developer diagnostics.")
     diagnostic_front = diagnostics.add_subparsers(dest="operation", required=True).add_parser(
         "front-candidates", help="Score bounded street-feature candidates; does not alter rendering.",
@@ -67,11 +69,42 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic_review.add_argument('--street-id', action='append')
     diagnostic_review.add_argument('--output-dir', type=Path, required=True)
     diagnostic_review.add_argument('--area', help='Display-area text; defaults to the dataset display name.')
+    diagnostic_review.add_argument('--overrides', type=Path, default=Path("data") / "manual_overrides.json")
+    diagnostic_review.add_argument('--include-resolved', action='store_true')
+    manual = commands.add_parser("manual-review", help="Resolve MANUAL_REVIEW streets with constrained placements.")
+    manual_operations = manual.add_subparsers(dest="operation", required=True)
+    for name in ("list", "show", "approve-standard", "approve-transform", "clear"):
+        child = manual_operations.add_parser(name)
+        child.add_argument("--dataset", type=Path, required=True)
+        child.add_argument("--overrides", type=Path, default=Path("data") / "manual_overrides.json")
+    manual_operations.choices["show"].add_argument("--street-id", required=True)
+    manual_operations.choices["approve-standard"].add_argument("--street-id", required=True)
+    manual_operations.choices["approve-standard"].add_argument("--note")
+    transform = manual_operations.choices["approve-transform"]
+    transform.add_argument("--street-id", required=True)
+    transform.add_argument("--orientation", type=int, required=True)
+    transform.add_argument("--scale", type=float, required=True)
+    transform.add_argument("--y-offset", type=int, required=True)
+    transform.add_argument("--note")
+    manual_operations.choices["clear"].add_argument("--street-id", required=True)
+    manual_operations.choices["list"].add_argument("--include-resolved", action="store_true")
+    preview_manual = manual_operations.add_parser("preview")
+    preview_manual.add_argument("--dataset", type=Path, required=True)
+    preview_manual.add_argument("--overrides", type=Path, default=Path("data") / "manual_overrides.json")
+    preview_manual.add_argument("--street-id", required=True)
+    preview_manual.add_argument("--orientation", type=int)
+    preview_manual.add_argument("--scale", type=float)
+    preview_manual.add_argument("--y-offset", type=int)
+    preview_manual.add_argument("--load-diagnostic", action="store_true")
+    preview_manual.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
     if args.command == "ui":
         from .ui.app import launch
         return launch(dataset_root=args.dataset_root)
+
+    if args.command == "manual-review":
+        return _run_manual_review_command(args)
 
     if args.command == "datasets":
         root = load_settings(dataset_root=args.dataset_root).dataset_root
@@ -102,19 +135,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 2
             from .diagnostics.front_candidates import ProductionTriageStatus
             from .diagnostics.manual_review import write_manual_review_batch
+            from .manual import ManualOverrideError, load_manual_overrides
 
-            batch = write_manual_review_batch(
-                data.display_name, (street for street in streets if street is not None),
-                args.output_dir, area=area,
-            )
+            try:
+                batch = write_manual_review_batch(
+                    data.id, (street for street in streets if street is not None), args.output_dir, area=area,
+                    override_store=load_manual_overrides(args.overrides), include_resolved=args.include_resolved,
+                )
+            except ManualOverrideError as error:
+                print(f'Manual override error: {error}')
+                return 2
             print('Production triage complete.')
             print()
             print('AUTO_APPROVED')
             print('  STANDARD: {}'.format(batch.auto_standard))
             print('  ADAPTED: {}'.format(batch.auto_adapted))
             print()
+            print('MANUALLY_APPROVED')
+            print('  STANDARD: {}'.format(batch.manual_standard))
+            print('  OVERRIDE: {}'.format(batch.manual_override))
+            print()
             print('MANUAL_REVIEW')
-            print('  {}'.format(batch.counts[ProductionTriageStatus.MANUAL_REVIEW]))
+            print('  PENDING: {}'.format(batch.pending_manual_review))
             print()
             print('UNRENDERABLE_INPUT')
             print('  {}'.format(batch.counts[ProductionTriageStatus.UNRENDERABLE_INPUT]))
@@ -205,13 +247,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         if street is None:
             print(f"Street not found: {args.street_id}")
             return 2
+        area = args.area if hasattr(args, "area") and args.area is not None else data.display_name
+        manual_override = None
+        if args.operation in {"face", "wrap"}:
+            from .manual import ManualOverrideError, approved_override_for_street, load_manual_overrides
+            try:
+                manual_override = approved_override_for_street(
+                    data, street, load_manual_overrides(args.manual_overrides), area=area,
+                )
+            except ManualOverrideError as error:
+                print(f"Manual override error: {error}")
+                return 2
         if args.operation == "wrap":
             from .diagnostics.front_candidates import ProductionTriageStatus, select_production_placement
 
-            decision = select_production_placement(
-                street, area=args.area if args.area is not None else data.display_name,
-            )
-            if decision.triage_status is not ProductionTriageStatus.AUTO_APPROVED:
+            decision = select_production_placement(street, area=area)
+            if decision.triage_status is not ProductionTriageStatus.AUTO_APPROVED and manual_override is None:
                 print(
                     f"Production triage: {decision.triage_status.value}; "
                     "final automatic wrap export was not produced."
@@ -220,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 2
         try:
             if args.operation == "face":
-                image = render_face(street, FaceRenderOptions(area=args.area if args.area is not None else data.display_name))
+                image = render_face(street, FaceRenderOptions(area=area, manual_override=manual_override))
             elif args.operation == "context":
                 context_result = render_context_map_result(data, street)
                 image = context_result.image
@@ -228,7 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 wrap_result = render_wrap_result(
                     data,
                     street,
-                    WrapRenderOptions(face_options=FaceRenderOptions(area=args.area if args.area is not None else data.display_name)),
+                    WrapRenderOptions(face_options=FaceRenderOptions(area=area, manual_override=manual_override)),
                 )
                 image = wrap_result.image
         except (FaceRenderError, ContextRenderError, WrapRenderError) as error:
@@ -289,3 +340,108 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _diagnostic_slug(value: str) -> str:
     """Use a predictable folder name without adding a diagnostics dependency."""
     return "".join(character.lower() if character.isalnum() else "_" for character in value).strip("_") or "street"
+
+
+def _run_manual_review_command(args: argparse.Namespace) -> int:
+    from .diagnostics.front_candidates import ProductionTriageStatus, select_production_placement
+    from .manual import (
+        ManualOverrideError, ManualPlacementOverride, clear_manual_override,
+        load_manual_overrides, save_manual_override,
+    )
+
+    try:
+        data = load_dataset(args.dataset)
+        store = load_manual_overrides(args.overrides)
+    except (DatasetLoadError, ManualOverrideError) as error:
+        print(f"Manual-review error: {error}")
+        return 2
+
+    if args.operation == "list":
+        rows = []
+        for street in data.streets:
+            decision = select_production_placement(street, area=data.display_name)
+            if decision.triage_status is not ProductionTriageStatus.MANUAL_REVIEW:
+                continue
+            override = store.get(data.id, street.id)
+            if override is not None and override.approved and not args.include_resolved:
+                continue
+            rows.append((street, override, decision))
+        print(f"Manual review queue: {len(rows)}")
+        for street, override, _decision in rows:
+            status = "pending" if override is None else override.status.value
+            print(f"{street.id}  {street.display_name}  {status}")
+        return 0
+
+    street = data.get_street(args.street_id)
+    if street is None:
+        print(f"Street not found: {args.street_id}")
+        return 2
+    decision = select_production_placement(street, area=data.display_name)
+    if decision.triage_status is ProductionTriageStatus.UNRENDERABLE_INPUT:
+        print(f"Manual-review error: unrenderable input ({', '.join(decision.reason_codes)})")
+        return 2
+    if decision.triage_status is not ProductionTriageStatus.MANUAL_REVIEW:
+        print("Manual-review error: only MANUAL_REVIEW streets may receive a human override.")
+        return 2
+
+    if args.operation == "show":
+        current = store.get(data.id, street.id)
+        candidate = decision.best_candidate or decision.standard
+        assert decision.standard is not None and candidate is not None
+        print(f"Street: {data.display_name} / {data.id} / {street.id} / {street.display_name}")
+        print(f"STANDARD: 0 deg, 1.00, Y+0")
+        print(f"Best diagnostic: {candidate.orientation_deg} deg, {candidate.scale:.2f}, Y{candidate.y_offset:+d}")
+        print(f"Reason codes: {', '.join(decision.reason_codes)}")
+        print(f"Resolution: {'pending' if current is None else current.status.value}")
+        return 0
+
+    try:
+        if args.operation == "approve-standard":
+            override = ManualPlacementOverride.approved_standard(data.id, street.id, street.display_name, note=args.note)
+            save_manual_override(override, args.overrides)
+        elif args.operation == "approve-transform":
+            override = ManualPlacementOverride.approved_transform(
+                data.id, street.id, street.display_name, orientation_deg=args.orientation,
+                scale=args.scale, y_offset=args.y_offset, note=args.note,
+            )
+            save_manual_override(override, args.overrides)
+        elif args.operation == "clear":
+            clear_manual_override(data.id, street.id, args.overrides)
+            print(f"Cleared manual override: {data.id} / {street.id} / {street.display_name}")
+            return 0
+        else:
+            return _render_manual_preview(args, data, street, decision)
+    except ManualOverrideError as error:
+        print(f"Manual-review error: {error}")
+        return 2
+    print(f"Saved manual override: {data.id} / {street.id} / {street.display_name}")
+    print(f"{override.orientation_deg} deg, {override.scale:.2f}, Y{override.y_offset:+d}")
+    return 0
+
+
+def _render_manual_preview(args: argparse.Namespace, data: object, street: object, decision: object) -> int:
+    """Render an unsaved constrained edit with the production face renderer."""
+    from .manual import ManualOverrideError, ManualPlacementOverride
+
+    if args.load_diagnostic:
+        candidate = decision.best_candidate or decision.standard
+        orientation, scale, y_offset = candidate.orientation_deg, candidate.scale, candidate.y_offset
+    else:
+        values = (args.orientation, args.scale, args.y_offset)
+        if any(value is None for value in values):
+            print("Manual-review error: preview requires orientation, scale, and y-offset, or --load-diagnostic.")
+            return 2
+        orientation, scale, y_offset = args.orientation, args.scale, args.y_offset
+    try:
+        override = ManualPlacementOverride.approved_transform(
+            data.id, street.id, street.display_name,
+            orientation_deg=orientation, scale=scale, y_offset=y_offset,
+        )
+        image = render_face(street, FaceRenderOptions(area=data.display_name, manual_override=override))
+    except (ManualOverrideError, FaceRenderError) as error:
+        print(f"Manual-review error: {error}")
+        return 2
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    image.save(args.output, format="PNG", dpi=(300, 300))
+    print(f"Rendered manual preview: {args.output}")
+    return 0

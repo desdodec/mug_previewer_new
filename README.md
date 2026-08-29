@@ -55,6 +55,50 @@ Task 02Q keeps that face calibration intact while anchoring the title/locality b
 
 ## Rear-context rendering
 
+## Manual face review and durable overrides
+
+Manual overrides live outside generated `diagnostics/` in the versioned JSON
+store `data/manual_overrides.json`.  They are keyed by the stable workflow
+dataset ID plus street ID; the street name is audit-only.  Saving is atomic and
+one save deterministically replaces the previous decision for that key.
+
+Automatic diagnostics, production triage, and human decisions remain separate.
+Production first rejects malformed input, then applies an explicitly approved
+manual decision, then falls back to automatic triage.  A pending review item
+never enters final automatic wrap output.
+
+The editor is a focused CLI workflow using the production face renderer.  It
+allows only `0`/`180` degrees, scales `1.00, 0.95, 0.90, 0.85, 0.80`, and Y
+offsets `-60` through `+60` in 20 px steps.  There is no free placement or
+geometry editing.
+
+```powershell
+# Pending review items (use --include-resolved to audit prior decisions)
+python -m mug_previewer manual-review list --dataset 'E:\...\dataset'
+
+# Inspect STANDARD, diagnostic candidate, reason codes, and current state
+python -m mug_previewer manual-review show --dataset 'E:\...\dataset' --street-id 0001
+
+# Render an unsaved production-faithful edit, or use --load-diagnostic
+python -m mug_previewer manual-review preview --dataset 'E:\...\dataset' --street-id 0001 `
+  --orientation 180 --scale 0.95 --y-offset 20 --output output\0001_manual_preview.png
+
+# Persist either canonical STANDARD or the reviewed transform
+python -m mug_previewer manual-review approve-standard --dataset 'E:\...\dataset' --street-id 0001
+python -m mug_previewer manual-review approve-transform --dataset 'E:\...\dataset' --street-id 0001 `
+  --orientation 180 --scale 0.95 --y-offset 20 --note 'Raised mouth for nose clearance.'
+
+# Return the street to pending review
+python -m mug_previewer manual-review clear --dataset 'E:\...\dataset' --street-id 0001
+```
+
+`render face` and `render wrap` read this store by default (override it with
+`--manual-overrides`).  The same approved front panel therefore flows unchanged
+into canonical wrap rendering, mug previews, Inkthreadable, and Printify
+exports.  The manual-review batch summary separately reports automatic
+STANDARD/ADAPTED, manually approved STANDARD/OVERRIDE, pending review, and
+unrenderable input.
+
 ## Production placement triage
 
 `STANDARD`, `ADAPTED`, and `UNRESOLVED` remain diagnostic placement concepts.
