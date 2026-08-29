@@ -60,6 +60,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic_triage.add_argument('--street-id', action='append')
     diagnostic_triage.add_argument('--output-dir', type=Path, required=True)
     diagnostic_triage.add_argument('--area', help='Display-area text; defaults to the dataset display name.')
+    diagnostic_review = diagnostic_operations.add_parser(
+        'manual-review', help='Generate a human-review queue with comparison artifacts.',
+    )
+    diagnostic_review.add_argument('--dataset', type=Path, required=True)
+    diagnostic_review.add_argument('--street-id', action='append')
+    diagnostic_review.add_argument('--output-dir', type=Path, required=True)
+    diagnostic_review.add_argument('--area', help='Display-area text; defaults to the dataset display name.')
     args = parser.parse_args(argv)
 
     if args.command == "ui":
@@ -84,6 +91,47 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Dataset error: {error}")
             return 2
         from .diagnostics.front_candidates import analyse_front_candidates, write_diagnostic_report
+
+        if args.operation == 'manual-review':
+            area = args.area if args.area is not None else data.display_name
+            requested = args.street_id or [street.id for street in data.streets]
+            streets = [data.get_street(street_id) for street_id in requested]
+            missing = [street_id for street_id, street in zip(requested, streets) if street is None]
+            if missing:
+                print('Street not found: {}'.format(', '.join(missing)))
+                return 2
+            from .diagnostics.front_candidates import ProductionTriageStatus
+            from .diagnostics.manual_review import write_manual_review_batch
+
+            batch = write_manual_review_batch(
+                data.display_name, (street for street in streets if street is not None),
+                args.output_dir, area=area,
+            )
+            print('Production triage complete.')
+            print()
+            print('AUTO_APPROVED')
+            print('  STANDARD: {}'.format(batch.auto_standard))
+            print('  ADAPTED: {}'.format(batch.auto_adapted))
+            print()
+            print('MANUAL_REVIEW')
+            print('  {}'.format(batch.counts[ProductionTriageStatus.MANUAL_REVIEW]))
+            print()
+            print('UNRENDERABLE_INPUT')
+            print('  {}'.format(batch.counts[ProductionTriageStatus.UNRENDERABLE_INPUT]))
+            print()
+            print('Manual review artifacts:')
+            print(batch.comparison_dir)
+            print()
+            print('Manual review manifest:')
+            print(batch.manifest_path)
+            print('Summary:')
+            print(batch.summary_path)
+            if batch.items:
+                print()
+                print('Manual review required:')
+                for item in batch.items:
+                    print('{} / {} / {}'.format(item.dataset, item.street_id, item.street_name))
+            return 0
 
         if args.operation == 'production-triage':
             area = args.area if args.area is not None else data.display_name
@@ -157,6 +205,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         if street is None:
             print(f"Street not found: {args.street_id}")
             return 2
+        if args.operation == "wrap":
+            from .diagnostics.front_candidates import ProductionTriageStatus, select_production_placement
+
+            decision = select_production_placement(
+                street, area=args.area if args.area is not None else data.display_name,
+            )
+            if decision.triage_status is not ProductionTriageStatus.AUTO_APPROVED:
+                print(
+                    f"Production triage: {decision.triage_status.value}; "
+                    "final automatic wrap export was not produced."
+                )
+                print(f"Reason codes: {', '.join(decision.reason_codes)}")
+                return 2
         try:
             if args.operation == "face":
                 image = render_face(street, FaceRenderOptions(area=args.area if args.area is not None else data.display_name))

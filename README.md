@@ -78,6 +78,29 @@ and machine-readable reason codes. `MANUAL_REVIEW` and `UNRENDERABLE_INPUT`
 records must be explicitly handled by a caller rather than treated as an
 automatic production result.
 
+## Manual-review handoff
+
+`MANUAL_REVIEW` is an intentional production outcome, not a failure. Generate
+the human queue directly from a dataset:
+
+```powershell
+python -m mug_previewer diagnostics manual-review `
+  --dataset 'E:\...\dataset' `
+  --output-dir diagnostics\task_03j_manual_review
+```
+
+This writes `manual_review_manifest.csv`, `summary.json`, an explicit
+`unrenderable_input.csv`, and one deterministic comparison PNG per review
+item in `comparisons\`. Each PNG shows canonical STANDARD and the best
+diagnostic candidate, both labelled as not automatically approved. The manifest
+retains the candidate's orientation, scale, and offsets alongside diagnostics
+and reason codes, so a future human editor can choose a bounded transform and
+re-render it deterministically.
+
+The automatic production path contains only `AUTO_APPROVED` STANDARD or
+ADAPTED decisions. Review records do not enter automatic final export; malformed
+or unsupported input remains separate in `UNRENDERABLE_INPUT`.
+
 `mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.

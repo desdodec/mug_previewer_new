@@ -501,7 +501,10 @@ def _production_adaptation_safe(
         and item.nose_min_distance_px >= thresholds.nose_healthy_px
         and item.typography_min_distance_px >= thresholds.typography_healthy_px
         and item.mouth_role_penalty <= thresholds.max_mouth_role_penalty
-        and (item.orientation_deg == 0 or item.orientation_penalty_or_bonus >= thresholds.minimum_rotated_orientation_signal)
+        # A 180-degree rescue changes the visual reading of a street feature.
+        # Preserve it for human review, but do not auto-approve it as final
+        # production artwork merely because its collision measurements improve.
+        and item.orientation_deg == 0
     )
 
 
