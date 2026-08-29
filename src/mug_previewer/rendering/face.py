@@ -104,7 +104,10 @@ def _render_face_with_decision(
     adapted.paste((255, 255, 255, 255), mask=masks.street_mouth)
     for protected in (masks.left_eye, masks.right_eye, masks.static_nose, masks.typography):
         adapted.paste(feature, mask=protected)
-    street_mask, _clipped = transform_street_mask(masks.street_mouth, decision.rendered.candidate)
+    # A production decision stores its approved rescue as ``transform``.
+    # ``rendered`` belongs only to the diagnostic decision type.
+    assert decision.transform is not None
+    street_mask, _clipped = transform_street_mask(masks.street_mouth, decision.transform.candidate)
     adapted.paste(feature, mask=street_mask)
     return adapted, decision
 

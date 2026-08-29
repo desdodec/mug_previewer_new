@@ -97,8 +97,21 @@ def test_title_font_selection_refuses_text_that_cannot_fit_at_the_minimum_tier()
 def test_render_face_missing_glyph_is_clear(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))
     missing = replace(data.get_street("0001"), glyph_path=tmp_path / "missing.svg")
+
     with pytest.raises(FaceRenderError, match=r'Cannot render street 0001 "St John\'s Road": glyph file does not exist:'):
         render_face(missing)
+def test_render_face_uses_the_production_adapted_transform(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An approved rescue uses ProductionPlacementDecision.transform, not diagnostic state."""
+    from types import SimpleNamespace
+    from mug_previewer.diagnostics import front_candidates
+    from mug_previewer.diagnostics.front_candidates import Candidate
+
+    decision = SimpleNamespace(adapted=True, transform=SimpleNamespace(candidate=Candidate(0, 1.0, 0, 0)))
+    monkeypatch.setattr(front_candidates, "select_production_placement_from_masks", lambda masks: (decision, ()))
+    data = load_dataset(dataset_copy(tmp_path))
+    image = render_face(data.get_street("0001"), FaceRenderOptions(area=data.display_name))
+    assert image.size == FRONT_PANEL_PX
+
 
 
 def test_render_face_accepts_unicode_street_name(tmp_path: Path) -> None:
