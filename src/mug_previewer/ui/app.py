@@ -12,6 +12,7 @@ from PIL import Image, ImageTk
 
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
+from .manual_review import ManualReviewController, ManualReviewWindow
 from .state import (
     AppState,
     DatasetOption,
@@ -70,6 +71,8 @@ class MugPreviewerApp(ttk.Frame):
         self.street_list.bind("<<ListboxSelect>>", self._select_street)
         controls.rowconfigure(5, weight=1)
         controls.columnconfigure(0, weight=1)
+        self.manual_review_button = ttk.Button(controls, text="Manual Review", command=self._open_manual_review)
+        self.manual_review_button.grid(row=11, column=0, sticky="ew", pady=(10, 0))
         self.render_button = ttk.Button(controls, text="Render Preview", command=self._start_render, state="disabled")
         design = ttk.LabelFrame(controls, text="Design", padding=8)
         design.grid(row=6, column=0, sticky="ew", pady=(2, 10))
@@ -208,6 +211,12 @@ class MugPreviewerApp(ttk.Frame):
         self.status_var.set(f"Selected: {street.id} — {street.display_name}")
         self.render_button.configure(state="normal")
         self._set_export_buttons_state('normal')
+
+    def _open_manual_review(self) -> None:
+        if not self.state.datasets:
+            self._show_error("Load workflow-v6 datasets before opening Manual Review.")
+            return
+        ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets]))
 
     def _start_render(self) -> None:
         data, street = self.state.selected_dataset, self.state.selected_street

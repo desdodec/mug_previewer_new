@@ -248,6 +248,13 @@ migrate that path without changing canonical artwork.
 
 The first desktop UI provides a local workflow for selecting a workflow-v6 dataset, filtering streets, and viewing front/rear production mug mockups. It uses standard-library Tkinter, so no new UI dependency or web server is needed.
 
+### Desktop Manual Review
+
+Use **Manual Review** in the desktop app after its datasets have loaded. The default queue contains only pending MANUAL_REVIEW records, in deterministic dataset/ID order; the filter can switch to resolved records or all review records. It displays real production-face renders side-by-side for **STANDARD** and the current in-memory edit.
+
+Only approved controls are available: orientation 0 or 180 degrees, scales 1.00 through 0.80 in the supported steps, and vertical positions from -60 to +60 in 20 px steps. **Use Standard**, **Use Best Candidate**, and **Reset Edit** never save. Use **Approve Standard** or **Approve Current Edit** to atomically persist a decision; successful saves move to the next queue item. **Leave Pending** moves on without a write. Resolved records can be opened through the filter and **Clear Saved Decision** returns one to pending review after confirmation.
+
+
 ```powershell
 python -m mug_previewer.ui
 # or
