@@ -340,7 +340,7 @@ class ManualReviewWindow(tk.Toplevel):
 
     def __init__(
         self, parent: tk.Tk, controller: ManualReviewController, *,
-        initial_key: tuple[str, str] | None = None, on_resolution_changed: Callable[[], None] | None = None,
+        initial_key: tuple[str, str] | None = None, on_resolution_changed: Callable[[tuple[str, str]], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.controller, self._standard_photo, self._current_photo = controller, None, None
@@ -470,25 +470,27 @@ class ManualReviewWindow(tk.Toplevel):
     def _approve_edit(self) -> None: self._save(self.controller.approve_current_edit, f"Saved manual placement: {self.controller.transform[0]} deg / {self.controller.transform[1]:.2f} / Y{self.controller.transform[2]:+d}.")
 
     def _save(self, action: Callable[[], object], message: str) -> None:
+        changed_key = self.controller.current_key
         try:
             action()
         except Exception as error:
             messagebox.showerror("Manual Review", f"Could not save manual decision. The street remains pending.\n\n{error}", parent=self)
             return
         self._refresh(); self.reason_var.set(message)
-        if self._on_resolution_changed is not None:
-            self._on_resolution_changed()
+        if self._on_resolution_changed is not None and changed_key is not None:
+            self._on_resolution_changed(changed_key)
 
     def _clear(self) -> None:
         if not self.controller.current or self.controller.current.item.manual_override is None:
             return
         if not messagebox.askyesno("Clear saved decision", "Return this street to pending manual review?", parent=self):
             return
+        changed_key = self.controller.current_key
         try:
             self.controller.clear_saved_decision()
         except Exception as error:
             messagebox.showerror("Manual Review", str(error), parent=self)
             return
         self._refresh()
-        if self._on_resolution_changed is not None:
-            self._on_resolution_changed()
+        if self._on_resolution_changed is not None and changed_key is not None:
+            self._on_resolution_changed(changed_key)

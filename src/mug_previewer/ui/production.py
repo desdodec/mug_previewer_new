@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 from typing import Iterable, Literal
@@ -63,30 +64,56 @@ def production_status(
     override_path: Path | str = DEFAULT_MANUAL_OVERRIDE_PATH,
 ) -> ProductionStatus:
     """Classify one selected street with concise user-facing wording."""
-    decision = select_production_placement(street, area=dataset.display_name)
-    if decision.triage_status is ProductionTriageStatus.UNRENDERABLE_INPUT:
-        return ProductionStatus(
-            "unrenderable", "Cannot Render", _reason_text(decision.reason_codes),
-            False, False, reason_codes=decision.reason_codes,
+    scope_row = _production_scope_index().get((dataset.display_name, street.id))
+    if scope_row is not None:
+        return _status_from_triage(
+            ProductionTriageStatus(scope_row["triage_status"]), scope_row["production_placement"] or None,
+            _scope_reason_codes(scope_row), dataset, street, override_path,
         )
-    if decision.triage_status is ProductionTriageStatus.MANUAL_REVIEW:
+    decision = select_production_placement(street, area=dataset.display_name)
+    return _status_from_triage(
+        decision.triage_status, decision.placement_class, decision.reason_codes, dataset, street, override_path,
+    )
+
+
+def _status_from_triage(
+    triage_status: ProductionTriageStatus,
+    placement_class: str | None,
+    reason_codes: tuple[str, ...],
+    dataset: Dataset,
+    street: StreetRecord,
+    override_path: Path | str,
+) -> ProductionStatus:
+    """Map a validated triage result or an on-demand result to UI status."""
+    if triage_status is ProductionTriageStatus.UNRENDERABLE_INPUT:
+        return ProductionStatus("unrenderable", "Cannot Render", _reason_text(reason_codes), False, False, reason_codes=reason_codes)
+    if triage_status is ProductionTriageStatus.MANUAL_REVIEW:
         override = load_manual_overrides(override_path).get(dataset.id, street.id)
         if override is not None and override.approved:
             if override.status is ManualResolutionStatus.APPROVED_STANDARD:
                 label = "Manually approved — Standard placement"
             else:
                 label = f"Manually approved — Edited placement {override.orientation_deg} degrees / {override.scale:.2f} / Y{override.y_offset:+d}"
-            return ProductionStatus("ready", "Ready for Production", label, True, False, label, decision.reason_codes)
+            return ProductionStatus("ready", "Ready for Production", label, True, False, label, reason_codes)
         return ProductionStatus(
-            "manual_review", "Manual Review Required",
-            "Manual review is required before production export.", False, True,
-            reason_codes=decision.reason_codes,
+            "manual_review", "Manual Review Required", "Manual review is required before production export.",
+            False, True, reason_codes=reason_codes,
         )
     label = "Ready for production"
-    if decision.placement_class == "ADAPTED":
+    if placement_class == "ADAPTED":
         label = "Ready for production — automatic placement applied"
-    return ProductionStatus("ready", "Ready for Production", label, True, False, reason_codes=decision.reason_codes)
+    return ProductionStatus("ready", "Ready for Production", label, True, False, reason_codes=reason_codes)
 
+
+@lru_cache(maxsize=1)
+def _production_scope_index() -> dict[tuple[str, str], dict[str, str]]:
+    """Return the reviewed release manifest keyed by display name and street ID."""
+    rows = json.loads(files("mug_previewer.ui").joinpath("manual_review_scope.json").read_text(encoding="utf-8"))
+    return {(row["dataset"], row["street_id"]): row for row in rows}
+
+
+def _scope_reason_codes(row: dict[str, str]) -> tuple[str, ...]:
+    return tuple(filter(None, row["reason_codes"].split(";")))
 
 def production_summary(
     datasets: Iterable[Dataset],

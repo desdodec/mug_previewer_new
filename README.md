@@ -2,13 +2,13 @@
 
 Mug Previewer consumes externally generated street datasets to produce customised mug artwork. The OpenStreetMap extraction workflow deliberately remains outside this repository.
 
-## Release candidate 0.1.0rc1: install and use
+## Release candidate 0.1.0rc2: install and use
 
 Python 3.11 or later is required. Workflow-v6 datasets are external input and are never bundled with the application. Install a built release wheel into a clean environment, then configure its dataset root using a path appropriate to your machine:
 
     py -3.11 -m venv .venv
     .\.venv\Scripts\Activate.ps1
-    python -m pip install .\dist\mug_previewer-0.1.0rc1-py3-none-any.whl
+    python -m pip install .\dist\mug_previewer-0.1.0rc2-py3-none-any.whl
     $env:MUG_PREVIEWER_DATASET_ROOT = "C:\path\to\workflow_outputs_v6"
     mug-previewer ui
 

@@ -1,4 +1,10 @@
-# Mug Previewer 0.1.0rc1
+# Mug Previewer 0.1.0rc2
+
+Fixes a desktop UI issue where production status checking could remain indefinitely in a loading state after selecting a street, leaving preview and export actions disabled.
+
+No rendering, provider geometry, or production-triage policy changes.
+
+## Previous release candidate: 0.1.0rc1
 
 This release candidate packages the validated desktop workflow for external
 workflow-v6 street datasets.

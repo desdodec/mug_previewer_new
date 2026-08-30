@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import threading
 import tkinter as tk
@@ -42,10 +43,14 @@ class MugPreviewerApp(ttk.Frame):
         self._rear_photo: ImageTk.PhotoImage | None = None
         self._resize_pending: str | None = None
         self.current_production_status: ProductionStatus | None = None
+        self._production_status_generation = 0
+        self._production_status_cache: dict[tuple[str, str], ProductionStatus] = {}
+        self._production_status_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, ProductionStatus | None, Exception | None]] = queue.SimpleQueue()
         self._build_widgets()
         self.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
+        root.after(25, self._drain_production_status_results)
         root.after_idle(self.refresh_datasets)
 
     def _build_widgets(self) -> None:
@@ -185,6 +190,7 @@ class MugPreviewerApp(ttk.Frame):
         data = self.dataset_by_label.get(self.dataset_var.get())
         if data is None:
             return
+        self._invalidate_active_production_status_request()
         self.state.selected_dataset = data
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
@@ -204,6 +210,7 @@ class MugPreviewerApp(ttk.Frame):
         data = self.state.selected_dataset
         if data is None:
             return
+        self._invalidate_active_production_status_request()
         self.state.street_filter = self.search_var.get()
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         self.street_list.delete(0, tk.END)
@@ -221,26 +228,74 @@ class MugPreviewerApp(ttk.Frame):
         if not selection:
             return
         self.state.selected_street = self.state.filtered_streets[selection[0]]
-        street = self.state.selected_street
+        self._request_production_status(self.state.selected_dataset, self.state.selected_street)
+
+    def _request_production_status(self, data: Dataset | None, street: StreetRecord) -> None:
+        """Start one status request; all widget changes remain on the Tk thread."""
+        if data is None:
+            return
+        self._production_status_generation += 1
+        generation = self._production_status_generation
         self.status_var.set(f"Checking production status for {street.id}...")
         self.production_var.set("Checking production status...")
         self.current_production_status = None
         self.render_button.configure(state="disabled")
         self._set_export_buttons_state("disabled")
         self.review_street_button.configure(state="disabled")
-        threading.Thread(target=self._production_status_worker, args=(self.state.selected_dataset, street), daemon=True).start()
+        cached = self._production_status_cache.get(self._production_status_key(data, street))
+        if cached is not None:
+            self._production_status_finished(generation, data, street, cached)
+            return
+        threading.Thread(target=self._production_status_worker, args=(generation, data, street), daemon=True).start()
 
-    def _production_status_worker(self, data: Dataset, street: StreetRecord) -> None:
+    def _production_status_worker(self, generation: int, data: Dataset, street: StreetRecord) -> None:
+        """Compute off the UI thread and hand the result to the main-thread poller."""
         try:
             result = production_status(data, street)
-        except Exception:
+        except Exception as error:
             LOGGER.exception("Production status check failed")
-            self.root.after(0, lambda: self._production_status_failed(data, street))
+            self._production_status_results.put((generation, data, street, None, error))
             return
-        self.root.after(0, lambda: self._production_status_finished(data, street, result))
+        self._production_status_results.put((generation, data, street, result, None))
 
-    def _production_status_finished(self, data: Dataset, street: StreetRecord, result: ProductionStatus) -> None:
-        if self.state.selected_dataset is not data or self.state.selected_street is not street:
+    def _drain_production_status_results(self) -> None:
+        """Apply completed worker results on Tk's main thread and keep polling."""
+        while True:
+            try:
+                generation, data, street, result, error = self._production_status_results.get_nowait()
+            except queue.Empty:
+                break
+            if error is not None:
+                self._production_status_failed(generation, data, street, error)
+            elif result is not None:
+                self._production_status_cache[self._production_status_key(data, street)] = result
+                self._production_status_finished(generation, data, street, result)
+        self.root.after(25, self._drain_production_status_results)
+
+    @staticmethod
+    def _production_status_key(data: Dataset, street: StreetRecord) -> tuple[str, str]:
+        return data.id, street.id
+
+    def _invalidate_active_production_status_request(self) -> None:
+        self._production_status_generation += 1
+
+    def _production_status_resolution_changed(self, key: tuple[str, str]) -> None:
+        self._production_status_cache.pop(key, None)
+        if self.state.selected_dataset is not None and self.state.selected_street is not None:
+            if self._production_status_key(self.state.selected_dataset, self.state.selected_street) == key:
+                self._request_production_status(self.state.selected_dataset, self.state.selected_street)
+
+    def _is_current_production_status_request(self, generation: int, data: Dataset, street: StreetRecord) -> bool:
+        selected_data, selected_street = self.state.selected_dataset, self.state.selected_street
+        return (
+            generation == self._production_status_generation
+            and selected_data is not None
+            and selected_street is not None
+            and self._production_status_key(selected_data, selected_street) == self._production_status_key(data, street)
+        )
+
+    def _production_status_finished(self, generation: int, data: Dataset, street: StreetRecord, result: ProductionStatus) -> None:
+        if not self._is_current_production_status_request(generation, data, street):
             return
         self.current_production_status = result
         self.production_var.set(f"{result.title}: {result.detail}")
@@ -249,13 +304,16 @@ class MugPreviewerApp(ttk.Frame):
         self._set_export_buttons_state("normal" if result.export_allowed else "disabled")
         self.review_street_button.configure(state="normal" if result.review_required else "disabled")
 
-    def _production_status_failed(self, data: Dataset, street: StreetRecord) -> None:
-        if self.state.selected_dataset is not data or self.state.selected_street is not street:
+    def _production_status_failed(self, generation: int, data: Dataset, street: StreetRecord, error: Exception) -> None:
+        if not self._is_current_production_status_request(generation, data, street):
             return
         self.current_production_status = None
-        self.production_var.set("Could not determine production status. Check the street input and try again.")
+        self.production_var.set("Status Check Failed: Could not determine production status. Check the street input and try again.")
+        self.status_var.set(f"Status Check Failed: {street.id} {street.display_name}")
+        self.render_button.configure(state="disabled")
         self._set_export_buttons_state("disabled")
         self.review_street_button.configure(state="disabled")
+        LOGGER.error("Production status check failed for %s/%s: %s", data.id, street.id, error)
 
     def _review_selected_street(self) -> None:
         data, street, result = self.state.selected_dataset, self.state.selected_street, self.current_production_status
@@ -290,9 +348,8 @@ class MugPreviewerApp(ttk.Frame):
         if not self.state.datasets:
             self._show_error("Load workflow-v6 datasets before opening Manual Review.")
             return
-        def refresh_main() -> None:
-            if self.state.selected_dataset is not None and self.state.selected_street is not None:
-                threading.Thread(target=self._production_status_worker, args=(self.state.selected_dataset, self.state.selected_street), daemon=True).start()
+        def refresh_main(key: tuple[str, str]) -> None:
+            self._production_status_resolution_changed(key)
         ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets], eager=False), initial_key=initial_key, on_resolution_changed=refresh_main)
 
     def _start_render(self) -> None:
