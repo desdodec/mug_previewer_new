@@ -230,7 +230,7 @@ def test_printify_cancelled_export_uses_png_dialog_and_does_not_start_worker(tmp
     assert dialog == {
         "parent": controller.root,
         "title": "Export Printify PNG",
-        "initialfile": "st-john-s-road_printify.png",
+        "initialfile": "test-borough_0001_st-john-s-road_printify.png",
         "defaultextension": ".png",
         "filetypes": [("PNG files", "*.png")],
     }

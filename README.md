@@ -263,3 +263,13 @@ python -m mug_previewer --dataset-root "E:\Python_Stuff\OS_Mail_Addresses\workfl
 ```
 
 The dataset root follows the existing precedence: the explicit `--dataset-root` argument, `MUG_PREVIEWER_DATASET_ROOT`, local configuration, then the current development workflow-v6 root. If the resolved root is absent or contains no usable datasets, the UI shows a concise error and remains open. Select a dataset, search/select a street, then choose **Render Preview**.
+
+## Desktop production workflow
+
+1. Start Mug Previewer and choose a dataset and street.
+2. Wait for the plain-language production status: **Ready for Production**, **Manual Review Required**, or **Cannot Render**.
+3. Preview ready streets, or use **Review Selected Street** to open the matching manual-review record.
+4. Approve a standard or edited placement only when satisfied; preview adjustments are not saved until approval. Clear a saved decision to return the street to review.
+5. Use the provider export buttons only when the status is ready. Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI; Printify exports are 2475 x 1155 RGBA PNGs at 300 DPI.
+
+Manual decisions are stored in data/manual_overrides.json and are keyed by dataset ID plus street ID. Streets marked **Cannot Render** need corrected source input and cannot be sent to Manual Review or export.

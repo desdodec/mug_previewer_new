@@ -338,9 +338,13 @@ from PIL import ImageTk
 class ManualReviewWindow(tk.Toplevel):
     """Tk review window that remains responsive while triage loads incrementally."""
 
-    def __init__(self, parent: tk.Tk, controller: ManualReviewController) -> None:
+    def __init__(
+        self, parent: tk.Tk, controller: ManualReviewController, *,
+        initial_key: tuple[str, str] | None = None, on_resolution_changed: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.controller, self._standard_photo, self._current_photo = controller, None, None
+        self._initial_key, self._on_resolution_changed = initial_key, on_resolution_changed
         self._updating = False
         self.title("Mug Previewer - Manual Review")
         self.minsize(1050, 700)
@@ -395,6 +399,10 @@ class ManualReviewWindow(tk.Toplevel):
     def _load_next(self) -> None:
         previous_key = self.controller.current_key
         more = self.controller.load_next()
+        if self._initial_key and any(record.key == self._initial_key for record in self.controller.records):
+            self.controller.set_filter("pending")
+            self.controller.select(self._initial_key)
+            self._initial_key = None
         self._refresh(render=self.controller.current_key != previous_key)
         if more and self.winfo_exists():
             self.after(1, self._load_next)
@@ -468,6 +476,8 @@ class ManualReviewWindow(tk.Toplevel):
             messagebox.showerror("Manual Review", f"Could not save manual decision. The street remains pending.\n\n{error}", parent=self)
             return
         self._refresh(); self.reason_var.set(message)
+        if self._on_resolution_changed is not None:
+            self._on_resolution_changed()
 
     def _clear(self) -> None:
         if not self.controller.current or self.controller.current.item.manual_override is None:
@@ -480,3 +490,5 @@ class ManualReviewWindow(tk.Toplevel):
             messagebox.showerror("Manual Review", str(error), parent=self)
             return
         self._refresh()
+        if self._on_resolution_changed is not None:
+            self._on_resolution_changed()

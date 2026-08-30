@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .manual_review import ManualReviewController, ManualReviewWindow
+from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
     AppState,
     DatasetOption,
@@ -40,6 +41,7 @@ class MugPreviewerApp(ttk.Frame):
         self._front_photo: ImageTk.PhotoImage | None = None
         self._rear_photo: ImageTk.PhotoImage | None = None
         self._resize_pending: str | None = None
+        self.current_production_status: ProductionStatus | None = None
         self._build_widgets()
         self.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
@@ -71,8 +73,14 @@ class MugPreviewerApp(ttk.Frame):
         self.street_list.bind("<<ListboxSelect>>", self._select_street)
         controls.rowconfigure(5, weight=1)
         controls.columnconfigure(0, weight=1)
-        self.manual_review_button = ttk.Button(controls, text="Manual Review", command=self._open_manual_review)
+        self.manual_review_button = ttk.Button(controls, text="Review Pending Streets", command=self._open_manual_review)
         self.manual_review_button.grid(row=11, column=0, sticky="ew", pady=(10, 0))
+        self.review_street_button = ttk.Button(controls, text="Review Selected Street", command=self._review_selected_street, state="disabled")
+        self.review_street_button.grid(row=12, column=0, sticky="ew", pady=(6, 0))
+        self.summary_button = ttk.Button(controls, text="Production Summary", command=self._show_production_summary)
+        self.summary_button.grid(row=13, column=0, sticky="ew", pady=(6, 0))
+        self.production_var = tk.StringVar(value="Production status: select a street")
+        ttk.Label(controls, textvariable=self.production_var, wraplength=270, justify="left").grid(row=14, column=0, sticky="ew", pady=(10, 0))
         self.render_button = ttk.Button(controls, text="Render Preview", command=self._start_render, state="disabled")
         design = ttk.LabelFrame(controls, text="Design", padding=8)
         design.grid(row=6, column=0, sticky="ew", pady=(2, 10))
@@ -183,6 +191,9 @@ class MugPreviewerApp(ttk.Frame):
         self.state.framing_mode = None
         self.framing_var.set("Rear framing: —")
         self._clear_previews()
+        self.current_production_status = None
+        self.production_var.set("Production status: select a street")
+        self.review_street_button.configure(state="disabled")
         self._apply_filter()
         self.status_var.set(f"{data.display_name}: {len(data.streets)} streets available.")
 
@@ -199,8 +210,11 @@ class MugPreviewerApp(ttk.Frame):
         for street in self.state.filtered_streets:
             self.street_list.insert(tk.END, f"{street.id} — {street.display_name}")
         self.state.selected_street = None
+        self.current_production_status = None
+        self.production_var.set("Production status: select a street")
         self.render_button.configure(state="disabled")
         self._set_export_buttons_state('disabled')
+        self.review_street_button.configure(state="disabled")
 
     def _select_street(self, _event: object | None = None) -> None:
         selection = self.street_list.curselection()
@@ -208,15 +222,78 @@ class MugPreviewerApp(ttk.Frame):
             return
         self.state.selected_street = self.state.filtered_streets[selection[0]]
         street = self.state.selected_street
-        self.status_var.set(f"Selected: {street.id} — {street.display_name}")
-        self.render_button.configure(state="normal")
-        self._set_export_buttons_state('normal')
+        self.status_var.set(f"Checking production status for {street.id}...")
+        self.production_var.set("Checking production status...")
+        self.current_production_status = None
+        self.render_button.configure(state="disabled")
+        self._set_export_buttons_state("disabled")
+        self.review_street_button.configure(state="disabled")
+        threading.Thread(target=self._production_status_worker, args=(self.state.selected_dataset, street), daemon=True).start()
 
-    def _open_manual_review(self) -> None:
+    def _production_status_worker(self, data: Dataset, street: StreetRecord) -> None:
+        try:
+            result = production_status(data, street)
+        except Exception:
+            LOGGER.exception("Production status check failed")
+            self.root.after(0, lambda: self._production_status_failed(data, street))
+            return
+        self.root.after(0, lambda: self._production_status_finished(data, street, result))
+
+    def _production_status_finished(self, data: Dataset, street: StreetRecord, result: ProductionStatus) -> None:
+        if self.state.selected_dataset is not data or self.state.selected_street is not street:
+            return
+        self.current_production_status = result
+        self.production_var.set(f"{result.title}: {result.detail}")
+        self.status_var.set(f"{result.title}: {street.id} {street.display_name}")
+        self.render_button.configure(state="normal" if result.readiness != "unrenderable" else "disabled")
+        self._set_export_buttons_state("normal" if result.export_allowed else "disabled")
+        self.review_street_button.configure(state="normal" if result.review_required else "disabled")
+
+    def _production_status_failed(self, data: Dataset, street: StreetRecord) -> None:
+        if self.state.selected_dataset is not data or self.state.selected_street is not street:
+            return
+        self.current_production_status = None
+        self.production_var.set("Could not determine production status. Check the street input and try again.")
+        self._set_export_buttons_state("disabled")
+        self.review_street_button.configure(state="disabled")
+
+    def _review_selected_street(self) -> None:
+        data, street, result = self.state.selected_dataset, self.state.selected_street, self.current_production_status
+        if data is None or street is None or result is None or not result.review_required:
+            self._show_error("This street does not currently require manual review.")
+            return
+        self._open_manual_review(initial_key=(data.id, street.id))
+
+    def _show_production_summary(self) -> None:
+        if not self.state.datasets:
+            self._show_error("Load workflow-v6 datasets before opening the production summary.")
+            return
+        datasets = [item.dataset for item in self.state.datasets]
+        summary = production_summary(datasets)
+        failures = production_unrenderable_items(datasets)
+        message_lines = [
+            f"Ready for production: {summary.ready}",
+            f"Automatically ready: {summary.auto_standard + summary.auto_adapted}",
+            f"Manually approved: {summary.manual_standard + summary.manual_override}",
+            f"Still requiring review: {summary.pending_manual_review}",
+            f"Unable to render: {summary.unrenderable}",
+            "",
+            "Use Review Pending Streets to resolve pending streets.",
+        ]
+        if failures:
+            message_lines.extend(("", "Input that cannot be rendered:"))
+            message_lines.extend(f"- {item.street_name}: {item.reason}" for item in failures)
+        message = "\n".join(message_lines)
+        messagebox.showinfo("Production Summary", message, parent=self.root)
+
+    def _open_manual_review(self, initial_key: tuple[str, str] | None = None) -> None:
         if not self.state.datasets:
             self._show_error("Load workflow-v6 datasets before opening Manual Review.")
             return
-        ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets], eager=False))
+        def refresh_main() -> None:
+            if self.state.selected_dataset is not None and self.state.selected_street is not None:
+                threading.Thread(target=self._production_status_worker, args=(self.state.selected_dataset, self.state.selected_street), daemon=True).start()
+        ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets], eager=False), initial_key=initial_key, on_resolution_changed=refresh_main)
 
     def _start_render(self) -> None:
         data, street = self.state.selected_dataset, self.state.selected_street
@@ -283,10 +360,14 @@ class MugPreviewerApp(ttk.Frame):
         if data is None or street is None:
             self._show_error("Select a street before exporting.")
             return
+        readiness = getattr(self, "current_production_status", "unknown")
+        if readiness != "unknown" and (readiness is None or not readiness.export_allowed):
+            self._show_error("Production export is unavailable until this street is ready for production.")
+            return
         destination = filedialog.asksaveasfilename(
             parent=self.root,
             title=f"Export {provider_label} PNG",
-            initialfile=self._provider_filename(street, filename_suffix),
+            initialfile=self._provider_filename(data, street, filename_suffix),
             defaultextension=".png",
             filetypes=[("PNG files", "*.png")],
         )
@@ -325,25 +406,28 @@ class MugPreviewerApp(ttk.Frame):
 
     def _export_finished(self, provider_label: str, destination: Path) -> None:
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
-        self.status_var.set(f"{provider_label} PNG exported: {destination}")
+        dimensions = "2362 x 1063" if provider_label == "Inkthreadable" else "2475 x 1155"
+        self.status_var.set(f"Export complete: {provider_label} {dimensions} PNG saved to {destination}")
 
     def _export_failed(self, provider_label: str, detail: str) -> None:
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
-        self._show_error(f"Could not export the selected street. {detail}")
+        LOGGER.error("%s export error: %s", provider_label, detail)
+        self._show_error("Could not write the export file. Check the destination folder and try again.")
 
     def _set_export_buttons_state(self, state: str) -> None:
         self.export_button.configure(state=state)
         self.printify_export_button.configure(state=state)
 
     @staticmethod
-    def _provider_filename(street: StreetRecord, suffix: str) -> str:
-        slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", street.display_name.casefold())).strip("-")
-        stem = slug or "street"
-        return f"{stem}_{suffix}.png"
+    def _provider_filename(dataset: Dataset, street: StreetRecord, suffix: str) -> str:
+        def slug(value: str, fallback: str) -> str:
+            normalized = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", value.casefold())).strip("-")
+            return normalized or fallback
+        return f"{slug(dataset.display_name, 'dataset')}_{slug(street.id, 'street')}_{slug(street.display_name, 'street')}_{slug(suffix, 'provider')}.png"
 
     @staticmethod
-    def _inkthreadable_filename(street: StreetRecord) -> str:
-        return MugPreviewerApp._provider_filename(street, "inkthreadable")
+    def _inkthreadable_filename(dataset: Dataset, street: StreetRecord) -> str:
+        return MugPreviewerApp._provider_filename(dataset, street, "inkthreadable")
     def _preview_resized(self, _event: object) -> None:
         if self._resize_pending is not None:
             self.root.after_cancel(self._resize_pending)
