@@ -9,7 +9,7 @@ Python 3.11 or later is required. Workflow-v6 datasets are external input and ar
     py -3.11 -m venv .venv
     .\.venv\Scripts\Activate.ps1
     python -m pip install .\dist\mug_previewer-0.1.0rc1-py3-none-any.whl
-    =C:\path\to\workflow_outputs_v6
+    $env:MUG_PREVIEWER_DATASET_ROOT = "C:\path\to\workflow_outputs_v6"
     mug-previewer ui
 
 The dataset root can also be supplied with the --dataset-root option, in local_config.toml (or the file named by MUG_PREVIEWER_LOCAL_CONFIG), or in .env. Precedence is explicit CLI option, environment variable, local config, .env, then config/default.toml.
