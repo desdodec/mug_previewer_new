@@ -64,3 +64,39 @@ def test_save_failure_leaves_pending_selection_intact(tmp_path: Path, monkeypatc
     with pytest.raises(ManualOverrideError, match="disk unavailable"):
         controller.approve_standard()
     assert controller.current.key == selected and controller.pending_count == 2
+
+
+
+def test_incremental_queue_load_is_preview_lazy_and_filter_cached(tmp_path: Path, monkeypatch) -> None:
+    dataset = load_dataset(Path(__file__).parent / "fixtures" / "workflow_v6_valid")
+    triage_calls: list[str] = []
+    preview_calls: list[object] = []
+
+    def select(street, *, area):
+        triage_calls.append(street.id)
+        return _decision(ProductionTriageStatus.MANUAL_REVIEW)
+
+    monkeypatch.setattr(manual_review, "select_production_placement", select)
+    controller = manual_review.ManualReviewController(
+        [dataset],
+        override_path=tmp_path / "overrides.json",
+        face_renderer=lambda *args: (preview_calls.append(args), Image.new("RGBA", (495, 462)))[1],
+        eager=False,
+    )
+
+    assert controller.load_progress == (0, 2)
+    assert triage_calls == []
+    assert preview_calls == []
+    controller.load_next()
+    assert triage_calls == ["0001"]
+    assert preview_calls == []
+    controller.set_filter("all")
+    controller.set_filter("pending")
+    assert triage_calls == ["0001"]
+    controller.render_previews()
+    assert len(preview_calls) == 2
+    controller.load_all()
+    assert triage_calls == ["0001", "0002"]
+    controller.set_filter("resolved")
+    controller.set_filter("pending")
+    assert triage_calls == ["0001", "0002"]

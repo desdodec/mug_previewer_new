@@ -29,3 +29,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "mug_previewer.providers" = ["profiles/*.json"]
+"mug_previewer.ui" = ["manual_review_scope.json"]

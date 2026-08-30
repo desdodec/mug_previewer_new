@@ -251,8 +251,9 @@ The first desktop UI provides a local workflow for selecting a workflow-v6 datas
 ### Desktop Manual Review
 
 Use **Manual Review** in the desktop app after its datasets have loaded. The default queue contains only pending MANUAL_REVIEW records, in deterministic dataset/ID order; the filter can switch to resolved records or all review records. It displays real production-face renders side-by-side for **STANDARD** and the current in-memory edit.
+The accepted production review scope loads as lightweight metadata with a visible processed count, so the window opens immediately; production triage and both face previews are deferred until a reviewer opens a street. Switching filters reuses the session queue and does not rescan source streets.
 
-Only approved controls are available: orientation 0 or 180 degrees, scales 1.00 through 0.80 in the supported steps, and vertical positions from -60 to +60 in 20 px steps. **Use Standard**, **Use Best Candidate**, and **Reset Edit** never save. Use **Approve Standard** or **Approve Current Edit** to atomically persist a decision; successful saves move to the next queue item. **Leave Pending** moves on without a write. Resolved records can be opened through the filter and **Clear Saved Decision** returns one to pending review after confirmation.
+Only approved controls are available: orientation 0 or 180 degrees, scales 1.00 through 0.80 in the supported steps, and vertical positions from -60 to +60 in 20 px steps. Unsaved adjustments belong only to the active street and are discarded when the reviewer navigates away; they are never written until an approval action. **Use Standard**, **Use Best Candidate**, and **Reset Edit** never save. Use **Approve Standard** or **Approve Current Edit** to atomically persist a decision; successful saves move to the next queue item. **Leave Pending** moves on without a write. Resolved records can be opened through the filter and **Clear Saved Decision** returns one to pending review after confirmation.
 
 
 ```powershell

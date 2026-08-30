@@ -216,7 +216,7 @@ class MugPreviewerApp(ttk.Frame):
         if not self.state.datasets:
             self._show_error("Load workflow-v6 datasets before opening Manual Review.")
             return
-        ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets]))
+        ManualReviewWindow(self.root, ManualReviewController([item.dataset for item in self.state.datasets], eager=False))
 
     def _start_render(self) -> None:
         data, street = self.state.selected_dataset, self.state.selected_street
