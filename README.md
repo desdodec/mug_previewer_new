@@ -2,6 +2,32 @@
 
 Mug Previewer consumes externally generated street datasets to produce customised mug artwork. The OpenStreetMap extraction workflow deliberately remains outside this repository.
 
+## Release candidate 0.1.0rc1: install and use
+
+Python 3.11 or later is required. Workflow-v6 datasets are external input and are never bundled with the application. Install a built release wheel into a clean environment, then configure its dataset root using a path appropriate to your machine:
+
+    py -3.11 -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install .\dist\mug_previewer-0.1.0rc1-py3-none-any.whl
+    =C:\path\to\workflow_outputs_v6
+    mug-previewer ui
+
+The dataset root can also be supplied with the --dataset-root option, in local_config.toml (or the file named by MUG_PREVIEWER_LOCAL_CONFIG), or in .env. Precedence is explicit CLI option, environment variable, local config, .env, then config/default.toml.
+
+In the desktop application, select a dataset and street, read its production status, preview a ready record, and choose the appropriate provider export. For Manual Review Required, use Review Selected Street, compare the standard and current edit, then approve a standard placement or the constrained edit. Preview changes are not saved until approval. Saved choices live in data/manual_overrides.json; clearing a decision returns that record to the pending queue.
+
+Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI. The bundled generic Printify 11oz profile exports 2475 x 1155 RGBA PNGs at 300 DPI.
+
+Generated diagnostics/ evidence is local-only, excluded from package data, and normally ignored by Git. The packaged manual_review_scope.json is a version-controlled release manifest; refresh it only as a reviewed release change from validated production-triage results, never during application startup.
+
+## Release limitations
+
+- Manual edits are constrained to 0 or 180 degrees, discrete scale steps, and discrete vertical positions.
+- Some valid streets require human review before export.
+- Malformed face anatomy cannot be repaired by manual editing.
+- Extreme unsupported title widths remain unrenderable.
+- A compatible external workflow-v6 dataset is required for production work.
+
 ## Architecture
 
 `workflow_outputs_v6/<dataset>` is read by the workflow-v6 adapter and converted into typed `Dataset`, `StreetRecord`, capability, path, and statistics models. The loader is the sole layer that knows workflow-v6 filenames and preserves persisted metric context metadata.
@@ -171,7 +197,7 @@ python -m mug_previewer render wrap `
   --output output\0246_wrap.png
 ```
 
-`output/` is ignored by Git. Provider-specific exports and web UI remain deferred.
+`output/` is ignored by Git. Provider-specific exports are available through the desktop workflow; a web UI is not part of this release.
 
 ## Provider profiles
 

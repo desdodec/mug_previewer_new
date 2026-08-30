@@ -5,12 +5,13 @@ import shutil
 from types import SimpleNamespace
 
 from PIL import Image
+import pytest
 
 from mug_previewer.datasets.discovery import DatasetCandidate
 from mug_previewer.design import DesignOptions, build_render_options
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.preview.mockup import PreviewOrientation
-from mug_previewer.ui.state import PREVIEW_SIZE, dataset_options, display_image, filter_streets, render_preview_pair
+from mug_previewer.ui.state import PREVIEW_SIZE, UIDataError, dataset_options, display_image, filter_streets, render_preview_pair
 from mug_previewer.providers import get_provider_profile
 from mug_previewer.ui.state import INKTHREADABLE_PROFILE_ID, export_inkthreadable_png
 import mug_previewer.ui.app as ui_app
@@ -276,3 +277,7 @@ def test_printify_export_without_selection_shows_clear_error_without_save_dialog
 
     assert errors == ["Select a street before exporting."]
     assert not called
+
+def test_dataset_options_requires_explicit_configuration() -> None:
+    with pytest.raises(UIDataError, match='No dataset root'):
+        dataset_options(None)

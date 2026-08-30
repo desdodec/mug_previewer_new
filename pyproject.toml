@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mug-previewer"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "Dataset-driven foundations for Mug Previewer"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,4 +29,5 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "mug_previewer.providers" = ["profiles/*.json"]
+"mug_previewer.preview" = ["assets/*.png"]
 "mug_previewer.ui" = ["manual_review_scope.json"]

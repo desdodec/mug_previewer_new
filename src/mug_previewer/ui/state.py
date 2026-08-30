@@ -18,7 +18,6 @@ from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_p
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
 
-DEVELOPMENT_DATASET_ROOT = Path(r"E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6")
 PREVIEW_SIZE = (1024, 1536)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
@@ -85,18 +84,20 @@ class ProviderExporter(Protocol):
     def __call__(self, wrap: Image.Image, profile: ProviderProfile, destination: Path) -> Path: ...
 
 
-def resolve_dataset_root(dataset_root: Path | str | None = None) -> Path:
-    """Resolve UI root with CLI/environment/config precedence then dev fallback."""
+def resolve_dataset_root(dataset_root: Path | str | None = None) -> Path | None:
+    """Resolve the configured UI dataset root without a developer-machine fallback."""
     settings = load_settings(dataset_root=dataset_root)
-    return settings.dataset_root or DEVELOPMENT_DATASET_ROOT
+    return settings.dataset_root
 
 
 def dataset_options(
-    root: Path | str,
+    root: Path | str | None,
     *,
     discover: Callable[[Path | str], list[DatasetCandidate]] = discover_datasets,
 ) -> list[DatasetOption]:
     """Discover datasets as stable, readable choices without exposing paths."""
+    if root is None:
+        raise UIDataError("No dataset root is configured. Set MUG_PREVIEWER_DATASET_ROOT or pass --dataset-root.")
     root_path = Path(root)
     if not root_path.is_dir():
         raise UIDataError(f"Dataset root does not exist: {root_path}")
