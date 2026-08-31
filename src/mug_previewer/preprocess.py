@@ -257,10 +257,8 @@ def _svg_number(value: str | None) -> float | None:
 
 def _validate_svg_reference(value: str) -> None:
     lowered = value.casefold()
-    if any(token in lowered for token in ("javascript:", "http:", "https:", "file:", "@import", "expression(")):
+    if any(token in lowered for token in ("javascript:", "http:", "https:", "file:", "data:", "@import", "expression(", "//")):
         raise SvgApprovalError("Supplied SVG contains a remote or executable reference.")
-    if "url(" in lowered and ("url(data:" in lowered or "url(//" in lowered):
-        raise SvgApprovalError("Supplied SVG contains an unsafe embedded or remote resource.")
 
 
 def _validate_svg_metadata(root: ET.Element, dataset: Dataset, street: StreetRecord) -> None:

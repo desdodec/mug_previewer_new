@@ -142,6 +142,14 @@ def test_invalid_and_cross_street_manual_svg_are_rejected(tmp_path: Path, monkey
         preprocess.approve_manual_svg(data, street, tmp_path, invalid)
 
     cross_street = tmp_path / "other.svg"
+    remote = tmp_path / "remote.svg"
+    remote.write_text(
+        '<svg width="990" height="462" viewBox="0 0 990 462"><image href="//example.invalid/face.png"/></svg>',
+        encoding="utf-8",
+    )
+    with pytest.raises(preprocess.SvgApprovalError, match="remote"):
+        preprocess.approve_manual_svg(data, street, tmp_path, remote)
+
     cross_street.write_text(preprocess.render_face_svg(data, other), encoding="utf-8")
     with pytest.raises(preprocess.SvgApprovalError, match="street_id"):
         preprocess.approve_manual_svg(data, street, tmp_path, cross_street)
