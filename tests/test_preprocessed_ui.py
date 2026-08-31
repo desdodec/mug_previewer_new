@@ -171,6 +171,7 @@ def test_rapid_preprocessed_switch_keeps_latest_preview(tmp_path: Path) -> None:
 
 def test_cli_passes_preprocessed_directory_to_ui(monkeypatch, tmp_path: Path) -> None:
     captured = {}
+    monkeypatch.setattr("mug_previewer.cli.PROJECT_ROOT", tmp_path)
     default_preprocessed = tmp_path / "svg_previews"
     default_preprocessed.mkdir()
     (default_preprocessed / "preprocess_index.json").write_text('{"records": []}', encoding="utf-8")
@@ -188,6 +189,7 @@ def test_preprocess_defaults_output_to_svg_previews(monkeypatch, tmp_path: Path)
     dataset = SimpleNamespace(id="area", display_name="Area")
     captured = {}
 
+    monkeypatch.setattr("mug_previewer.cli.PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("mug_previewer.cli.discover_datasets", lambda _root: [SimpleNamespace(dataset=dataset)])
     monkeypatch.setattr(
         "mug_previewer.preprocess.preprocess_datasets",
@@ -206,6 +208,7 @@ def test_preprocess_explicit_output_overrides_svg_previews(monkeypatch, tmp_path
     output = tmp_path / "custom-output"
     captured = {}
 
+    monkeypatch.setattr("mug_previewer.cli.PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("mug_previewer.cli.discover_datasets", lambda _root: [SimpleNamespace(dataset=dataset)])
     monkeypatch.setattr(
         "mug_previewer.preprocess.preprocess_datasets",
@@ -225,6 +228,7 @@ def test_cli_discovers_default_preprocessed_directory_for_ui(monkeypatch, tmp_pa
     (preprocessed / "preprocess_index.json").write_text('{"records": []}', encoding="utf-8")
     captured = {}
 
+    monkeypatch.setattr("mug_previewer.cli.PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         "mug_previewer.ui.app.launch",
         lambda *, dataset_root=None, preprocessed=None: captured.update(
@@ -237,6 +241,7 @@ def test_cli_discovers_default_preprocessed_directory_for_ui(monkeypatch, tmp_pa
 
 
 def test_cli_missing_default_preprocessed_index_is_clear_and_does_not_launch(monkeypatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.setattr("mug_previewer.cli.PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("mug_previewer.ui.app.launch", lambda **_kwargs: pytest.fail("UI must not launch"))
 
     assert main(["--dataset-root", str(tmp_path), "ui"]) == 2
