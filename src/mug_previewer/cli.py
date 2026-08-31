@@ -14,6 +14,13 @@ from .rendering.context_map import ContextRenderError, render_context_map_result
 from .rendering.face import FaceRenderError, FaceRenderOptions, render_face
 
 
+DEFAULT_PREPROCESSED_DIRNAME = "svg_previews"
+
+
+def _default_preprocessed_path(dataset_root: Path) -> Path:
+    return dataset_root / DEFAULT_PREPROCESSED_DIRNAME
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mug-previewer")
     parser.add_argument("--dataset-root", type=Path)
@@ -22,7 +29,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
     preprocess = commands.add_parser("preprocess", help="Prepare resumable editable face assets for GUI use.")
     preprocess.add_argument("--dataset-root", dest="preprocess_dataset_root", type=Path)
-    preprocess.add_argument("--output", type=Path, required=True)
+    preprocess.add_argument(
+        "--output", type=Path,
+        help=f"Preprocessing output directory (defaults to <dataset-root>/{DEFAULT_PREPROCESSED_DIRNAME}).",
+    )
     preprocess.add_argument("--dataset", action="append", help="Dataset ID or display name; may be repeated.")
     preprocess.add_argument("--street-id", action="append", help="Limit every selected dataset to these IDs.")
     preprocess.add_argument("--force", action="store_true", help="Regenerate even when matching assets are indexed.")
@@ -114,7 +124,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ui":
         from .ui.app import launch
-        return launch(dataset_root=args.dataset_root, preprocessed=args.preprocessed)
+        root = args.dataset_root or load_settings().dataset_root
+        if args.preprocessed is not None:
+            return launch(dataset_root=root, preprocessed=args.preprocessed)
+        if root is None:
+            return launch(dataset_root=None)
+        preprocessed = _default_preprocessed_path(root)
+        index_path = preprocessed / "preprocess_index.json"
+        if not index_path.is_file():
+            print(
+                f"Default preprocessed catalogue not found: {index_path}\n"
+                "Run `mug-previewer preprocess --dataset-root <root>` first, "
+                "or pass --preprocessed <directory>."
+            )
+            return 2
+        return launch(dataset_root=root, preprocessed=preprocessed)
 
     if args.command == "approve-svg":
         root = args.approve_dataset_root or args.dataset_root or load_settings().dataset_root
@@ -172,8 +196,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         from .preprocess import preprocess_datasets
 
+        output = args.output or _default_preprocessed_path(root)
         summary = preprocess_datasets(
-            datasets_to_process, args.output, street_ids=args.street_id, force=args.force,
+            datasets_to_process, output, street_ids=args.street_id, force=args.force,
         )
         print("Preprocess summary:")
         print(f"  Processed: {summary.processed}")
@@ -183,7 +208,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  MANUAL_APPROVED: {summary.manual_approved}")
         print(f"  UNRENDERABLE_INPUT: {summary.unrenderable_input}")
         print(f"  Unexpected errors: {summary.unexpected_errors}")
-        print(f"  Index: {args.output / 'preprocess_index.json'}")
+        print(f"  Index: {output / 'preprocess_index.json'}")
         return 0
     if args.command == "manual-review":
         return _run_manual_review_command(args)

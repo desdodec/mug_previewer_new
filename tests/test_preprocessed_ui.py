@@ -171,6 +171,9 @@ def test_rapid_preprocessed_switch_keeps_latest_preview(tmp_path: Path) -> None:
 
 def test_cli_passes_preprocessed_directory_to_ui(monkeypatch, tmp_path: Path) -> None:
     captured = {}
+    default_preprocessed = tmp_path / "svg_previews"
+    default_preprocessed.mkdir()
+    (default_preprocessed / "preprocess_index.json").write_text('{"records": []}', encoding="utf-8")
 
     def launch(*, dataset_root=None, preprocessed=None) -> int:
         captured.update(dataset_root=dataset_root, preprocessed=preprocessed)
@@ -179,3 +182,65 @@ def test_cli_passes_preprocessed_directory_to_ui(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr("mug_previewer.ui.app.launch", launch)
     assert main(["--dataset-root", str(tmp_path), "--preprocessed", str(tmp_path), "ui"]) == 0
     assert captured == {"dataset_root": tmp_path, "preprocessed": tmp_path}
+
+
+def test_preprocess_defaults_output_to_svg_previews(monkeypatch, tmp_path: Path) -> None:
+    dataset = SimpleNamespace(id="area", display_name="Area")
+    captured = {}
+
+    monkeypatch.setattr("mug_previewer.cli.discover_datasets", lambda _root: [SimpleNamespace(dataset=dataset)])
+    monkeypatch.setattr(
+        "mug_previewer.preprocess.preprocess_datasets",
+        lambda _datasets, output, **_kwargs: captured.update(output=output) or SimpleNamespace(
+            processed=0, reused=0, auto_approved=0, manual_review=0, manual_approved=0,
+            unrenderable_input=0, unexpected_errors=0,
+        ),
+    )
+
+    assert main(["preprocess", "--dataset-root", str(tmp_path)]) == 0
+    assert captured["output"] == tmp_path / "svg_previews"
+
+
+def test_preprocess_explicit_output_overrides_svg_previews(monkeypatch, tmp_path: Path) -> None:
+    dataset = SimpleNamespace(id="area", display_name="Area")
+    output = tmp_path / "custom-output"
+    captured = {}
+
+    monkeypatch.setattr("mug_previewer.cli.discover_datasets", lambda _root: [SimpleNamespace(dataset=dataset)])
+    monkeypatch.setattr(
+        "mug_previewer.preprocess.preprocess_datasets",
+        lambda _datasets, resolved_output, **_kwargs: captured.update(output=resolved_output) or SimpleNamespace(
+            processed=0, reused=0, auto_approved=0, manual_review=0, manual_approved=0,
+            unrenderable_input=0, unexpected_errors=0,
+        ),
+    )
+
+    assert main(["preprocess", "--dataset-root", str(tmp_path), "--output", str(output)]) == 0
+    assert captured["output"] == output
+
+
+def test_cli_discovers_default_preprocessed_directory_for_ui(monkeypatch, tmp_path: Path) -> None:
+    preprocessed = tmp_path / "svg_previews"
+    preprocessed.mkdir()
+    (preprocessed / "preprocess_index.json").write_text('{"records": []}', encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(
+        "mug_previewer.ui.app.launch",
+        lambda *, dataset_root=None, preprocessed=None: captured.update(
+            dataset_root=dataset_root, preprocessed=preprocessed,
+        ) or 0,
+    )
+
+    assert main(["--dataset-root", str(tmp_path), "ui"]) == 0
+    assert captured == {"dataset_root": tmp_path, "preprocessed": preprocessed}
+
+
+def test_cli_missing_default_preprocessed_index_is_clear_and_does_not_launch(monkeypatch, tmp_path: Path, capsys) -> None:
+    monkeypatch.setattr("mug_previewer.ui.app.launch", lambda **_kwargs: pytest.fail("UI must not launch"))
+
+    assert main(["--dataset-root", str(tmp_path), "ui"]) == 2
+
+    output = capsys.readouterr().out
+    assert str(tmp_path / "svg_previews" / "preprocess_index.json") in output
+    assert "Run `mug-previewer preprocess --dataset-root <root>` first" in output
