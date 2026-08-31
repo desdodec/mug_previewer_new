@@ -19,6 +19,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--dataset-root", type=Path)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
+    preprocess = commands.add_parser("preprocess", help="Prepare resumable editable face assets for GUI use.")
+    preprocess.add_argument("--dataset-root", dest="preprocess_dataset_root", type=Path)
+    preprocess.add_argument("--output", type=Path, required=True)
+    preprocess.add_argument("--dataset", action="append", help="Dataset ID or display name; may be repeated.")
+    preprocess.add_argument("--street-id", action="append", help="Limit every selected dataset to these IDs.")
+    preprocess.add_argument("--force", action="store_true", help="Regenerate even when matching assets are indexed.")
     datasets = commands.add_parser("datasets").add_subparsers(dest="operation", required=True)
     datasets.add_parser("list")
     dataset = commands.add_parser("dataset").add_subparsers(dest="operation", required=True)
@@ -103,6 +109,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .ui.app import launch
         return launch(dataset_root=args.dataset_root)
 
+    if args.command == "preprocess":
+        root = args.preprocess_dataset_root or args.dataset_root or load_settings().dataset_root
+        if root is None:
+            print("No dataset root is configured. Set MUG_PREVIEWER_DATASET_ROOT or pass --dataset-root.")
+            return 2
+        found = discover_datasets(root)
+        datasets_to_process = [item.dataset for item in found]
+        if args.dataset:
+            requested = {item.casefold() for item in args.dataset}
+            datasets_to_process = [
+                item for item in datasets_to_process
+                if item.id.casefold() in requested or item.display_name.casefold() in requested
+            ]
+            missing = requested - {
+                value for item in datasets_to_process for value in (item.id.casefold(), item.display_name.casefold())
+            }
+            if missing:
+                print("Dataset not found: {}".format(", ".join(sorted(missing))))
+                return 2
+        if not datasets_to_process:
+            print(f"No usable datasets found under: {root}")
+            return 2
+        from .preprocess import preprocess_datasets
+
+        summary = preprocess_datasets(
+            datasets_to_process, args.output, street_ids=args.street_id, force=args.force,
+        )
+        print("Preprocess summary:")
+        print(f"  Processed: {summary.processed}")
+        print(f"  Reused/skipped: {summary.reused}")
+        print(f"  AUTO_APPROVED: {summary.auto_approved}")
+        print(f"  MANUAL_REVIEW: {summary.manual_review}")
+        print(f"  UNRENDERABLE_INPUT: {summary.unrenderable_input}")
+        print(f"  Unexpected errors: {summary.unexpected_errors}")
+        print(f"  Index: {args.output / 'preprocess_index.json'}")
+        return 0
     if args.command == "manual-review":
         return _run_manual_review_command(args)
 

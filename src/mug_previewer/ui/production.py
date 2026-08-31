@@ -98,6 +98,22 @@ def production_status(
         decision.triage_status, decision.placement_class, decision.reason_codes, dataset, street, override_path,
     )
 
+def production_triage_state(
+    dataset: Dataset,
+    street: StreetRecord,
+) -> tuple[ProductionTriageStatus, tuple[str, ...]]:
+    """Return the existing production state without changing its policy.
+
+    Reviewed rows are authoritative and deliberately avoid candidate scoring.
+    Streets outside that scope retain the established on-demand production
+    triage behaviour.
+    """
+    scope_row = _production_scope_index().get((dataset.display_name, street.id))
+    if scope_row is not None:
+        return ProductionTriageStatus(scope_row["triage_status"]), _scope_reason_codes(scope_row)
+    decision = select_production_placement(street, area=dataset.display_name)
+    return decision.triage_status, decision.reason_codes
+
 
 def _status_from_triage(
     triage_status: ProductionTriageStatus,
