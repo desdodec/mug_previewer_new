@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import queue
+import tempfile
 import threading
 import tkinter as tk
 from dataclasses import dataclass
@@ -15,8 +16,56 @@ from ..datasets.models import Dataset
 from ..preprocess import INDEX_FILENAME, PreprocessProgress, PreprocessSummary, preprocess_datasets
 
 
-def default_output_path(dataset_root: Path | str) -> Path:
-    return Path(dataset_root) / "svg_previews"
+class PreprocessLocationError(ValueError):
+    """A concise, user-actionable input or output location problem."""
+
+
+def validate_preprocess_locations(
+    input_root: Path | str | None,
+    output_root: Path | str | None,
+    *,
+    discover: Callable[[Path | str], list] = discover_datasets,
+) -> tuple[Path, Path, list]:
+    """Validate explicit locations and return the datasets from the input root."""
+    if input_root is None or not str(input_root).strip():
+        raise PreprocessLocationError("Choose an Input Dataset Folder.")
+    if output_root is None or not str(output_root).strip():
+        raise PreprocessLocationError("Choose an Output Folder.")
+    input_path, output_path = Path(input_root), Path(output_root)
+    if not input_path.is_dir():
+        raise PreprocessLocationError(f"Input Dataset Folder does not exist: {input_path}")
+    input_resolved, output_resolved = input_path.resolve(), output_path.resolve()
+    if _paths_overlap(input_resolved, output_resolved):
+        raise PreprocessLocationError("Input Dataset Folder and Output Folder must be separate locations.")
+    if output_path.exists() and not output_path.is_dir():
+        raise PreprocessLocationError(f"Output Folder is not a folder: {output_path}")
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise PreprocessLocationError(f"Output Folder cannot be created: {output_path} ({error})") from error
+    if not output_path.is_dir():
+        raise PreprocessLocationError(f"Output Folder is not a folder: {output_path}")
+    try:
+        with tempfile.NamedTemporaryFile(dir=output_path, prefix=".mug-previewer-write-test-", delete=True):
+            pass
+    except OSError as error:
+        raise PreprocessLocationError(f"Output Folder is not writable: {output_path} ({error})") from error
+    datasets = discover(input_path)
+    if not datasets:
+        raise PreprocessLocationError(f"No valid workflow datasets were found in: {input_path}")
+    return input_path, output_path, datasets
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        try:
+            left.relative_to(right)
+            return True
+        except ValueError:
+            return False
 
 
 @dataclass(frozen=True)
@@ -59,11 +108,14 @@ class PreprocessUiApp:
         self.root.minsize(590, 410)
         self.worker: PreprocessWorker | None = None
         self.dataset_root_var = tk.StringVar(value=str(dataset_root) if dataset_root else "")
-        self.output_var = tk.StringVar(value=str(default_output_path(dataset_root)) if dataset_root else "")
+        self.output_var = tk.StringVar(value="")
         self.scope_var = tk.StringVar(value="All datasets")
         self.progress_var = tk.StringVar(value="Ready")
         self.counts_var = tk.StringVar(value="Processed: 0 | Reused/skipped: 0")
         self._build()
+        if dataset_root is not None:
+            self._load_scope_choices()
+        self._refresh_location_state()
         self._update_browser_button()
 
     def _build(self) -> None:
@@ -72,15 +124,15 @@ class PreprocessUiApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        self._path_row(frame, 0, "Dataset root", self.dataset_root_var, self._choose_dataset_root)
-        self._path_row(frame, 1, "Output folder", self.output_var, self._choose_output)
+        self._path_row(frame, 0, "Input Dataset Folder", self.dataset_root_var, self._choose_dataset_root, "Choose Input Folder...")
+        self._path_row(frame, 1, "Output Folder", self.output_var, self._choose_output, "Choose Output Folder...")
         ttk.Label(frame, text="Scope").grid(row=2, column=0, sticky="w", pady=(12, 0))
         self.scope_box = ttk.Combobox(frame, textvariable=self.scope_var, state="readonly")
         self.scope_box.grid(row=3, column=0, sticky="ew")
         self.scope_box["values"] = ("All datasets",)
         actions = ttk.Frame(frame)
         actions.grid(row=4, column=0, sticky="ew", pady=(14, 8))
-        self.start_button = ttk.Button(actions, text="Start Preprocessing", command=self._start)
+        self.start_button = ttk.Button(actions, text="Start Preprocessing", command=self._start, state="disabled")
         self.start_button.grid(row=0, column=0, padx=(0, 7))
         ttk.Button(actions, text="Open Output Folder", command=self._open_output).grid(row=0, column=1, padx=(0, 7))
         self.browser_button = ttk.Button(actions, text="Launch Mug Browser", command=self._launch_browser)
@@ -89,30 +141,34 @@ class PreprocessUiApp:
         ttk.Label(frame, textvariable=self.counts_var, wraplength=550, justify="left").grid(row=6, column=0, sticky="w")
 
     @staticmethod
-    def _path_row(parent: ttk.Frame, row: int, label: str, value: tk.StringVar, command: Callable[[], None]) -> None:
+    def _path_row(
+        parent: ttk.Frame, row: int, label: str, value: tk.StringVar,
+        command: Callable[[], None], button_label: str,
+    ) -> None:
         ttk.Label(parent, text=label).grid(row=row * 2, column=0, sticky="w")
         line = ttk.Frame(parent)
         line.grid(row=row * 2 + 1, column=0, sticky="ew", pady=(0, 8))
         line.columnconfigure(0, weight=1)
-        ttk.Entry(line, textvariable=value).grid(row=0, column=0, sticky="ew", padx=(0, 7))
-        ttk.Button(line, text="Choose Folder...", command=command).grid(row=0, column=1)
+        ttk.Entry(line, textvariable=value, state="readonly").grid(row=0, column=0, sticky="ew", padx=(0, 7))
+        ttk.Button(line, text=button_label, command=command).grid(row=0, column=1)
 
     def _choose_dataset_root(self) -> None:
-        selected = filedialog.askdirectory(parent=self.root, title="Choose dataset root")
+        selected = filedialog.askdirectory(parent=self.root, title="Choose Input Dataset Folder")
         if selected:
             self.dataset_root_var.set(selected)
-            self.output_var.set(str(default_output_path(selected)))
             self._load_scope_choices()
+            self._refresh_location_state()
             self._update_browser_button()
 
     def _choose_output(self) -> None:
-        selected = filedialog.askdirectory(parent=self.root, title="Choose preprocessing output folder")
+        selected = filedialog.askdirectory(parent=self.root, title="Choose Output Folder")
         if selected:
             self.output_var.set(selected)
+            self._refresh_location_state()
             self._update_browser_button()
 
     def _load_scope_choices(self) -> None:
-        root = Path(self.dataset_root_var.get())
+        root = self.dataset_root_var.get()
         try:
             choices = [item.dataset.display_name for item in discover_datasets(root)]
         except Exception:
@@ -120,13 +176,30 @@ class PreprocessUiApp:
         self.scope_box["values"] = tuple(["All datasets", *choices])
         self.scope_var.set("All datasets")
 
-    def _start(self) -> None:
-        dataset_root = Path(self.dataset_root_var.get())
-        output = Path(self.output_var.get())
-        if not dataset_root.is_dir():
-            messagebox.showerror("Preprocessing", f"Dataset root does not exist: {dataset_root}", parent=self.root)
+    def _refresh_location_state(self) -> None:
+        try:
+            _input_root, _output_root, datasets = validate_preprocess_locations(
+                self.dataset_root_var.get(), self.output_var.get(),
+            )
+        except PreprocessLocationError as error:
+            self.start_button.configure(state="disabled")
+            if self.dataset_root_var.get() or self.output_var.get():
+                self.progress_var.set(str(error))
             return
-        found = discover_datasets(dataset_root)
+        self.scope_box["values"] = tuple(["All datasets", *(item.dataset.display_name for item in datasets)])
+        self.start_button.configure(state="normal")
+        self.progress_var.set("Input and output folders are ready.")
+
+    def _start(self) -> None:
+        try:
+            dataset_root, output, found = validate_preprocess_locations(
+                self.dataset_root_var.get(), self.output_var.get(),
+            )
+        except PreprocessLocationError as error:
+            self.start_button.configure(state="disabled")
+            self.progress_var.set(str(error))
+            messagebox.showerror("Preprocessing", str(error), parent=self.root)
+            return
         datasets = [item.dataset for item in found]
         if self.scope_var.get() != "All datasets":
             datasets = [dataset for dataset in datasets if dataset.display_name == self.scope_var.get()]
@@ -170,19 +243,41 @@ class PreprocessUiApp:
         messagebox.showinfo("Preprocessing complete", _counts_text(finished.summary), parent=self.root)
 
     def _update_browser_button(self) -> None:
-        output = Path(self.output_var.get()) if self.output_var.get() else None
-        ready = output is not None and (output / INDEX_FILENAME).is_file()
+        try:
+            _input_root, output, _datasets = validate_preprocess_locations(
+                self.dataset_root_var.get(), self.output_var.get(),
+            )
+        except PreprocessLocationError:
+            ready = False
+        else:
+            ready = (output / INDEX_FILENAME).is_file()
         self.browser_button.configure(state="normal" if ready else "disabled")
 
     def _open_output(self) -> None:
+        if not self.output_var.get():
+            messagebox.showerror("Preprocessing", "Choose an Output Folder first.", parent=self.root)
+            return
         output = Path(self.output_var.get())
-        output.mkdir(parents=True, exist_ok=True)
+        try:
+            output.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            messagebox.showerror("Preprocessing", f"Cannot create Output Folder: {error}", parent=self.root)
+            return
         os.startfile(output)  # type: ignore[attr-defined]
 
     def _launch_browser(self) -> None:
         from .app import launch
 
-        dataset_root, output = Path(self.dataset_root_var.get()), Path(self.output_var.get())
+        try:
+            dataset_root, output, _datasets = validate_preprocess_locations(
+                self.dataset_root_var.get(), self.output_var.get(),
+            )
+        except PreprocessLocationError as error:
+            messagebox.showerror("Preprocessing", str(error), parent=self.root)
+            return
+        if not (output / INDEX_FILENAME).is_file():
+            messagebox.showerror("Preprocessing", f"No preprocessing index exists in: {output}", parent=self.root)
+            return
         self.root.destroy()
         launch(dataset_root=dataset_root, preprocessed=output)
 
