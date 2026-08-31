@@ -270,6 +270,7 @@ class FrontPlacementDecision:
 class ProductionTriageStatus(str, Enum):
     AUTO_APPROVED = 'AUTO_APPROVED'
     MANUAL_REVIEW = 'MANUAL_REVIEW'
+    MANUAL_APPROVED = 'MANUAL_APPROVED'
     UNRENDERABLE_INPUT = 'UNRENDERABLE_INPUT'
 
 

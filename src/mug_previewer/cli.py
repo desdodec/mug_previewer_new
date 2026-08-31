@@ -25,6 +25,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     preprocess.add_argument("--dataset", action="append", help="Dataset ID or display name; may be repeated.")
     preprocess.add_argument("--street-id", action="append", help="Limit every selected dataset to these IDs.")
     preprocess.add_argument("--force", action="store_true", help="Regenerate even when matching assets are indexed.")
+    approve_svg = commands.add_parser("approve-svg", help="Accept a manually edited face SVG for a review street.")
+    approve_svg.add_argument("--dataset-root", dest="approve_dataset_root", type=Path)
+    approve_svg.add_argument("--preprocessed", type=Path, required=True)
+    approve_svg.add_argument("--dataset", required=True, help="Dataset ID or display name.")
+    approve_svg.add_argument("--street-id", required=True)
+    approve_svg.add_argument("--svg", type=Path, required=True, help="Edited SVG to validate and store.")
     datasets = commands.add_parser("datasets").add_subparsers(dest="operation", required=True)
     datasets.add_parser("list")
     dataset = commands.add_parser("dataset").add_subparsers(dest="operation", required=True)
@@ -109,6 +115,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .ui.app import launch
         return launch(dataset_root=args.dataset_root)
 
+    if args.command == "approve-svg":
+        root = args.approve_dataset_root or args.dataset_root or load_settings().dataset_root
+        if root is None:
+            print("No dataset root is configured. Set MUG_PREVIEWER_DATASET_ROOT or pass --dataset-root.")
+            return 2
+        requested = args.dataset.casefold()
+        matches = [
+            item.dataset for item in discover_datasets(root)
+            if item.dataset.id.casefold() == requested or item.dataset.display_name.casefold() == requested
+        ]
+        if not matches:
+            print(f"Dataset not found: {args.dataset}")
+            return 2
+        if len(matches) > 1:
+            print(f"Dataset is ambiguous: {args.dataset}")
+            return 2
+        dataset = matches[0]
+        street = dataset.get_street(args.street_id)
+        if street is None:
+            print(f"Street not found: {args.street_id}")
+            return 2
+        from .preprocess import SvgApprovalError, approve_manual_svg
+
+        try:
+            resolution = approve_manual_svg(dataset, street, args.preprocessed, args.svg)
+        except SvgApprovalError as error:
+            print(f"SVG approval error: {error}")
+            return 2
+        print(f"Approved SVG: {resolution.path}")
+        print(f"State: {resolution.state.value}")
+        print(f"Index: {args.preprocessed / 'preprocess_index.json'}")
+        return 0
     if args.command == "preprocess":
         root = args.preprocess_dataset_root or args.dataset_root or load_settings().dataset_root
         if root is None:
@@ -141,6 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  Reused/skipped: {summary.reused}")
         print(f"  AUTO_APPROVED: {summary.auto_approved}")
         print(f"  MANUAL_REVIEW: {summary.manual_review}")
+        print(f"  MANUAL_APPROVED: {summary.manual_approved}")
         print(f"  UNRENDERABLE_INPUT: {summary.unrenderable_input}")
         print(f"  Unexpected errors: {summary.unexpected_errors}")
         print(f"  Index: {args.output / 'preprocess_index.json'}")
