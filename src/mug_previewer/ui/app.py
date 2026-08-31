@@ -46,11 +46,14 @@ class MugPreviewerApp(ttk.Frame):
         self._production_status_generation = 0
         self._production_status_cache: dict[tuple[str, str], ProductionStatus] = {}
         self._production_status_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, ProductionStatus | None, Exception | None]] = queue.SimpleQueue()
+        self._render_generation = 0
+        self._render_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, PreviewPair | None, Exception | None]] = queue.SimpleQueue()
         self._build_widgets()
         self.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         root.after(25, self._drain_production_status_results)
+        root.after(25, self._drain_render_results)
         root.after_idle(self.refresh_datasets)
 
     def _build_widgets(self) -> None:
@@ -191,6 +194,7 @@ class MugPreviewerApp(ttk.Frame):
         if data is None:
             return
         self._invalidate_active_production_status_request()
+        self._invalidate_active_render_request()
         self.state.selected_dataset = data
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
@@ -211,6 +215,7 @@ class MugPreviewerApp(ttk.Frame):
         if data is None:
             return
         self._invalidate_active_production_status_request()
+        self._invalidate_active_render_request()
         self.state.street_filter = self.search_var.get()
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         self.street_list.delete(0, tk.END)
@@ -227,6 +232,7 @@ class MugPreviewerApp(ttk.Frame):
         selection = self.street_list.curselection()
         if not selection:
             return
+        self._invalidate_active_render_request()
         self.state.selected_street = self.state.filtered_streets[selection[0]]
         self._request_production_status(self.state.selected_dataset, self.state.selected_street)
 
@@ -357,23 +363,54 @@ class MugPreviewerApp(ttk.Frame):
         if data is None or street is None:
             self._show_error("Select a dataset and street before rendering.")
             return
+        self._render_generation += 1
+        generation = self._render_generation
         self.render_button.configure(state="disabled")
         self.status_var.set(f"Rendering {street.id} — {street.display_name}…")
         self.state.render_status = "Rendering"
         threading.Thread(
             target=self._render_worker,
-            args=(data, street, self.state.design_options),
+            args=(generation, data, street, self.state.design_options),
             daemon=True,
         ).start()
 
-    def _render_worker(self, data: Dataset, street: StreetRecord, design_options: DesignOptions) -> None:
+    def _render_worker(self, generation: int, data: Dataset, street: StreetRecord, design_options: DesignOptions) -> None:
+        """Render off the UI thread and hand the result to the main-thread poller."""
         try:
             pair = render_preview_pair(data, street, design_options=design_options)
         except Exception as error:
             LOGGER.exception("Preview rendering failed")
-            self.root.after(0, lambda: self._render_failed(str(error)))
+            self._render_results.put((generation, data, street, None, error))
             return
-        self.root.after(0, lambda: self._render_finished(pair, data, street))
+        self._render_results.put((generation, data, street, pair, None))
+
+    def _drain_render_results(self) -> None:
+        """Apply completed preview results on Tk's main thread and keep polling."""
+        while True:
+            try:
+                generation, data, street, pair, error = self._render_results.get_nowait()
+            except queue.Empty:
+                break
+            if not self._is_current_render_request(generation, data, street):
+                continue
+            if error is not None:
+                self._render_failed(str(error))
+            elif pair is not None:
+                self._render_finished(pair, data, street)
+        self.root.after(25, self._drain_render_results)
+
+    def _invalidate_active_render_request(self) -> None:
+        self._render_generation += 1
+
+    def _is_current_render_request(self, generation: int, data: Dataset, street: StreetRecord) -> bool:
+        selected_data, selected_street = self.state.selected_dataset, self.state.selected_street
+        return (
+            generation == self._render_generation
+            and selected_data is not None
+            and selected_street is not None
+            and selected_data.id == data.id
+            and selected_street.id == street.id
+        )
 
     def _render_finished(self, pair: PreviewPair, data: Dataset, street: StreetRecord) -> None:
         self.state.current_wrap = pair.wrap

@@ -1,3 +1,9 @@
+# Mug Previewer 0.1.0rc3
+
+Fixes the preview-render Tk thread handoff: completed worker results are now queued and applied by the Tk main thread, preventing the desktop preview UI from remaining in `Rendering...`.
+
+## Previous release candidate: 0.1.0rc2
+
 # Mug Previewer 0.1.0rc2
 
 Fixes a desktop UI issue where production status checking could remain indefinitely in a loading state after selecting a street, leaving preview and export actions disabled.
