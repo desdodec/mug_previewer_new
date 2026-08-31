@@ -10,7 +10,7 @@ from typing import Iterable, Literal
 
 from ..datasets.models import Dataset, StreetRecord
 from ..diagnostics.front_candidates import ProductionTriageStatus, select_production_placement
-from ..manual import DEFAULT_MANUAL_OVERRIDE_PATH, ManualResolutionStatus, load_manual_overrides
+from ..manual import DEFAULT_MANUAL_OVERRIDE_PATH, ManualPlacementOverride, ManualResolutionStatus, load_manual_overrides
 
 Readiness = Literal["ready", "manual_review", "unrenderable"]
 
@@ -57,6 +57,29 @@ class UnrenderableItem:
     reason: str
 
 
+def preview_render_override(dataset: Dataset, street: StreetRecord) -> ManualPlacementOverride | None:
+    """Return the placement already approved for a fast on-screen preview.
+
+    The release scope is a validated production decision, so preview rendering
+    need not score its 70 diagnostic candidates again.  Exports still render
+    through the full production path.
+    """
+    manual = load_manual_overrides().get(dataset.id, street.id)
+    if manual is not None and manual.approved:
+        return manual
+    scope_row = _production_scope_index().get((dataset.display_name, street.id))
+    if scope_row is None or scope_row["triage_status"] != ProductionTriageStatus.AUTO_APPROVED.value:
+        return None
+    if scope_row["production_placement"] == "ADAPTED":
+        return ManualPlacementOverride.approved_transform(
+            dataset.id, street.id, street.display_name,
+            orientation_deg=int(scope_row["orientation"]), scale=float(scope_row["scale"]), y_offset=int(scope_row["y_offset"]),
+            note="validated production placement",
+        )
+    return ManualPlacementOverride.approved_standard(
+        dataset.id, street.id, street.display_name, note="validated production placement",
+    )
+
 def production_status(
     dataset: Dataset,
     street: StreetRecord,
@@ -91,9 +114,9 @@ def _status_from_triage(
         override = load_manual_overrides(override_path).get(dataset.id, street.id)
         if override is not None and override.approved:
             if override.status is ManualResolutionStatus.APPROVED_STANDARD:
-                label = "Manually approved — Standard placement"
+                label = "Manually approved \u2014 Standard placement"
             else:
-                label = f"Manually approved — Edited placement {override.orientation_deg} degrees / {override.scale:.2f} / Y{override.y_offset:+d}"
+                label = f"Manually approved \u2014 Edited placement {override.orientation_deg} degrees / {override.scale:.2f} / Y{override.y_offset:+d}"
             return ProductionStatus("ready", "Ready for Production", label, True, False, label, reason_codes)
         return ProductionStatus(
             "manual_review", "Manual Review Required", "Manual review is required before production export.",
@@ -101,7 +124,7 @@ def _status_from_triage(
         )
     label = "Ready for production"
     if placement_class == "ADAPTED":
-        label = "Ready for production — automatic placement applied"
+        label = "Ready for production \u2014 automatic placement applied"
     return ProductionStatus("ready", "Ready for Production", label, True, False, reason_codes=reason_codes)
 
 

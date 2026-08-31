@@ -10,10 +10,12 @@ import pytest
 from mug_previewer.datasets.discovery import DatasetCandidate
 from mug_previewer.design import DesignOptions, build_render_options
 from mug_previewer.datasets.loader import load_dataset
+from mug_previewer.manual import ManualPlacementOverride
 from mug_previewer.preview.mockup import PreviewOrientation
 from mug_previewer.ui.state import PREVIEW_SIZE, UIDataError, dataset_options, display_image, filter_streets, render_preview_pair
 from mug_previewer.providers import get_provider_profile
 from mug_previewer.ui.state import INKTHREADABLE_PROFILE_ID, export_inkthreadable_png
+import mug_previewer.ui.state as ui_state
 import mug_previewer.ui.app as ui_app
 from mug_previewer.ui.app import MugPreviewerApp
 
@@ -39,7 +41,7 @@ def test_street_filter_matches_case_insensitive_names_ids_and_empty_query(tmp_pa
     assert [street.id for street in filter_streets(streets, "")] == ["0001", "0002"]
     assert [street.id for street in filter_streets(streets, "john")] == ["0001"]
     assert [street.id for street in filter_streets(streets, "0002")] == ["0002"]
-    assert [street.id for street in filter_streets(streets, "CAFÉ")] == ["0002"]
+    assert [street.id for street in filter_streets(streets, "CAF\u00C9")] == ["0002"]
 
 
 def test_preview_rendering_uses_one_wrap_and_both_production_orientations(tmp_path: Path) -> None:
@@ -281,3 +283,28 @@ def test_printify_export_without_selection_shows_clear_error_without_save_dialog
 def test_dataset_options_requires_explicit_configuration() -> None:
     with pytest.raises(UIDataError, match='No dataset root'):
         dataset_options(None)
+
+
+def test_preview_uses_screen_mockup_layout_and_approved_placement(tmp_path: Path, monkeypatch) -> None:
+    data = _dataset(tmp_path)
+    street = data.streets[0]
+    wrap = Image.new("RGBA", (2362, 1063))
+    override = ManualPlacementOverride.approved_standard(data.id, street.id, street.display_name)
+    captured: list[object] = []
+
+    monkeypatch.setattr(ui_state, "approved_override_for_street", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ui_state, "preview_render_override", lambda *_args: override)
+
+    def fake_wrap(_data, _street, options=None):
+        captured.append(options)
+        return wrap
+
+    def fake_preview(_wrap, options):
+        captured.append(options)
+        return Image.new("RGBA", ui_state.PREVIEW_SIZE)
+
+    render_preview_pair(data, street, wrap_renderer=fake_wrap, preview_renderer=fake_preview)
+
+    options = captured[0]
+    assert options.face_options.manual_override is override
+    assert [item.layout.canvas_size for item in captured[1:]] == [ui_state.PREVIEW_SIZE, ui_state.PREVIEW_SIZE]

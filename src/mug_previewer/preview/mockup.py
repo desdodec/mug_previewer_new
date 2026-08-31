@@ -64,11 +64,31 @@ class MugPreviewLayout:
             raise ValueError("Mug projection needs at least eight mesh segments.")
 
 
+def scaled_mug_preview_layout(
+    scale: float,
+    layout: MugPreviewLayout | None = None,
+) -> MugPreviewLayout:
+    """Return a proportionally scaled owned-mug layout for screen previews."""
+    if not 0 < scale <= 1:
+        raise ValueError("Preview scale must be greater than zero and no greater than one.")
+    source = layout or DEFAULT_MUG_PREVIEW_LAYOUT
+    left, top, right, bottom = source.body_bounds_xyxy
+    return MugPreviewLayout(
+        canvas_size=tuple(max(1, round(value * scale)) for value in source.canvas_size),
+        body_bounds_xyxy=tuple(round(value * scale) for value in (left, top, right, bottom)),
+        visible_angle_degrees=source.visible_angle_degrees,
+        mesh_segments=source.mesh_segments,
+    )
+
+
 @dataclass(frozen=True)
 class MugPreviewOptions:
     """Preview-only options; none affect canonical or provider artwork."""
 
     layout: MugPreviewLayout = field(default_factory=lambda: DEFAULT_MUG_PREVIEW_LAYOUT)
+    wrap_geometry: CanonicalWrapPreviewGeometry = field(
+        default_factory=lambda: CANONICAL_WRAP_PREVIEW_GEOMETRY,
+    )
     orientation: PreviewOrientation | str = PreviewOrientation.FRONT_HANDLE_RIGHT
     show_debug_guides: bool = False
 
@@ -107,8 +127,8 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     flat print master.
     """
     options = options or MugPreviewOptions()
-    _validate_wrap(wrap)
-    orientation = _resolve_orientation(options.orientation)
+    _validate_wrap(wrap, options.wrap_geometry)
+    orientation = _resolve_orientation(options.orientation, options.wrap_geometry)
     base, body_mask = _load_owned_mug_assets(options.layout)
     layout = options.layout
     if orientation.mirror_mug:
@@ -118,7 +138,7 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     left, top, right, bottom = layout.body_bounds_xyxy
     projected = project_canonical_wrap(
         wrap, target_size=(right - left, bottom - top), visible_angle_degrees=options.layout.visible_angle_degrees,
-        mesh_segments=options.layout.mesh_segments, source_centre_x=orientation.source_centre_x,
+        geometry=options.wrap_geometry, mesh_segments=options.layout.mesh_segments, source_centre_x=orientation.source_centre_x,
     )
     local_mask = body_mask.crop((left, top, right, bottom))
     projected.putalpha(ImageChops.multiply(projected.getchannel("A"), local_mask))
@@ -151,7 +171,7 @@ def project_canonical_wrap(
     if target_size[0] <= 0 or target_size[1] <= 0:
         raise MugPreviewError("Projection target dimensions must be positive.")
     if not 20.0 <= visible_angle_degrees < 180.0 or mesh_segments < 8:
-        raise MugPreviewError("Projection needs a 20–180 degree view and at least eight mesh segments.")
+        raise MugPreviewError("Projection needs a 20â€“180 degree view and at least eight mesh segments.")
     _validate_wrap(wrap, geometry)
     source = wrap.convert("RGBA")
     target_width, target_height = target_size
@@ -212,8 +232,11 @@ def _load_owned_mug_assets(layout: MugPreviewLayout) -> tuple[Image.Image, Image
         base = source.convert("RGBA").copy()
     with Image.open(assets / "white_mug_mask.png") as source:
         mask = source.convert("L").copy()
-    if base.size != layout.canvas_size or mask.size != layout.canvas_size:
-        raise MugPreviewError("White mug preview assets do not match the declared preview canvas.")
+    if base.size != mask.size:
+        raise MugPreviewError("White mug preview assets must share one canvas size.")
+    if base.size != layout.canvas_size:
+        base = base.resize(layout.canvas_size, Image.Resampling.LANCZOS)
+        mask = mask.resize(layout.canvas_size, Image.Resampling.NEAREST)
     return base, mask
 
 

@@ -89,3 +89,39 @@ def test_stale_render_result_is_ignored_by_tk_poller() -> None:
     controller = _controller(data, street_a)
     finished: list[object] = []
     controller._render_finished = lambda *_args: finished.append("finished")
+    controller.state.selected_street = street_b
+    controller._render_results.put((1, data, street_a, object(), None))
+
+    controller._drain_render_results()
+
+    assert finished == []
+    assert controller.root.after_calls == [(25, controller._drain_render_results)]
+
+
+def test_shutdown_invalidates_workers_before_destroying_tk() -> None:
+    data = SimpleNamespace(id="area", display_name="Area")
+    street = SimpleNamespace(id="0001", display_name="Ready")
+    controller = _controller(data, street)
+    destroyed: list[bool] = []
+    controller.root.destroy = lambda: destroyed.append(True)
+    controller._shutting_down = False
+    controller._production_status_generation = 4
+    controller._resize_pending = None
+
+    controller._shutdown()
+
+    assert controller._shutting_down is True
+    assert controller._render_generation == 2
+    assert controller._production_status_generation == 5
+    assert destroyed == [True]
+
+
+def test_render_poller_does_not_reschedule_after_shutdown() -> None:
+    data = SimpleNamespace(id="area", display_name="Area")
+    street = SimpleNamespace(id="0001", display_name="Ready")
+    controller = _controller(data, street)
+    controller._shutting_down = True
+
+    controller._drain_render_results()
+
+    assert controller.root.after_calls == []

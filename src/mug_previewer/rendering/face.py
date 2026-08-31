@@ -94,18 +94,20 @@ def _render_face_with_decision(
     panel_center = width * FRONT_CENTER_RATIO
     face_markup = _render_native_face(glyph, panel_center, width, height, options.street_feature_stroke_multiplier)
     standard = _render_face_standard(street, options, face_markup=face_markup)
-    from ..diagnostics.front_candidates import Candidate, render_production_masks, select_production_placement_from_masks, transform_street_mask
-
-    masks = render_production_masks(street, area=options.area, face_markup=face_markup, base=standard)
-    decision, _ranked = select_production_placement_from_masks(masks)
     override = options.manual_override
     if override is not None:
         if not override.approved:
             raise FaceRenderError("Only an explicitly approved manual override may be rendered.")
         if override.status is ManualResolutionStatus.APPROVED_STANDARD:
             return standard, override
+        from ..diagnostics.front_candidates import Candidate, render_production_masks
+        masks = render_production_masks(street, area=options.area, face_markup=face_markup, base=standard)
         candidate = Candidate(override.orientation_deg, override.scale, 0, override.y_offset)
         return _render_transformed_street(standard, masks, candidate), override
+
+    from ..diagnostics.front_candidates import render_production_masks, select_production_placement_from_masks
+    masks = render_production_masks(street, area=options.area, face_markup=face_markup, base=standard)
+    decision, _ranked = select_production_placement_from_masks(masks)
     if not decision.adapted:
         return standard, decision
     # A production decision stores its approved rescue as ``transform``.

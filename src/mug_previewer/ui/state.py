@@ -14,11 +14,13 @@ from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset, StreetRecord
 from ..exporting import save_provider_export
 from ..manual import approved_override_for_street, load_manual_overrides
-from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview
+from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview, scaled_mug_preview_layout
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
+from .production import preview_render_override
 
-PREVIEW_SIZE = (1024, 1536)
+PREVIEW_SIZE = (512, 768)
+SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(0.5)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
 # Export helpers use the production provider profile.
@@ -185,10 +187,11 @@ def render_preview_pair(
     wrap_renderer: WrapRenderer = render_wrap_result,
     preview_renderer: PreviewRenderer = render_mug_preview,
 ) -> PreviewPair:
-    """Render one canonical wrap, then derive both fixed production mockups."""
+    """Render a screen-quality preview without re-running placement triage."""
     design = design_options or DesignOptions()
     options = build_render_options(design, area=dataset.display_name)
     override = approved_override_for_street(dataset, street, load_manual_overrides(), area=dataset.display_name)
+    override = override or preview_render_override(dataset, street)
     if override is not None:
         options = replace(options, face_options=replace(options.face_options, manual_override=override))
     rendered = wrap_renderer(
@@ -201,8 +204,8 @@ def render_preview_pair(
     else:
         wrap = rendered
         framing_mode = "metric" if dataset.capabilities.metric_context_framing else "legacy"
-    front = preview_renderer(wrap, MugPreviewOptions(orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
-    rear = preview_renderer(wrap, MugPreviewOptions(orientation=PreviewOrientation.REAR_HANDLE_LEFT))
+    front = preview_renderer(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
+    rear = preview_renderer(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.REAR_HANDLE_LEFT))
     for name, preview in (("Front", front), ("Rear", rear)):
         if preview.size != PREVIEW_SIZE or preview.mode != "RGBA":
             raise UIDataError(

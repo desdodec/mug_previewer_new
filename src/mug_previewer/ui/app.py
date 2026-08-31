@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 import queue
 import re
 import threading
@@ -48,10 +49,12 @@ class MugPreviewerApp(ttk.Frame):
         self._production_status_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, ProductionStatus | None, Exception | None]] = queue.SimpleQueue()
         self._render_generation = 0
         self._render_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, PreviewPair | None, Exception | None]] = queue.SimpleQueue()
+        self._shutting_down = False
         self._build_widgets()
         self.grid(sticky="nsew")
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
+        root.protocol("WM_DELETE_WINDOW", self._shutdown)
         root.after(25, self._drain_production_status_results)
         root.after(25, self._drain_render_results)
         root.after_idle(self.refresh_datasets)
@@ -115,14 +118,14 @@ class MugPreviewerApp(ttk.Frame):
         )
         self.printify_export_button.grid(row=10, column=0, sticky="ew", pady=(6, 0))
         self.render_button.grid(row=7, column=0, sticky="ew")
-        self.framing_var = tk.StringVar(value="Rear framing: —")
+        self.framing_var = tk.StringVar(value="Rear framing: \u2014")
         ttk.Label(controls, textvariable=self.framing_var).grid(row=8, column=0, sticky="w", pady=(13, 0))
 
         self.front_card = self._preview_card("Front")
         self.front_card.grid(row=0, column=1, sticky="nsew", padx=(0, 7))
         self.rear_card = self._preview_card("Rear")
         self.rear_card.grid(row=0, column=2, sticky="nsew", padx=(7, 0))
-        self.status_var = tk.StringVar(value="Loading datasets…")
+        self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
     def _add_weight_control(
@@ -150,8 +153,8 @@ class MugPreviewerApp(ttk.Frame):
         self._update_weight_displays()
 
     def _update_weight_displays(self) -> None:
-        self.front_weight_display.set(f"{self.front_weight_var.get():.2f}×")
-        self.rear_weight_display.set(f"{self.rear_weight_var.get():.2f}×")
+        self.front_weight_display.set(f"{self.front_weight_var.get():.2f}\u00d7")
+        self.rear_weight_display.set(f"{self.rear_weight_var.get():.2f}\u00d7")
 
     def _design_changed(self, _value: str | None = None) -> None:
         self.state.set_design_options(
@@ -159,7 +162,7 @@ class MugPreviewerApp(ttk.Frame):
         )
         self._update_weight_displays()
         if self.state.current_wrap is not None:
-            self.status_var.set("Design settings changed — render to update preview.")
+            self.status_var.set("Design settings changed \u2014 render to update preview.")
 
     def _reset_design(self) -> None:
         self.state.reset_design_options()
@@ -167,7 +170,7 @@ class MugPreviewerApp(ttk.Frame):
         self.rear_weight_var.set(self.state.design_options.rear_highlight_weight)
         self._update_weight_displays()
         if self.state.current_wrap is not None:
-            self.status_var.set("Design reset — render to update preview.")
+            self.status_var.set("Design reset \u2014 render to update preview.")
 
     def _preview_card(self, title: str) -> ttk.Frame:
         card = ttk.LabelFrame(self, text=title, padding=8)
@@ -199,7 +202,7 @@ class MugPreviewerApp(ttk.Frame):
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
         self.state.framing_mode = None
-        self.framing_var.set("Rear framing: —")
+        self.framing_var.set("Rear framing: \u2014")
         self._clear_previews()
         self.current_production_status = None
         self.production_var.set("Production status: select a street")
@@ -220,7 +223,7 @@ class MugPreviewerApp(ttk.Frame):
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         self.street_list.delete(0, tk.END)
         for street in self.state.filtered_streets:
-            self.street_list.insert(tk.END, f"{street.id} — {street.display_name}")
+            self.street_list.insert(tk.END, f"{street.id} \u2014 {street.display_name}")
         self.state.selected_street = None
         self.current_production_status = None
         self.production_var.set("Production status: select a street")
@@ -266,6 +269,8 @@ class MugPreviewerApp(ttk.Frame):
 
     def _drain_production_status_results(self) -> None:
         """Apply completed worker results on Tk's main thread and keep polling."""
+        if getattr(self, "_shutting_down", False):
+            return
         while True:
             try:
                 generation, data, street, result, error = self._production_status_results.get_nowait()
@@ -276,7 +281,7 @@ class MugPreviewerApp(ttk.Frame):
             elif result is not None:
                 self._production_status_cache[self._production_status_key(data, street)] = result
                 self._production_status_finished(generation, data, street, result)
-        self.root.after(25, self._drain_production_status_results)
+        self._schedule_main_thread_poll(self._drain_production_status_results)
 
     @staticmethod
     def _production_status_key(data: Dataset, street: StreetRecord) -> tuple[str, str]:
@@ -366,7 +371,7 @@ class MugPreviewerApp(ttk.Frame):
         self._render_generation += 1
         generation = self._render_generation
         self.render_button.configure(state="disabled")
-        self.status_var.set(f"Rendering {street.id} — {street.display_name}…")
+        self.status_var.set(f"Rendering {street.id} \u2014 {street.display_name}\u2026")
         self.state.render_status = "Rendering"
         threading.Thread(
             target=self._render_worker,
@@ -386,6 +391,8 @@ class MugPreviewerApp(ttk.Frame):
 
     def _drain_render_results(self) -> None:
         """Apply completed preview results on Tk's main thread and keep polling."""
+        if getattr(self, "_shutting_down", False):
+            return
         while True:
             try:
                 generation, data, street, pair, error = self._render_results.get_nowait()
@@ -397,7 +404,31 @@ class MugPreviewerApp(ttk.Frame):
                 self._render_failed(str(error))
             elif pair is not None:
                 self._render_finished(pair, data, street)
-        self.root.after(25, self._drain_render_results)
+        self._schedule_main_thread_poll(self._drain_render_results)
+
+    def _schedule_main_thread_poll(self, callback: Callable[[], None]) -> None:
+        """Reschedule a poll only while the Tk application still exists."""
+        if getattr(self, "_shutting_down", False):
+            return
+        try:
+            self.root.after(25, callback)
+        except tk.TclError:
+            self._shutting_down = True
+
+    def _shutdown(self) -> None:
+        """Invalidate worker completions before the Tk interpreter is destroyed."""
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        self._invalidate_active_production_status_request()
+        self._invalidate_active_render_request()
+        if self._resize_pending is not None:
+            try:
+                self.root.after_cancel(self._resize_pending)
+            except tk.TclError:
+                pass
+            self._resize_pending = None
+        self.root.destroy()
 
     def _invalidate_active_render_request(self) -> None:
         self._render_generation += 1
@@ -419,7 +450,7 @@ class MugPreviewerApp(ttk.Frame):
         self.state.framing_mode = pair.framing_mode
         self.state.render_status = "Ready"
         self.framing_var.set(f"Rear framing: {pair.framing_mode}")
-        self.status_var.set(f"Rendered {data.display_name} — {street.id} {street.display_name}")
+        self.status_var.set(f"Rendered {data.display_name} \u2014 {street.id} {street.display_name}")
         self._refresh_preview_images()
         self.render_button.configure(state="normal")
 
@@ -523,6 +554,8 @@ class MugPreviewerApp(ttk.Frame):
     def _inkthreadable_filename(dataset: Dataset, street: StreetRecord) -> str:
         return MugPreviewerApp._provider_filename(dataset, street, "inkthreadable")
     def _preview_resized(self, _event: object) -> None:
+        if getattr(self, "_shutting_down", False):
+            return
         if self._resize_pending is not None:
             self.root.after_cancel(self._resize_pending)
         self._resize_pending = self.root.after(100, self._refresh_preview_images)
