@@ -337,3 +337,143 @@ def _face_y_between_text(
 
 def _escape(value: str) -> str:
     return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+FACE_SVG_GENERATOR = "mug-previewer/canonical-face-svg-v1"
+
+
+def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRenderOptions | None = None) -> str:
+    """Return editable canonical SVG front artwork for one selected street.
+
+    The SVG keeps the frozen V28 front panel dimensions and composition.  It
+    emits the native face linework directly as SVG rather than preserving the
+    PNG renderer's temporary embedded SVG image.
+    """
+    import json
+    import re
+
+    options = options or FaceRenderOptions(area=dataset.display_name)
+    placement_source = _validated_svg_placement_source(dataset, street, options)
+    glyph = street.glyph_path
+    if not glyph.is_file() or glyph.suffix.casefold() != ".svg":
+        # Keep the public error wording aligned with the PNG renderer.
+        render_face(street, options)
+        raise AssertionError("render_face unexpectedly returned for an invalid glyph")
+
+    width, height = SOURCE_CANVAS_PX
+    panel_center = width * FRONT_CENTER_RATIO
+    face_markup = _render_native_face(
+        glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
+    )
+    asset = _decode_native_face_asset(face_markup)
+    asset_root = ET.fromstring(asset)
+    face_content = next(
+        (node for node in asset_root.iter() if _svg_local_name(node.tag) == "g" and "face-content" in node.get("class", "").split()),
+        None,
+    )
+    if face_content is None:
+        raise FaceRenderError(f"Native V28 renderer produced no editable face artwork for {glyph}")
+    _add_editable_face_groups(face_content)
+
+    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
+    font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
+    street_name = street.display_name.strip() or street.street_name.strip() or street.id
+    title = select_title_font(street_name, font_stack)
+    area = options.area.strip()
+    title_y, area_y = _front_text_y_positions(
+        height, options.title_locality_gap_delta, options.typography_block_y_offset,
+    )
+    group_transform = _front_group_transform(
+        panel_center, height, options.group_scale, options.group_y_offset,
+    )
+    bbox = _face_content_bbox(asset)
+    face_width = width * FACE_WIDTH_RATIO
+    face_height = height * FACE_HEIGHT_RATIO
+    face_x = panel_center - face_width / 2
+    top_text_bottom = height * AREA_Y_RATIO + TEXT_CLEARANCE
+    face_y = _face_y_between_text(bbox, face_width, face_height, top_text_bottom, height - top_text_bottom)
+    face_y = min(max(face_y, 0.0), height - face_height)
+    asset_scale = min(face_width / FACE_ASSET_SIZE[0], face_height / FACE_ASSET_SIZE[1])
+    asset_x = face_x + (face_width - FACE_ASSET_SIZE[0] * asset_scale) / 2
+    asset_y = face_y + (face_height - FACE_ASSET_SIZE[1] * asset_scale) / 2
+    asset_body = next((node for node in asset_root if _svg_local_name(node.tag) == "g"), None)
+    defs = next((node for node in asset_root if _svg_local_name(node.tag) == "defs"), None)
+    if asset_body is None or defs is None:
+        raise FaceRenderError("Native V28 renderer produced incomplete editable artwork.")
+    metadata = {
+        "dataset_id": dataset.id,
+        "dataset_name": dataset.display_name,
+        "generator": FACE_SVG_GENERATOR,
+        "generator_version": "V28.1",
+        "placement_source": placement_source,
+        "street_id": street.id,
+        "street_name": street_name,
+    }
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
+  <metadata id="mug-previewer-metadata">{_escape(json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")))}</metadata>
+  {ET.tostring(defs, encoding="unicode")}
+  <style>
+    .mug-title {{ font-family:{font_stack}; font-size:{title.size_px:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
+    .mug-area {{ font:500 {LOCALITY_FONT_SIZE:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
+    .v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH:.2f}px !important; }}
+  </style>
+  <g class="front-composition" transform="{group_transform}">
+    <g id="title"><text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text></g>
+    <g id="locality"><text class="mug-area" x="{panel_center:.1f}" y="{area_y:.1f}">{_escape(area)}</text></g>
+    <g class="v28-face-vector" transform="translate({asset_x:.4f} {asset_y:.4f}) scale({asset_scale:.8f})">{ET.tostring(asset_body, encoding="unicode")}</g>
+  </g>
+</svg>'''
+
+
+def write_face_svg(
+    dataset: "Dataset", street: StreetRecord, output: Path | str, options: FaceRenderOptions | None = None,
+) -> Path:
+    """Write :func:`render_face_svg` output and return its destination path."""
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_face_svg(dataset, street, options), encoding="utf-8")
+    return path
+
+
+def _decode_native_face_asset(face_markup: str) -> str:
+    import re
+
+    match = re.compile(r'href="data:image/svg\+xml;base64,([^"]+)"').search(face_markup)
+    if match is None:
+        raise FaceRenderError("Native V28 renderer produced no SVG face asset.")
+    return base64.b64decode(match.group(1)).decode("utf-8")
+
+
+def _svg_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _add_editable_face_groups(face_content: ET.Element) -> None:
+    """Give the direct native vectors stable, editor-friendly parent groups."""
+    namespace = "{http://www.w3.org/2000/svg}"
+    groups = {
+        "eyes": ET.Element(namespace + "g", {"id": "eyes"}),
+        "nose-street": ET.Element(namespace + "g", {"id": "nose-street"}),
+        "mouth": ET.Element(namespace + "g", {"id": "mouth"}),
+    }
+    children = list(face_content)
+    for child in children:
+        face_content.remove(child)
+        classes = set(child.get("class", "").split())
+        tag = _svg_local_name(child.tag)
+        if tag == "polyline" or "street" in classes or "v28-nose" in classes:
+            groups["nose-street"].append(child)
+        elif "soft-detail" in classes:
+            groups["mouth"].append(child)
+        else:
+            groups["eyes"].append(child)
+    for role in ("eyes", "nose-street", "mouth"):
+        face_content.append(groups[role])
+def _validated_svg_placement_source(dataset: "Dataset", street: StreetRecord, options: FaceRenderOptions) -> str:
+    """Use an accepted production placement without running candidate scoring."""
+    if options.manual_override is not None:
+        return "explicit-manual-override"
+    from ..ui.production import preview_render_override
+
+    approved = preview_render_override(dataset, street)
+    if approved is None:
+        return "standard-layout"
+    return "validated-production-{}".format(approved.status.value.casefold())
