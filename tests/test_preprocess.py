@@ -44,7 +44,7 @@ def test_auto_and_manual_generate_assets_and_index(tmp_path: Path, monkeypatch) 
         assert record["source_fingerprint"]
 
 
-def test_unrenderable_continues_and_does_not_claim_assets(tmp_path: Path, monkeypatch) -> None:
+def test_svg_capable_outlier_becomes_manual_review_with_assets(tmp_path: Path, monkeypatch) -> None:
     data = _dataset()
     monkeypatch.setattr(
         preprocess, "production_triage_state",
@@ -53,12 +53,38 @@ def test_unrenderable_continues_and_does_not_claim_assets(tmp_path: Path, monkey
 
     result = preprocess.preprocess_datasets([data], tmp_path, street_ids=["0001", "0002"])
 
-    assert (result.processed, result.unrenderable_input, result.auto_approved) == (2, 1, 1)
+    assert (result.processed, result.manual_review, result.auto_approved) == (2, 1, 1)
     records = json.loads((tmp_path / preprocess.INDEX_FILENAME).read_text(encoding="utf-8"))["records"]
-    unrenderable = next(record for record in records if record["street_id"] == "0001")
-    assert unrenderable["svg_path"] is None
-    assert unrenderable["preview_path"] is None
-    assert unrenderable["success"] is True
+    review = next(record for record in records if record["street_id"] == "0001")
+    assert review["production_state"] == "MANUAL_REVIEW"
+    assert "editable_svg_generated" in review["reason_detail"]
+    assert (tmp_path / review["svg_path"]).is_file()
+    assert (tmp_path / review["preview_path"]).is_file()
+
+
+def test_non_generatable_input_remains_unrenderable(tmp_path: Path, monkeypatch) -> None:
+    data = _dataset()
+    monkeypatch.setattr(preprocess, "render_face_svg", lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("corrupt glyph")))
+
+    result = preprocess.preprocess_datasets([data], tmp_path, street_ids=["0001"])
+
+    assert (result.processed, result.unrenderable_input, result.unexpected_errors) == (1, 1, 0)
+    record = json.loads((tmp_path / preprocess.INDEX_FILENAME).read_text(encoding="utf-8"))["records"][0]
+    assert record["production_state"] == "UNRENDERABLE_INPUT"
+    assert record["svg_path"] is None and record["preview_path"] is None
+    assert "editable_svg_generation_failed" in record["reason_detail"]
+
+
+def test_svg_capable_triage_failure_becomes_manual_review(tmp_path: Path, monkeypatch) -> None:
+    data = _dataset()
+    monkeypatch.setattr(preprocess, "production_triage_state", lambda *_args: (_ for _ in ()).throw(RuntimeError("diagnostic unavailable")))
+
+    result = preprocess.preprocess_datasets([data], tmp_path, street_ids=["0001"])
+
+    assert (result.processed, result.manual_review, result.unexpected_errors) == (1, 1, 0)
+    record = json.loads((tmp_path / preprocess.INDEX_FILENAME).read_text(encoding="utf-8"))["records"][0]
+    assert "triage_failed:RuntimeError" in record["reason_detail"]
+    assert (tmp_path / record["svg_path"]).is_file() and (tmp_path / record["preview_path"]).is_file()
 
 
 def test_record_exception_isolated_resume_and_force(tmp_path: Path, monkeypatch) -> None:

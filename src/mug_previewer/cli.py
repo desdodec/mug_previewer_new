@@ -18,8 +18,8 @@ DEFAULT_PREPROCESSED_DIRNAME = "svg_previews"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _default_preprocessed_path() -> Path:
-    return PROJECT_ROOT / DEFAULT_PREPROCESSED_DIRNAME
+def _default_preprocessed_path(dataset_root: Path | None = None) -> Path:
+    return (dataset_root or PROJECT_ROOT) / DEFAULT_PREPROCESSED_DIRNAME
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -28,11 +28,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--preprocessed", type=Path, help="Use cached previews from a preprocessing output directory in the UI.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
+    commands.add_parser("preprocess-ui", help="Launch the desktop preprocessing UI.")
     preprocess = commands.add_parser("preprocess", help="Prepare resumable editable face assets for GUI use.")
     preprocess.add_argument("--dataset-root", dest="preprocess_dataset_root", type=Path)
     preprocess.add_argument(
         "--output", type=Path,
-        help=f"Preprocessing output directory (defaults to <project-root>/{DEFAULT_PREPROCESSED_DIRNAME}).",
+        help=f"Preprocessing output directory (defaults to <dataset-root>/{DEFAULT_PREPROCESSED_DIRNAME}).",
     )
     preprocess.add_argument("--dataset", action="append", help="Dataset ID or display name; may be repeated.")
     preprocess.add_argument("--street-id", action="append", help="Limit every selected dataset to these IDs.")
@@ -123,6 +124,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     preview_manual.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
 
+    if args.command == "preprocess-ui":
+        from .ui.preprocess_ui import launch
+
+        return launch(dataset_root=args.dataset_root or load_settings().dataset_root)
+
     if args.command == "ui":
         from .ui.app import launch
         root = args.dataset_root or load_settings().dataset_root
@@ -130,7 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return launch(dataset_root=root, preprocessed=args.preprocessed)
         if root is None:
             return launch(dataset_root=None)
-        preprocessed = _default_preprocessed_path()
+        preprocessed = _default_preprocessed_path(root)
         index_path = preprocessed / "preprocess_index.json"
         if not index_path.is_file():
             print(
@@ -197,7 +203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         from .preprocess import preprocess_datasets
 
-        output = args.output or _default_preprocessed_path()
+        output = args.output or _default_preprocessed_path(root)
         summary = preprocess_datasets(
             datasets_to_process, output, street_ids=args.street_id, force=args.force,
         )

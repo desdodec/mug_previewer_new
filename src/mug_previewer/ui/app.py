@@ -278,7 +278,7 @@ class MugPreviewerApp(ttk.Frame):
         result = self._preprocessed_status(record)
         self.current_production_status = result
         detail = result.detail
-        if record.editable_svg_path is not None and record.state is not None and record.state.value == "MANUAL_REVIEW":
+        if record.editable_svg_path is not None and record.state is not None and record.state.value in {"MANUAL_REVIEW", "MANUAL_APPROVED"}:
             detail = f"{detail}\nEditable SVG: {record.editable_svg_path}"
         self.production_var.set(f"{result.title}: {detail}")
         self._set_export_buttons_state("normal" if result.export_allowed else "disabled")

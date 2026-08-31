@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 import cairosvg
 from PIL import Image
@@ -22,7 +22,7 @@ from .rendering.face import FACE_SVG_GENERATOR, FRONT_PANEL_PX, SOURCE_CANVAS_PX
 from .ui.production import production_triage_state
 
 PREPROCESS_GENERATOR = "mug-previewer/preprocess"
-PREPROCESS_GENERATOR_VERSION = "1"
+PREPROCESS_GENERATOR_VERSION = "2"
 FACE_GENERATOR_VERSION = "V28.1"
 SVG_IMPORT_GENERATOR = "mug-previewer/manual-svg-import"
 SVG_IMPORT_VERSION = "1"
@@ -45,6 +45,16 @@ class PreprocessSummary:
 
 
 @dataclass(frozen=True)
+class PreprocessProgress:
+    processed_or_reused: int
+    total: int
+    dataset_name: str
+    street_id: str
+    street_name: str
+    summary: PreprocessSummary
+
+
+@dataclass(frozen=True)
 class FaceSvgResolution:
     """The current face artwork and whether it is approved for production."""
 
@@ -59,8 +69,10 @@ def preprocess_datasets(
     *,
     street_ids: Iterable[str] | None = None,
     force: bool = False,
+    progress: Callable[[PreprocessProgress], None] | None = None,
 ) -> PreprocessSummary:
     """Prepare selected streets, recording an isolated outcome for each one."""
+    datasets = tuple(datasets)
     root = Path(output)
     root.mkdir(parents=True, exist_ok=True)
     index_path = root / INDEX_FILENAME
@@ -68,6 +80,8 @@ def preprocess_datasets(
     by_key = {_record_key(record): record for record in records if _record_key(record) is not None}
     selected_ids = {str(item) for item in street_ids} if street_ids is not None else None
     summary = PreprocessSummary()
+    total = sum(1 for dataset in datasets for street in dataset.streets if selected_ids is None or street.id in selected_ids)
+    completed = 0
 
     for dataset in datasets:
         for street in dataset.streets:
@@ -82,15 +96,36 @@ def preprocess_datasets(
                     print(f"Warning {dataset.display_name} / {street.id}: approved preview could not be refreshed: {error}")
                 summary = _count(summary, existing, reused=True)
                 print(f"Reused protected manual approval {dataset.display_name} / {street.id} / {street.display_name}")
+                completed += 1
+                _report_progress(progress, completed, total, dataset, street, summary)
+                continue
+            try:
+                svg = _render_editable_svg(dataset, street)
+            except Exception as error:
+                record = _unrenderable_record(dataset, street, error)
+                by_key[key] = record
+                summary = _count(summary, record)
+                print(f"Unrenderable {dataset.display_name} / {street.id} / {street.display_name}: {error}")
+                completed += 1
+                _report_progress(progress, completed, total, dataset, street, summary)
                 continue
             try:
                 state, reason_codes = production_triage_state(dataset, street)
+            except Exception as error:
+                state = ProductionTriageStatus.MANUAL_REVIEW
+                reason_codes = (f"triage_failed:{type(error).__name__}",)
+            if state is ProductionTriageStatus.UNRENDERABLE_INPUT:
+                state = ProductionTriageStatus.MANUAL_REVIEW
+                reason_codes = tuple((*reason_codes, "editable_svg_generated"))
+            try:
                 fingerprint = _fingerprint(dataset, street, state, reason_codes)
                 if not force and _is_reusable(existing, root, fingerprint):
                     summary = _count(summary, existing, reused=True)
                     print(f"Reused {dataset.display_name} / {street.id} / {street.display_name}")
+                    completed += 1
+                    _report_progress(progress, completed, total, dataset, street, summary)
                     continue
-                record = _preprocess_one(dataset, street, root, state, reason_codes, fingerprint)
+                record = _preprocess_one(dataset, street, root, state, reason_codes, fingerprint, svg)
                 by_key[key] = record
                 summary = _count(summary, record)
                 print(f"Processed {dataset.display_name} / {street.id} / {street.display_name}: {record['production_state']}")
@@ -99,6 +134,8 @@ def preprocess_datasets(
                 by_key[key] = record
                 summary = _count(summary, record)
                 print(f"Error {dataset.display_name} / {street.id} / {street.display_name}: {error}")
+            completed += 1
+            _report_progress(progress, completed, total, dataset, street, summary)
 
     _write_index(index_path, by_key.values())
     return summary
@@ -185,16 +222,13 @@ def _preprocess_one(
     state: ProductionTriageStatus,
     reason_codes: tuple[str, ...],
     fingerprint: str,
+    svg: str,
 ) -> dict[str, object]:
     record = _base_record(dataset, street, state, reason_codes, fingerprint)
-    if state is ProductionTriageStatus.UNRENDERABLE_INPUT:
-        return record | {"success": True, "svg_path": None, "preview_path": None, "error_message": None}
-
     relative_base = Path(_slug(dataset.id)) / f"{street.id}_{_slug(street.display_name)}"
     suffix = ".generated" if state is ProductionTriageStatus.MANUAL_REVIEW else ""
     svg_relative = Path("faces") / relative_base.with_name(relative_base.name + suffix).with_suffix(".svg")
     preview_relative = Path("previews") / relative_base.with_suffix(".png")
-    svg = render_face_svg(dataset, street, FaceRenderOptions(area=dataset.display_name))
     svg_path = root / svg_relative
     svg_path.parent.mkdir(parents=True, exist_ok=True)
     svg_path.write_text(svg, encoding="utf-8")
@@ -206,6 +240,40 @@ def _preprocess_one(
         "preview_path": preview_relative.as_posix(),
         "error_message": None,
     }
+
+
+def _render_editable_svg(dataset: Dataset, street: StreetRecord) -> str:
+    svg = render_face_svg(dataset, street, FaceRenderOptions(area=dataset.display_name))
+    if not isinstance(svg, str) or not svg.strip():
+        raise ValueError("Face renderer returned an empty SVG.")
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError as error:
+        raise ValueError(f"Face renderer returned invalid SVG XML: {error}") from error
+    if _local_name(root.tag) != "svg":
+        raise ValueError("Face renderer did not return an SVG document.")
+    _validate_svg_dimensions(root)
+    return svg
+
+
+def _unrenderable_record(dataset: Dataset, street: StreetRecord, error: Exception) -> dict[str, object]:
+    reason = f"editable_svg_generation_failed:{type(error).__name__}"
+    return _base_record(
+        dataset, street, ProductionTriageStatus.UNRENDERABLE_INPUT, (reason,),
+        _fingerprint(dataset, street, ProductionTriageStatus.UNRENDERABLE_INPUT, (reason,)),
+    ) | {"success": True, "svg_path": None, "preview_path": None, "error_message": str(error)}
+
+
+def _report_progress(
+    callback: Callable[[PreprocessProgress], None] | None,
+    completed: int,
+    total: int,
+    dataset: Dataset,
+    street: StreetRecord,
+    summary: PreprocessSummary,
+) -> None:
+    if callback is not None:
+        callback(PreprocessProgress(completed, total, dataset.display_name, street.id, street.display_name, summary))
 
 
 def _validate_approved_svg(payload: bytes, dataset: Dataset, street: StreetRecord) -> None:

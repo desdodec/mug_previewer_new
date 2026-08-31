@@ -110,7 +110,7 @@ def test_preprocessed_selection_loads_cached_preview_without_workers(tmp_path: P
     assert controller.refreshed == ["0001"]
     assert title in controller.production_var.value
     assert controller.export_button.state == ("normal" if export_allowed else "disabled")
-    if state is ProductionTriageStatus.MANUAL_REVIEW:
+    if state in (ProductionTriageStatus.MANUAL_REVIEW, ProductionTriageStatus.MANUAL_APPROVED):
         assert "Editable SVG:" in controller.production_var.value
 
 
