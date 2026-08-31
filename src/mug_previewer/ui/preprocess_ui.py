@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Iterable
 
-from ..datasets.discovery import discover_datasets
+from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset
 from ..preprocess import INDEX_FILENAME, PreprocessProgress, PreprocessSummary, preprocess_datasets
 
@@ -197,11 +197,22 @@ class PreprocessUiApp:
     def _load_scope_choices(self) -> None:
         root = self.dataset_root_var.get()
         try:
-            choices = [item.dataset.display_name for item in discover_datasets(root)]
+            datasets = discover_datasets(root)
         except Exception:
-            choices = []
-        self.scope_box["values"] = tuple(["All datasets", *choices])
-        self.scope_var.set("All datasets")
+            datasets = ()
+        self._set_scope_choices(datasets)
+
+    def _set_scope_choices(self, datasets: Iterable[DatasetCandidate]) -> None:
+        candidates = tuple(datasets)
+        names = tuple(item.dataset.display_name for item in candidates)
+        selected_path = getattr(candidates[0].dataset, "path", None) if len(candidates) == 1 else None
+        is_direct_dataset = (
+            bool(selected_path)
+            and Path(self.dataset_root_var.get()).resolve() == Path(selected_path).resolve()
+        )
+        values = names if is_direct_dataset else ("All datasets", *names)
+        self.scope_box["values"] = values
+        self.scope_var.set(names[0] if is_direct_dataset else "All datasets")
 
     def _refresh_location_state(self) -> None:
         try:
@@ -213,7 +224,7 @@ class PreprocessUiApp:
             if self.dataset_root_var.get() or self.output_var.get():
                 self.progress_var.set(str(error))
             return
-        self.scope_box["values"] = tuple(["All datasets", *(item.dataset.display_name for item in datasets)])
+        self._set_scope_choices(datasets)
         self.start_button.configure(state="normal")
         self.progress_var.set("Input and output folders are ready.")
 
