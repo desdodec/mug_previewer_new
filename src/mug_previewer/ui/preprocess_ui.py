@@ -105,7 +105,7 @@ class PreprocessUiApp:
     def __init__(self, root: tk.Tk, *, dataset_root: Path | None = None) -> None:
         self.root = root
         self.root.title("Mug Previewer Preprocessing")
-        self.root.minsize(590, 410)
+        self.root.minsize(640, 460)
         self.worker: PreprocessWorker | None = None
         self.dataset_root_var = tk.StringVar(value=str(dataset_root) if dataset_root else "")
         self.output_var = tk.StringVar(value="")
@@ -124,30 +124,57 @@ class PreprocessUiApp:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         frame.columnconfigure(0, weight=1)
-        self._path_row(frame, 0, "Input Dataset Folder", self.dataset_root_var, self._choose_dataset_root, "Choose Input Folder...")
-        self._path_row(frame, 1, "Output Folder", self.output_var, self._choose_output, "Choose Output Folder...")
-        ttk.Label(frame, text="Scope").grid(row=2, column=0, sticky="w", pady=(12, 0))
-        self.scope_box = ttk.Combobox(frame, textvariable=self.scope_var, state="readonly")
-        self.scope_box.grid(row=3, column=0, sticky="ew")
+        self._path_section(
+            frame,
+            0,
+            "Input Dataset Folder",
+            self.dataset_root_var,
+            self._choose_dataset_root,
+            "Choose Input Folder...",
+        )
+        self._path_section(
+            frame,
+            1,
+            "Output Folder",
+            self.output_var,
+            self._choose_output,
+            "Choose Output Folder...",
+        )
+
+        scope = ttk.Frame(frame)
+        scope.grid(row=2, column=0, sticky="ew", pady=(0, 18))
+        scope.columnconfigure(0, weight=1)
+        ttk.Label(scope, text="Scope").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        self.scope_box = ttk.Combobox(scope, textvariable=self.scope_var, state="readonly")
+        self.scope_box.grid(row=1, column=0, sticky="ew")
         self.scope_box["values"] = ("All datasets",)
+
         actions = ttk.Frame(frame)
-        actions.grid(row=4, column=0, sticky="ew", pady=(14, 8))
+        actions.grid(row=3, column=0, sticky="w", pady=(0, 18))
         self.start_button = ttk.Button(actions, text="Start Preprocessing", command=self._start, state="disabled")
-        self.start_button.grid(row=0, column=0, padx=(0, 7))
-        ttk.Button(actions, text="Open Output Folder", command=self._open_output).grid(row=0, column=1, padx=(0, 7))
+        self.start_button.grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(actions, text="Open Output Folder", command=self._open_output).grid(row=0, column=1, padx=(0, 8))
         self.browser_button = ttk.Button(actions, text="Launch Mug Browser", command=self._launch_browser)
         self.browser_button.grid(row=0, column=2)
-        ttk.Label(frame, textvariable=self.progress_var, wraplength=550, justify="left").grid(row=5, column=0, sticky="w", pady=(12, 4))
-        ttk.Label(frame, textvariable=self.counts_var, wraplength=550, justify="left").grid(row=6, column=0, sticky="w")
+
+        status = ttk.Frame(frame)
+        status.grid(row=4, column=0, sticky="ew")
+        status.columnconfigure(0, weight=1)
+        ttk.Separator(status, orient="horizontal").grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        ttk.Label(status, textvariable=self.progress_var, wraplength=600, justify="left").grid(row=1, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(status, textvariable=self.counts_var, wraplength=600, justify="left").grid(row=2, column=0, sticky="w")
 
     @staticmethod
-    def _path_row(
+    def _path_section(
         parent: ttk.Frame, row: int, label: str, value: tk.StringVar,
         command: Callable[[], None], button_label: str,
     ) -> None:
-        ttk.Label(parent, text=label).grid(row=row * 2, column=0, sticky="w")
-        line = ttk.Frame(parent)
-        line.grid(row=row * 2 + 1, column=0, sticky="ew", pady=(0, 8))
+        section = ttk.Frame(parent)
+        section.grid(row=row, column=0, sticky="ew", pady=(0, 18))
+        section.columnconfigure(0, weight=1)
+        ttk.Label(section, text=label).grid(row=0, column=0, sticky="w", pady=(0, 4))
+        line = ttk.Frame(section)
+        line.grid(row=1, column=0, sticky="ew")
         line.columnconfigure(0, weight=1)
         ttk.Entry(line, textvariable=value, state="readonly").grid(row=0, column=0, sticky="ew", padx=(0, 7))
         ttk.Button(line, text=button_label, command=command).grid(row=0, column=1)
