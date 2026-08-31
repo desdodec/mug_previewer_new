@@ -17,6 +17,7 @@ from .rendering.face import FaceRenderError, FaceRenderOptions, render_face
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mug-previewer")
     parser.add_argument("--dataset-root", type=Path)
+    parser.add_argument("--preprocessed", type=Path, help="Use cached previews from a preprocessing output directory in the UI.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
     preprocess = commands.add_parser("preprocess", help="Prepare resumable editable face assets for GUI use.")
@@ -27,7 +28,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     preprocess.add_argument("--force", action="store_true", help="Regenerate even when matching assets are indexed.")
     approve_svg = commands.add_parser("approve-svg", help="Accept a manually edited face SVG for a review street.")
     approve_svg.add_argument("--dataset-root", dest="approve_dataset_root", type=Path)
-    approve_svg.add_argument("--preprocessed", type=Path, required=True)
+    approve_svg.add_argument("--preprocessed", dest="approve_preprocessed", type=Path, required=True)
     approve_svg.add_argument("--dataset", required=True, help="Dataset ID or display name.")
     approve_svg.add_argument("--street-id", required=True)
     approve_svg.add_argument("--svg", type=Path, required=True, help="Edited SVG to validate and store.")
@@ -113,7 +114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ui":
         from .ui.app import launch
-        return launch(dataset_root=args.dataset_root)
+        return launch(dataset_root=args.dataset_root, preprocessed=args.preprocessed)
 
     if args.command == "approve-svg":
         root = args.approve_dataset_root or args.dataset_root or load_settings().dataset_root
@@ -139,13 +140,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .preprocess import SvgApprovalError, approve_manual_svg
 
         try:
-            resolution = approve_manual_svg(dataset, street, args.preprocessed, args.svg)
+            resolution = approve_manual_svg(dataset, street, args.approve_preprocessed, args.svg)
         except SvgApprovalError as error:
             print(f"SVG approval error: {error}")
             return 2
         print(f"Approved SVG: {resolution.path}")
         print(f"State: {resolution.state.value}")
-        print(f"Index: {args.preprocessed / 'preprocess_index.json'}")
+        print(f"Index: {args.approve_preprocessed / 'preprocess_index.json'}")
         return 0
     if args.command == "preprocess":
         root = args.preprocess_dataset_root or args.dataset_root or load_settings().dataset_root

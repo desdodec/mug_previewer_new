@@ -18,6 +18,8 @@ from .manual_review import ManualReviewController, ManualReviewWindow
 from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
     AppState,
+    PreprocessedCatalogue,
+    PreprocessedRecord,
     DatasetOption,
     PreviewPair,
     UIDataError,
@@ -25,6 +27,8 @@ from .state import (
     display_image,
     export_provider_png,
     filter_streets,
+    load_preprocessed_catalogue,
+    load_preprocessed_preview,
     render_preview_pair,
     resolve_dataset_root,
 )
@@ -35,8 +39,13 @@ LOGGER = logging.getLogger(__name__)
 class MugPreviewerApp(ttk.Frame):
     """Widget layer that delegates data, rendering, and image operations to state."""
 
-    def __init__(self, root: tk.Tk, *, dataset_root: Path | None = None) -> None:
+    def __init__(
+        self, root: tk.Tk, *, dataset_root: Path | None = None, preprocessed: Path | None = None,
+    ) -> None:
         super().__init__(root, padding=14)
+        self.preprocessed_catalogue: PreprocessedCatalogue | None = (
+            load_preprocessed_catalogue(preprocessed) if preprocessed is not None else None
+        )
         self.root = root
         self.state = AppState(dataset_root=resolve_dataset_root(dataset_root))
         self.dataset_by_label: dict[str, Dataset] = {}
@@ -119,6 +128,8 @@ class MugPreviewerApp(ttk.Frame):
         self.printify_export_button.grid(row=10, column=0, sticky="ew", pady=(6, 0))
         self.render_button.grid(row=7, column=0, sticky="ew")
         self.framing_var = tk.StringVar(value="Rear framing: \u2014")
+        if self._is_preprocessed_mode():
+            self.render_button.grid_remove()
         ttk.Label(controls, textvariable=self.framing_var).grid(row=8, column=0, sticky="w", pady=(13, 0))
 
         self.front_card = self._preview_card("Front")
@@ -237,7 +248,68 @@ class MugPreviewerApp(ttk.Frame):
             return
         self._invalidate_active_render_request()
         self.state.selected_street = self.state.filtered_streets[selection[0]]
+        if self._is_preprocessed_mode():
+            self._show_preprocessed_selection(self.state.selected_dataset, self.state.selected_street)
+            return
         self._request_production_status(self.state.selected_dataset, self.state.selected_street)
+
+    def _is_preprocessed_mode(self) -> bool:
+        return getattr(self, "preprocessed_catalogue", None) is not None
+
+    def _show_preprocessed_selection(self, data: Dataset | None, street: StreetRecord) -> None:
+        """Apply stored state and a cached PNG synchronously, never render or score."""
+        catalogue = self.preprocessed_catalogue
+        if data is None or catalogue is None:
+            return
+        record = catalogue.find(data, street)
+        self.render_button.configure(state="disabled")
+        self.review_street_button.configure(state="disabled")
+        self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
+        self.state.framing_mode = None
+        self.framing_var.set("Rear framing: cached face preview")
+        if record is None:
+            self.current_production_status = None
+            self.production_var.set("Preview not prepared: no index record for this street.")
+            self.status_var.set(f"Preview not prepared: {street.id} {street.display_name}")
+            self._set_export_buttons_state("disabled")
+            self._clear_previews()
+            return
+
+        result = self._preprocessed_status(record)
+        self.current_production_status = result
+        detail = result.detail
+        if record.editable_svg_path is not None and record.state is not None and record.state.value == "MANUAL_REVIEW":
+            detail = f"{detail}\nEditable SVG: {record.editable_svg_path}"
+        self.production_var.set(f"{result.title}: {detail}")
+        self._set_export_buttons_state("normal" if result.export_allowed else "disabled")
+        if result.readiness == "unrenderable":
+            self.status_var.set(f"{result.title}: {street.id} {street.display_name}")
+            self._clear_previews()
+            return
+        try:
+            self.state.current_front_preview = load_preprocessed_preview(record)
+        except UIDataError as error:
+            self.current_production_status = None
+            self.production_var.set(str(error))
+            self.status_var.set(f"Preview not prepared: {street.id} {street.display_name}")
+            self._set_export_buttons_state("disabled")
+            self._clear_previews()
+            return
+        self.status_var.set(f"Cached preview: {data.display_name} - {street.id} {street.display_name}")
+        self._refresh_preview_images()
+
+    @staticmethod
+    def _preprocessed_status(record: PreprocessedRecord) -> ProductionStatus:
+        detail = record.reason_detail or "Stored preprocessing result."
+        if record.state is not None and record.state.value == "AUTO_APPROVED":
+            return ProductionStatus("ready", "Ready for Production", detail, True, False)
+        if record.state is not None and record.state.value == "MANUAL_REVIEW":
+            return ProductionStatus("manual_review", "Manual Review Required", detail, False, True)
+        if record.state is not None and record.state.value == "MANUAL_APPROVED":
+            return ProductionStatus("ready", "Manually Approved / Ready for Production", detail, True, False)
+        if record.state is not None and record.state.value == "UNRENDERABLE_INPUT":
+            return ProductionStatus("unrenderable", "Cannot Render", detail, False, False)
+        return ProductionStatus("not_prepared", "Preview not prepared", detail, False, False)
 
     def _request_production_status(self, data: Dataset | None, street: StreetRecord) -> None:
         """Start one status request; all widget changes remain on the Tk thread."""
@@ -565,10 +637,10 @@ class MugPreviewerApp(ttk.Frame):
         self._front_photo = self._set_preview(self.front_label, self.state.current_front_preview)
         self._rear_photo = self._set_preview(self.rear_label, self.state.current_rear_preview)
 
-    @staticmethod
-    def _set_preview(label: ttk.Label, image: Image.Image | None) -> ImageTk.PhotoImage | None:
+    def _set_preview(self, label: ttk.Label, image: Image.Image | None) -> ImageTk.PhotoImage | None:
         if image is None:
-            label.configure(image="", text="Render a street to view this mug")
+            text = "No cached preview for this view" if self._is_preprocessed_mode() else "Render a street to view this mug"
+            label.configure(image="", text=text)
             return None
         width, height = max(80, label.winfo_width() - 12), max(80, label.winfo_height() - 12)
         photo = ImageTk.PhotoImage(display_image(image, (width, height)))
@@ -577,8 +649,9 @@ class MugPreviewerApp(ttk.Frame):
 
     def _clear_previews(self) -> None:
         self._front_photo = self._rear_photo = None
-        self.front_label.configure(image="", text="Render a street to view this mug")
-        self.rear_label.configure(image="", text="Render a street to view this mug")
+        text = "No cached preview" if self._is_preprocessed_mode() else "Render a street to view this mug"
+        self.front_label.configure(image="", text=text)
+        self.rear_label.configure(image="", text=text)
 
     def _show_error(self, detail: str) -> None:
         self.state.error = detail
@@ -586,9 +659,14 @@ class MugPreviewerApp(ttk.Frame):
         messagebox.showerror("Mug Previewer", detail, parent=self.root)
 
 
-def launch(*, dataset_root: Path | None = None) -> int:
+def launch(*, dataset_root: Path | None = None, preprocessed: Path | None = None) -> int:
     """Create the native desktop shell and begin the Tk event loop."""
     root = tk.Tk()
-    MugPreviewerApp(root, dataset_root=dataset_root)
+    try:
+        MugPreviewerApp(root, dataset_root=dataset_root, preprocessed=preprocessed)
+    except UIDataError as error:
+        messagebox.showerror("Mug Previewer", str(error), parent=root)
+        root.destroy()
+        return 2
     root.mainloop()
     return 0

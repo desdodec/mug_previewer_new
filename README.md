@@ -20,6 +20,12 @@ Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI. The bundled generic 
 
 Generated diagnostics/ evidence is local-only, excluded from package data, and normally ignored by Git. The packaged manual_review_scope.json is a version-controlled release manifest; refresh it only as a reviewed release change from validated production-triage results, never during application startup.
 
+For instant review of prepared assets, point the UI at a preprocessing output. In this mode, street selection reads `preprocess_index.json` and its cached PNG directly; it does not recalculate production status or render a new mug preview.
+
+```powershell
+mug-previewer --dataset-root "E:\path\to\workflow_outputs_v6" --preprocessed "E:\path\to\preprocessed" ui
+```
+
 ## Release limitations
 
 - Manual edits are constrained to 0 or 180 degrees, discrete scale steps, and discrete vertical positions.

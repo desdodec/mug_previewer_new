@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
+import json
 from pathlib import Path
 from typing import Protocol
 
@@ -12,6 +13,7 @@ from ..config import load_settings
 from ..design import DesignOptions, build_render_options
 from ..datasets.discovery import DatasetCandidate, discover_datasets
 from ..datasets.models import Dataset, StreetRecord
+from ..diagnostics.front_candidates import ProductionTriageStatus
 from ..exporting import save_provider_export
 from ..manual import approved_override_for_street, load_manual_overrides
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview, scaled_mug_preview_layout
@@ -23,6 +25,7 @@ PREVIEW_SIZE = (512, 768)
 SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(0.5)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
+PREPROCESS_INDEX_FILENAME = "preprocess_index.json"
 # Export helpers use the production provider profile.
 
 
@@ -45,6 +48,30 @@ class PreviewPair:
     rear: Image.Image
     framing_mode: str
 
+
+@dataclass(frozen=True)
+class PreprocessedRecord:
+    """One trusted, already-classified record from the preprocessing index."""
+
+    dataset_id: str
+    street_id: str
+    state: ProductionTriageStatus | None
+    reason_detail: str
+    success: bool
+    preview_path: Path | None
+    svg_path: Path | None
+    editable_svg_path: Path | None
+
+
+@dataclass(frozen=True)
+class PreprocessedCatalogue:
+    """Lookup table for the assets produced by ``mug-previewer preprocess``."""
+
+    root: Path
+    records: dict[tuple[str, str], PreprocessedRecord]
+
+    def find(self, dataset: Dataset, street: StreetRecord) -> PreprocessedRecord | None:
+        return self.records.get((dataset.id, street.id))
 
 @dataclass
 class AppState:
@@ -91,6 +118,75 @@ def resolve_dataset_root(dataset_root: Path | str | None = None) -> Path | None:
     settings = load_settings(dataset_root=dataset_root)
     return settings.dataset_root
 
+
+def load_preprocessed_catalogue(root: Path | str) -> PreprocessedCatalogue:
+    """Load index metadata only; preview PNGs remain lazy until selected."""
+    root_path = Path(root)
+    if not root_path.is_dir():
+        raise UIDataError(f"Preprocessed directory does not exist: {root_path}")
+    index_path = root_path / PREPROCESS_INDEX_FILENAME
+    if not index_path.is_file():
+        raise UIDataError(f"Preprocessing index does not exist: {index_path}")
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise UIDataError(f"Cannot read preprocessing index {index_path}: {error}") from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+        raise UIDataError(f"Preprocessing index is invalid: {index_path}")
+
+    records: dict[tuple[str, str], PreprocessedRecord] = {}
+    for item in payload["records"]:
+        if not isinstance(item, dict):
+            continue
+        dataset_id, street_id = item.get("dataset_id"), item.get("street_id")
+        if not isinstance(dataset_id, str) or not isinstance(street_id, str):
+            continue
+        raw_state = item.get("production_state")
+        try:
+            state = ProductionTriageStatus(raw_state) if isinstance(raw_state, str) else None
+        except ValueError:
+            state = None
+        preview_path = _preprocessed_asset_path(root_path, item.get("preview_path"))
+        svg_path = _preprocessed_asset_path(root_path, item.get("svg_path"))
+        generated_path = _preprocessed_asset_path(root_path, item.get("generated_svg_path"))
+        approved_path = _preprocessed_asset_path(root_path, item.get("approved_svg_path"))
+        editable_path = generated_path if state is ProductionTriageStatus.MANUAL_REVIEW else approved_path or svg_path
+        records[(dataset_id, street_id)] = PreprocessedRecord(
+            dataset_id=dataset_id,
+            street_id=street_id,
+            state=state,
+            reason_detail=str(item.get("reason_detail") or item.get("error_message") or ""),
+            success=bool(item.get("success")),
+            preview_path=preview_path,
+            svg_path=svg_path,
+            editable_svg_path=editable_path,
+        )
+    return PreprocessedCatalogue(root_path, records)
+
+
+def load_preprocessed_preview(record: PreprocessedRecord) -> Image.Image:
+    """Open one cached preview without invoking any production renderer."""
+    if not record.success or record.preview_path is None:
+        raise UIDataError("Preview not prepared.")
+    if not record.preview_path.is_file():
+        raise UIDataError("Preview not prepared: cached PNG is missing.")
+    try:
+        with Image.open(record.preview_path) as source:
+            source.load()
+            return source.convert("RGBA").copy()
+    except (OSError, ValueError) as error:
+        raise UIDataError(f"Preview not prepared: could not load cached PNG ({error}).") from error
+
+
+def _preprocessed_asset_path(root: Path, value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    candidate = root / value
+    try:
+        candidate.resolve().relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
 
 def dataset_options(
     root: Path | str | None,
