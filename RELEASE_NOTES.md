@@ -1,3 +1,10 @@
+# Mug Previewer 0.1.0rc4
+
+- Fast desktop previews now reuse the validated auto-approved production placement instead of rerunning the 70-candidate scorer.
+- Screen preview mockups render at 512x768, while production wraps and provider exports remain unchanged.
+- Shutdown now invalidates active workers and guards Tk poll and resize callbacks against updates after the application closes.
+
+## Previous release candidate: 0.1.0rc3
 # Mug Previewer 0.1.0rc3
 
 Fixes the preview-render Tk thread handoff: completed worker results are now queued and applied by the Tk main thread, preventing the desktop preview UI from remaining in `Rendering...`.
