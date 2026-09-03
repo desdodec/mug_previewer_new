@@ -14,6 +14,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import cairosvg
 from PIL import Image, ImageColor
@@ -44,6 +45,12 @@ FRONT_GROUP_Y_OFFSET = 60.0
 FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 4.0
 # Task 02Q: move only the title/locality block in source-panel coordinates.
 FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -12.0
+# Final-layout visual clearance for a normal lower street feature only.
+NOSE_STREET_TARGET_CLEARANCE_PX = 3
+NOSE_STREET_MAX_AUTOMATIC_SHIFT_PX = 12
+NOSE_STREET_MIN_NORMAL_WIDTH_PX = 120
+NOSE_STREET_MAX_NORMAL_HEIGHT_PX = 32
+MASK_ALPHA_THRESHOLD = 128
 
 
 class FaceRenderError(ValueError):
@@ -71,6 +78,12 @@ class TitleFontChoice:
     rendered_width_px: int
 
 
+class NoseStreetClearanceCorrection(NamedTuple):
+    required_shift_px: int
+    applied_shift_px: int
+    outcome: str
+
+
 def render_face(
     street: StreetRecord,
     options: FaceRenderOptions | None = None,
@@ -92,7 +105,10 @@ def _render_face_with_decision(
         raise FaceRenderError(f'Cannot render street {street.id}: glyph is not an SVG file: {glyph}')
     width, height = SOURCE_CANVAS_PX
     panel_center = width * FRONT_CENTER_RATIO
-    face_markup = _render_native_face(glyph, panel_center, width, height, options.street_feature_stroke_multiplier)
+    face_markup = _render_native_face(
+        glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
+        group_scale=options.group_scale, group_y_offset=options.group_y_offset,
+    )
     standard = _render_face_standard(street, options, face_markup=face_markup)
     override = options.manual_override
     if override is not None:
@@ -154,6 +170,7 @@ def _render_face_standard(
     panel_center = width * FRONT_CENTER_RATIO
     face_markup = face_markup or _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
+        group_scale=options.group_scale, group_y_offset=options.group_y_offset,
     )
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
@@ -255,6 +272,9 @@ def _render_native_face(
     width: int,
     height: int,
     street_feature_stroke_multiplier: float,
+    *,
+    group_scale: float = FRONT_GROUP_SCALE,
+    group_y_offset: float = FRONT_GROUP_Y_OFFSET,
 ) -> str:
     if not math.isfinite(street_feature_stroke_multiplier) or street_feature_stroke_multiplier <= 0:
         raise FaceRenderError("Front street feature stroke multiplier must be positive and finite.")
@@ -308,10 +328,143 @@ def _render_native_face(
         top_text_bottom, height - top_text_bottom,
     )
     face_y = min(max(face_y, 0.0), height - face_height)
+    face_asset, _clearance = _apply_tiny_nose_street_clearance(
+        face_asset,
+        panel_center=panel_center,
+        panel_height=height,
+        face_x=face_x,
+        face_y=face_y,
+        face_width=face_width,
+        face_height=face_height,
+        group_scale=group_scale,
+        group_y_offset=group_y_offset,
+    )
+    href = "data:image/svg+xml;base64," + base64.b64encode(face_asset.encode("utf-8")).decode("ascii")
     return (
         f'<image class="v28-face" href="{href}" x="{face_x:.1f}" y="{face_y:.1f}" '
         f'width="{face_width:.1f}" height="{face_height:.1f}" preserveAspectRatio="xMidYMid meet"/>'
     )
+
+
+def assess_nose_street_clearance(nose_mask: Image.Image, street_mask: Image.Image) -> NoseStreetClearanceCorrection:
+    if nose_mask.size != street_mask.size:
+        raise FaceRenderError("Nose and lower street masks must share one coordinate space.")
+    nose = nose_mask.convert("L")
+    street = street_mask.convert("L")
+    nose_bounds = nose.point(lambda value: 255 if value >= MASK_ALPHA_THRESHOLD else 0).getbbox()
+    street_binary = street.point(lambda value: 255 if value >= MASK_ALPHA_THRESHOLD else 0)
+    street_bounds = street_binary.getbbox()
+    if nose_bounds is None or street_bounds is None:
+        return NoseStreetClearanceCorrection(0, 0, "manual-review")
+    street_width = street_bounds[2] - street_bounds[0]
+    street_height = street_bounds[3] - street_bounds[1]
+    normal_lower_feature = (
+        street_width >= NOSE_STREET_MIN_NORMAL_WIDTH_PX
+        and street_height <= NOSE_STREET_MAX_NORMAL_HEIGHT_PX
+    )
+    nose_pixels = nose.load()
+    street_pixels = street_binary.load()
+    required_shift = 0
+    for x in range(nose.width):
+        nose_bottom = next((y for y in range(nose.height - 1, -1, -1) if nose_pixels[x, y] >= MASK_ALPHA_THRESHOLD), None)
+        street_top = next((y for y in range(street.height) if street_pixels[x, y] >= MASK_ALPHA_THRESHOLD), None)
+        if nose_bottom is not None and street_top is not None:
+            required_shift = max(required_shift, nose_bottom + NOSE_STREET_TARGET_CLEARANCE_PX - street_top)
+    if not normal_lower_feature:
+        return NoseStreetClearanceCorrection(max(required_shift, 0), 0, "manual-review")
+    if required_shift <= 0:
+        return NoseStreetClearanceCorrection(0, 0, "clear")
+    if required_shift > NOSE_STREET_MAX_AUTOMATIC_SHIFT_PX:
+        return NoseStreetClearanceCorrection(required_shift, 0, "manual-review")
+    return NoseStreetClearanceCorrection(required_shift, required_shift, "auto-corrected")
+
+
+def _apply_tiny_nose_street_clearance(
+    face_asset: str,
+    *,
+    panel_center: float,
+    panel_height: float,
+    face_x: float,
+    face_y: float,
+    face_width: float,
+    face_height: float,
+    group_scale: float,
+    group_y_offset: float,
+) -> tuple[str, NoseStreetClearanceCorrection]:
+    if group_scale <= 0 or not math.isfinite(group_scale):
+        raise FaceRenderError("Front composition scale must be positive and finite.")
+    nose_mask = _native_role_mask(
+        face_asset, {"v28-nose"}, panel_center, panel_height, face_x, face_y,
+        face_width, face_height, group_scale, group_y_offset,
+    )
+    street_mask = _native_role_mask(
+        face_asset, {"street"}, panel_center, panel_height, face_x, face_y,
+        face_width, face_height, group_scale, group_y_offset,
+    )
+    correction = assess_nose_street_clearance(nose_mask, street_mask)
+    if correction.applied_shift_px == 0:
+        return face_asset, correction
+    asset_scale = min(face_width / FACE_ASSET_SIZE[0], face_height / FACE_ASSET_SIZE[1])
+    native_shift = correction.applied_shift_px / (asset_scale * group_scale)
+    root = ET.fromstring(face_asset)
+    changed = False
+    for node in root.iter():
+        if _svg_local_name(node.tag) == "polyline" and "street" in node.get("class", "").split():
+            node.set("transform", _with_downward_translation(node.get("transform", ""), native_shift))
+            changed = True
+    if not changed:
+        raise FaceRenderError("Native V28 renderer produced no lower street feature for clearance correction.")
+    return ET.tostring(root, encoding="unicode"), correction
+
+
+def _native_role_mask(
+    face_asset: str,
+    classes: set[str],
+    panel_center: float,
+    panel_height: float,
+    face_x: float,
+    face_y: float,
+    face_width: float,
+    face_height: float,
+    group_scale: float,
+    group_y_offset: float,
+) -> Image.Image:
+    root = ET.fromstring(face_asset)
+    namespace = "{http://www.w3.org/2000/svg}"
+    parent_by_child = {child: parent for parent in root.iter() for child in parent}
+    content = next((node for node in root.iter(f"{namespace}g") if "face-content" in node.get("class", "").split()), None)
+    if content is None or not _retain_svg_role(content, classes):
+        return Image.new("L", FRONT_PANEL_PX, 0)
+    selected = content
+    ancestor = parent_by_child.get(content)
+    while ancestor is not None and ancestor is not root:
+        wrapper = ET.Element(ancestor.tag, ancestor.attrib)
+        wrapper.append(selected)
+        selected = wrapper
+        ancestor = parent_by_child.get(ancestor)
+    defs = root.find(f"{namespace}defs")
+    defs_markup = "" if defs is None else ET.tostring(defs, encoding="unicode")
+    filtered_asset = f'<svg xmlns="http://www.w3.org/2000/svg" width="{FACE_ASSET_SIZE[0]}" height="{FACE_ASSET_SIZE[1]}" viewBox="0 0 {FACE_ASSET_SIZE[0]} {FACE_ASSET_SIZE[1]}">{defs_markup}{ET.tostring(selected, encoding="unicode")}</svg>'
+    href = "data:image/svg+xml;base64," + base64.b64encode(filtered_asset.encode("utf-8")).decode("ascii")
+    transform = _front_group_transform(panel_center, panel_height, group_scale, group_y_offset)
+    markup = f'<svg xmlns="http://www.w3.org/2000/svg" width="{SOURCE_CANVAS_PX[0]}" height="{SOURCE_CANVAS_PX[1]}"><g transform="{transform}"><image href="{href}" x="{face_x:.1f}" y="{face_y:.1f}" width="{face_width:.1f}" height="{face_height:.1f}" preserveAspectRatio="xMidYMid meet"/></g></svg>'
+    png = cairosvg.svg2png(bytestring=markup.encode("utf-8"), output_width=SOURCE_CANVAS_PX[0], output_height=SOURCE_CANVAS_PX[1])
+    with Image.open(io.BytesIO(png)) as rendered:
+        return rendered.getchannel("A").crop((0, 0, *FRONT_PANEL_PX)).copy()
+
+
+def _retain_svg_role(node: ET.Element, classes: set[str]) -> bool:
+    keep = bool(set(node.get("class", "").split()) & classes)
+    for child in list(node):
+        if _retain_svg_role(child, classes):
+            keep = True
+        else:
+            node.remove(child)
+    return keep
+
+
+def _with_downward_translation(transform: str, shift: float) -> str:
+    return f"{transform} translate(0 {shift:.4f})".strip()
 
 
 def _face_content_bbox(face_asset: str) -> tuple[int, int, int, int]:
@@ -362,6 +515,7 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
     panel_center = width * FRONT_CENTER_RATIO
     face_markup = _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
+        group_scale=options.group_scale, group_y_offset=options.group_y_offset,
     )
     asset = _decode_native_face_asset(face_markup)
     asset_root = ET.fromstring(asset)
@@ -384,13 +538,7 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
     group_transform = _front_group_transform(
         panel_center, height, options.group_scale, options.group_y_offset,
     )
-    bbox = _face_content_bbox(asset)
-    face_width = width * FACE_WIDTH_RATIO
-    face_height = height * FACE_HEIGHT_RATIO
-    face_x = panel_center - face_width / 2
-    top_text_bottom = height * AREA_Y_RATIO + TEXT_CLEARANCE
-    face_y = _face_y_between_text(bbox, face_width, face_height, top_text_bottom, height - top_text_bottom)
-    face_y = min(max(face_y, 0.0), height - face_height)
+    face_x, face_y, face_width, face_height = _native_face_markup_placement(face_markup)
     asset_scale = min(face_width / FACE_ASSET_SIZE[0], face_height / FACE_ASSET_SIZE[1])
     asset_x = face_x + (face_width - FACE_ASSET_SIZE[0] * asset_scale) / 2
     asset_y = face_y + (face_height - FACE_ASSET_SIZE[1] * asset_scale) / 2
@@ -440,6 +588,11 @@ def _decode_native_face_asset(face_markup: str) -> str:
     if match is None:
         raise FaceRenderError("Native V28 renderer produced no SVG face asset.")
     return base64.b64decode(match.group(1)).decode("utf-8")
+
+
+def _native_face_markup_placement(face_markup: str) -> tuple[float, float, float, float]:
+    image = ET.fromstring(face_markup)
+    return tuple(float(image.attrib[name]) for name in ("x", "y", "width", "height"))
 
 
 def _svg_local_name(tag: str) -> str:
