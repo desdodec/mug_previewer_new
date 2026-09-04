@@ -16,32 +16,32 @@ def _masks(*, street_top: int, street_width: int = 121, street_height: int = 2) 
 def test_tiny_overlap_gets_corrected() -> None:
     nose, street = _masks(street_top=28)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (5, 5, 'auto-corrected')
+    assert correction == (10, 10, 'auto-corrected')
 
 
 def test_correction_uses_the_minimum_required_downward_shift() -> None:
     nose, street = _masks(street_top=30)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction.required_shift_px == 3
-    assert correction.applied_shift_px == 3
+    assert correction.required_shift_px == 8
+    assert correction.applied_shift_px == 8
 
 
-def test_correction_cap_allows_exactly_twelve_pixels() -> None:
-    nose, street = _masks(street_top=21)
+def test_correction_cap_allows_exactly_sixteen_pixels() -> None:
+    nose, street = _masks(street_top=22)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (12, 12, 'auto-corrected')
+    assert correction == (16, 16, 'auto-corrected')
 
 
 def test_large_overlap_is_not_auto_corrected() -> None:
-    nose, street = _masks(street_top=20)
+    nose, street = _masks(street_top=21)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (13, 0, 'manual-review')
+    assert correction == (17, 0, 'manual-review')
 
 
 def test_atypical_lower_feature_remains_manual() -> None:
     nose, street = _masks(street_top=25, street_width=90, street_height=20)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (8, 0, 'manual-review')
+    assert correction == (13, 0, 'manual-review')
 
 
 def test_clearance_decision_is_deterministic() -> None:
