@@ -26,16 +26,22 @@ def test_correction_uses_the_minimum_required_downward_shift() -> None:
     assert correction.applied_shift_px == 8
 
 
-def test_correction_cap_allows_exactly_sixteen_pixels() -> None:
-    nose, street = _masks(street_top=22)
+def test_correction_cap_allows_exactly_twenty_pixels() -> None:
+    nose, street = _masks(street_top=18)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (16, 16, 'auto-corrected')
+    assert correction == (20, 20, 'auto-corrected')
+
+
+def test_valid_seventeen_pixel_correction_is_applied() -> None:
+    nose, street = _masks(street_top=21)
+    correction = assess_nose_street_clearance(nose, street)
+    assert correction == (17, 17, 'auto-corrected')
 
 
 def test_large_overlap_is_not_auto_corrected() -> None:
-    nose, street = _masks(street_top=21)
+    nose, street = _masks(street_top=17)
     correction = assess_nose_street_clearance(nose, street)
-    assert correction == (17, 0, 'manual-review')
+    assert correction == (21, 0, 'manual-review')
 
 
 def test_atypical_lower_feature_remains_manual() -> None:
