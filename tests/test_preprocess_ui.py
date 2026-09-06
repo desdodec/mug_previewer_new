@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from mug_previewer.datasets.discovery import discover_datasets
 from mug_previewer.preprocess import PreprocessProgress, PreprocessSummary
-from mug_previewer.cli import main
+from mug_previewer.cli import DEFAULT_PREPROCESS_UI_DATASET_ROOT, DEFAULT_PREPROCESS_UI_OUTPUT_ROOT, main
 import mug_previewer.ui.preprocess_ui as preprocess_ui
 from mug_previewer.ui.preprocess_ui import PreprocessLocationError, PreprocessWorker, WorkerFinished, _counts_text, validate_preprocess_locations
 
@@ -85,12 +85,38 @@ def test_discovery_rejects_an_arbitrary_folder(tmp_path: Path) -> None:
     assert discover_datasets(arbitrary) == []
 
 
-def test_preprocess_ui_command_passes_dataset_root(monkeypatch, tmp_path: Path) -> None:
+def test_preprocess_ui_command_passes_explicit_input_and_default_output(monkeypatch, tmp_path: Path) -> None:
     captured = {}
-    monkeypatch.setattr("mug_previewer.ui.preprocess_ui.launch", lambda *, dataset_root=None: captured.update(dataset_root=dataset_root) or 0)
+    monkeypatch.setattr(
+        "mug_previewer.ui.preprocess_ui.launch",
+        lambda *, dataset_root=None, output_root=None: captured.update(
+            dataset_root=dataset_root,
+            output_root=output_root,
+        ) or 0,
+    )
 
     assert main(["--dataset-root", str(tmp_path), "preprocess-ui"]) == 0
-    assert captured == {"dataset_root": tmp_path}
+    assert captured == {
+        "dataset_root": tmp_path,
+        "output_root": DEFAULT_PREPROCESS_UI_OUTPUT_ROOT,
+    }
+
+
+def test_preprocess_ui_command_uses_requested_default_folders(monkeypatch) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        "mug_previewer.ui.preprocess_ui.launch",
+        lambda *, dataset_root=None, output_root=None: captured.update(
+            dataset_root=dataset_root,
+            output_root=output_root,
+        ) or 0,
+    )
+
+    assert main(["preprocess-ui"]) == 0
+    assert captured == {
+        "dataset_root": DEFAULT_PREPROCESS_UI_DATASET_ROOT,
+        "output_root": DEFAULT_PREPROCESS_UI_OUTPUT_ROOT,
+    }
 
 
 class _Var:
@@ -153,7 +179,12 @@ def test_input_selection_discovers_datasets_without_setting_output(monkeypatch, 
         SimpleNamespace(dataset=SimpleNamespace(display_name="Godalming", path=input_root / "Godalming")),
     ]
     refreshed = []
-    monkeypatch.setattr(preprocess_ui.filedialog, "askdirectory", lambda **kwargs: str(input_root))
+    chooser_options = {}
+    monkeypatch.setattr(
+        preprocess_ui.filedialog,
+        "askdirectory",
+        lambda **kwargs: chooser_options.update(kwargs) or str(input_root),
+    )
     monkeypatch.setattr(preprocess_ui, "discover_datasets", lambda path: candidates)
     controller._refresh_location_state = lambda: refreshed.append(True)
     controller._update_browser_button = lambda: None
@@ -163,6 +194,7 @@ def test_input_selection_discovers_datasets_without_setting_output(monkeypatch, 
     assert controller.dataset_root_var.get() == str(input_root)
     assert controller.output_var.get() == ""
     assert controller.scope_box.values == ("All datasets", "Glasgow", "Godalming")
+    assert chooser_options["initialdir"] == str(input_root)
     assert refreshed == [True]
 
 
@@ -204,13 +236,19 @@ def test_output_selection_sets_only_the_explicitly_chosen_folder(monkeypatch, tm
     controller = _controller(tmp_path / "input", tmp_path / "old-output")
     selected = tmp_path / "chosen-output"
     refreshed = []
-    monkeypatch.setattr(preprocess_ui.filedialog, "askdirectory", lambda **kwargs: str(selected))
+    chooser_options = {}
+    monkeypatch.setattr(
+        preprocess_ui.filedialog,
+        "askdirectory",
+        lambda **kwargs: chooser_options.update(kwargs) or str(selected),
+    )
     controller._refresh_location_state = lambda: refreshed.append(True)
     controller._update_browser_button = lambda: None
 
     controller._choose_output()
 
     assert controller.output_var.get() == str(selected)
+    assert chooser_options["initialdir"] == str(tmp_path / "old-output")
     assert refreshed == [True]
 
 

@@ -16,6 +16,8 @@ from .rendering.face import FaceRenderError, FaceRenderOptions, render_face
 
 DEFAULT_PREPROCESSED_DIRNAME = "svg_previews"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PREPROCESS_UI_DATASET_ROOT = Path(r"E:\Python_Stuff\OS_Mail_Addresses\workflow_outputs_v6")
+DEFAULT_PREPROCESS_UI_OUTPUT_ROOT = Path(r"D:\Python_Stuff\Mug_Previewer_V2\svg_previews")
 
 
 def _default_preprocessed_path(dataset_root: Path | None = None) -> Path:
@@ -127,7 +129,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "preprocess-ui":
         from .ui.preprocess_ui import launch
 
-        return launch(dataset_root=args.dataset_root or load_settings().dataset_root)
+        return launch(
+            dataset_root=args.dataset_root or DEFAULT_PREPROCESS_UI_DATASET_ROOT,
+            output_root=DEFAULT_PREPROCESS_UI_OUTPUT_ROOT,
+        )
 
     if args.command == "ui":
         from .ui.app import launch

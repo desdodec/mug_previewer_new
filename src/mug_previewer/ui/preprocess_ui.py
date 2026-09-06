@@ -102,13 +102,19 @@ class PreprocessWorker:
 
 
 class PreprocessUiApp:
-    def __init__(self, root: tk.Tk, *, dataset_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        *,
+        dataset_root: Path | None = None,
+        output_root: Path | None = None,
+    ) -> None:
         self.root = root
         self.root.title("Mug Previewer Preprocessing")
         self.root.minsize(640, 460)
         self.worker: PreprocessWorker | None = None
         self.dataset_root_var = tk.StringVar(value=str(dataset_root) if dataset_root else "")
-        self.output_var = tk.StringVar(value="")
+        self.output_var = tk.StringVar(value=str(output_root) if output_root else "")
         self.scope_var = tk.StringVar(value="All datasets")
         self.progress_var = tk.StringVar(value="Ready")
         self.counts_var = tk.StringVar(value="Processed: 0 | Reused/skipped: 0")
@@ -180,7 +186,11 @@ class PreprocessUiApp:
         ttk.Button(line, text=button_label, command=command).grid(row=0, column=1)
 
     def _choose_dataset_root(self) -> None:
-        selected = filedialog.askdirectory(parent=self.root, title="Choose Input Dataset Folder")
+        selected = filedialog.askdirectory(
+            parent=self.root,
+            title="Choose Input Dataset Folder",
+            initialdir=self.dataset_root_var.get(),
+        )
         if selected:
             self.dataset_root_var.set(selected)
             self._load_scope_choices()
@@ -188,7 +198,11 @@ class PreprocessUiApp:
             self._update_browser_button()
 
     def _choose_output(self) -> None:
-        selected = filedialog.askdirectory(parent=self.root, title="Choose Output Folder")
+        selected = filedialog.askdirectory(
+            parent=self.root,
+            title="Choose Output Folder",
+            initialdir=self.output_var.get(),
+        )
         if selected:
             self.output_var.set(selected)
             self._refresh_location_state()
@@ -329,8 +343,8 @@ def _counts_text(summary: PreprocessSummary) -> str:
     )
 
 
-def launch(*, dataset_root: Path | None = None) -> int:
+def launch(*, dataset_root: Path | None = None, output_root: Path | None = None) -> int:
     root = tk.Tk()
-    PreprocessUiApp(root, dataset_root=dataset_root)
+    PreprocessUiApp(root, dataset_root=dataset_root, output_root=output_root)
     root.mainloop()
     return 0

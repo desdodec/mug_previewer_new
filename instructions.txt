@@ -1,0 +1,16 @@
+
+mug-previewer --dataset-root "E:\path\to\workflow_outputs_v6" ui
+
+1. Select the dataset and street.
+2. Wait until its status says Ready for Production.
+3. Click Export Inkthreadable PNG or Export Printify PNG.
+4. Choose where to save the PNG.
+That creates the actual printer-ready mug-wrap file, not merely the on-screen mock-up.
+A street marked Manual Review Required must be approved in the review screen before the export buttons become available. Cannot Render means its source artwork needs fixing first.
+mug-previewer preprocess-ui is only for preparing/editing source preview assets; it does not make the final printer PNGs.
+
+
+
+
+
+mug-previewer preprocess-ui
