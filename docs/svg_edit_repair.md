@@ -16,7 +16,7 @@ inputs are preserved. Existing corrected files are skipped with a reason rather
 than overwritten; move previous outputs elsewhere before generating replacements.
 The command reports the exact processed, corrected, and skipped counts.
 
-To view the results, reopen `svg_previews/previewer.html` and select only the
+To view the results, reopen `tools/svg_reviewer/previewer.html` and select only the
 `corrected` folder using its SVG directory selector. A saved review referring to
 original filenames will not automatically include these `_edit.svg` copies.
 

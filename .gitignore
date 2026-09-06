@@ -21,3 +21,6 @@ previews/
 workflow_outputs*/
 datasets_local/
 diagnostics/
+
+# Generated SVGs, cached previews, and preprocessing indexes.
+/svg_previews/

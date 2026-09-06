@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Keep imported preview paths relative to the generated output folder. -->
+  <base href="../../svg_previews/">
+  <title>SVG QA Reviewer</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; background: #f5f5f5; }
+    .upload-bar {
+      background: white;
+      padding: 16px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      align-items: center;
+    }
+    .upload-group, .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-row { display: flex; align-items: center; gap: 12px; }
+    .grid { display: grid; gap: 16px; margin-bottom: 24px; }
+    .grid.autofit { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    .card { background: white; border: 1px solid #ccc; border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .card-preview { border: 1px solid #eee; background: #fff; min-height: 150px; display: flex; align-items: center; justify-content: center; }
+    .card-preview img { max-width: 100%; height: auto; display: block; }
+    .card-title { font-weight: bold; font-size: 0.9em; word-break: break-all; }
+    .controls { display: flex; flex-direction: column; gap: 6px; }
+    .controls label { font-size: 0.8em; color: #555; }
+    .controls select { width: 100%; box-sizing: border-box; padding: 6px; }
+    .metadata { font-size: 0.8em; color: #555; word-break: break-word; }
+    .filter-group select { min-width: 150px; padding: 6px; }
+    #item-count { margin: 0 0 16px; color: #555; }
+    #submit-btn { padding: 12px 24px; background: #0066cc; color: white; border: none; border-radius: 4px; font-size: 1em; cursor: pointer; }
+    #submit-btn:hover { background: #0052a3; }
+  </style>
+</head>
+<body>
+
+  <h2>SVG Review Panel</h2>
+  <div class='upload-bar'>
+    <div class='upload-group'>
+      <label for='index-input'><strong>Import review results or preprocess index:</strong></label>
+      <input type='file' id='index-input' accept='.json,application/json'>
+    </div>
+    <div class='control-group filter-group'>
+      <label for='status-filter'><strong>Show review status:</strong></label>
+      <select id='status-filter'>
+        <option value='all'>All</option>
+        <option value='pass'>Pass</option>
+        <option value='overlap'>Overlap</option>
+        <option value='duplicates'>Duplicates</option>
+        <option value='missing'>Missing</option>
+        <option value='other'>Other</option>
+        <option value='Do Not Use'>Do Not Use</option>
+      </select>
+    </div>
+  </div>
+  <p>Import saved reviews to restore images and statuses, then choose a review status to filter. Older review files may require selecting the matching SVG folder.</p>
+  <p id='item-count' aria-live='polite'>No items loaded.</p>
+
+  <div class="upload-bar">
+    <div class="upload-group">
+      <label for="file-input"><strong>Select SVG Files or Directory:</strong></label>
+      <input type="file" id="file-input" multiple accept=".svg" webkitdirectory>
+    </div>
+
+    <div class="control-group">
+      <strong>Layout Controls:</strong>
+      <div class="control-row">
+        <label><input type="checkbox" id="autofit-toggle" checked onchange="updateLayout()"> Auto-fit Grid</label>
+        <label for="col-count">Columns:</label>
+        <input type="number" id="col-count" value="4" min="1" max="12" style="width: 50px;" disabled onchange="updateLayout()">
+      </div>
+    </div>
+  </div>
+
+  <div class="grid autofit" id="svg-grid"></div>
+  <button id="submit-btn" onclick="exportJSON()">Submit & Download JSON</button>
+
+  <script>
+    const grid = document.getElementById("svg-grid");
+    const fileInput = document.getElementById("file-input");
+    const autofitToggle = document.getElementById("autofit-toggle");
+    const colCountInput = document.getElementById("col-count");
+    let loadedFiles = [];
+
+    function updateLayout() {
+      const isAutoFit = autofitToggle.checked;
+      colCountInput.disabled = isAutoFit;
+
+      if (isAutoFit) {
+        grid.className = "grid autofit";
+        grid.style.gridTemplateColumns = "";
+      } else {
+        grid.className = "grid";
+        grid.style.gridTemplateColumns = `repeat(${colCountInput.value}, 1fr)`;
+      }
+    }
+
+    fileInput.addEventListener("change", (e) => {
+      grid.innerHTML = "";
+      loadedFiles = Array.from(e.target.files).filter(file => file.name.endsWith(".svg"));
+      loadedFiles.sort((a, b) => a.name.localeCompare(b.name));
+
+      loadedFiles.forEach((file, index) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        const fileUrl = URL.createObjectURL(file);
+
+        card.innerHTML = `
+          <div class="card-title">${file.name}</div>
+          <div class="card-preview">
+            <img src="${fileUrl}" alt="${file.name}">
+          </div>
+          <div class="controls">
+            <label for="status-${index}">Status:</label>
+            <select id="status-${index}">
+              <option value="pass" selected>pass</option>
+              <option value="overlap">overlap</option>
+              <option value="duplicates">duplicates</option>
+              <option value="missing">missing</option>
+              <option value="other">other</option>
+              <option value="Do Not Use">Do Not Use</option>
+            </select>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    });
+
+    function exportJSON() {
+      if (loadedFiles.length === 0) {
+        alert("No SVG files loaded.");
+        return;
+      }
+
+      const results = loadedFiles.map((file, index) => {
+        const status = document.getElementById(`status-${index}`).value;
+        return {
+          svg_name: file.name,
+          status: status
+        };
+      });
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(results, null, 2));
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "svg_review_results.json");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+  </script>
+  <script>
+    // This second review controller also supports records from preprocess_index.json.
+    const indexInput = document.getElementById('index-input');
+    const statusFilter = document.getElementById('status-filter');
+    const itemCount = document.getElementById('item-count');
+    const reviewStatuses = ['pass', 'overlap', 'duplicates', 'missing', 'other', 'Do Not Use'];
+    let reviewItems = [];
+    let savedReviews = null;
+    let selectedSvgFiles = [];
+    let reviewObjectUrls = [];
+
+    function clearReviewGrid() {
+      grid.innerHTML = '';
+    }
+
+    function revokeReviewObjectUrls() {
+      reviewObjectUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+      reviewObjectUrls = [];
+    }
+
+    function statusFromIndexRecord(record) {
+      const reason = String(record.reason_detail || '').toLowerCase();
+      if (record.success === false || reason.includes('triage_failed') || reason.includes('missing')) return 'missing';
+      if (reason.includes('duplicate')) return 'duplicates';
+      if (reason.includes('overlap')) return 'overlap';
+      return record.production_state === 'AUTO_APPROVED' ? 'pass' : 'other';
+    }
+
+    function makeStatusSelect(item, index) {
+      const select = document.createElement('select');
+      select.id = 'review-status-' + index;
+      reviewStatuses.forEach(function (status) {
+        const option = document.createElement('option');
+        option.value = status;
+        option.textContent = status;
+        option.selected = item.status === status;
+        select.appendChild(option);
+      });
+      select.addEventListener('change', function () {
+        item.status = select.value;
+        if (item.card) item.card.dataset.status = item.status;
+        applyStatusFilter();
+      });
+      return select;
+    }
+
+    function renderReviewItems() {
+      clearReviewGrid();
+      reviewItems.forEach(function (item, index) {
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = item.name;
+        card.appendChild(title);
+
+        const preview = document.createElement('div');
+        preview.className = 'card-preview';
+        const image = document.createElement('img');
+        image.src = item.previewUrl;
+        image.alt = item.name;
+        image.addEventListener('error', function () {
+          image.remove();
+          preview.textContent = 'Image unavailable. Use the SVG folder selector above to locate the original files.';
+        }, { once: true });
+        preview.appendChild(image);
+        card.appendChild(preview);
+
+        if (item.detail) {
+          const metadata = document.createElement('div');
+          metadata.className = 'metadata';
+          metadata.textContent = item.detail;
+          card.appendChild(metadata);
+        }
+
+        const controls = document.createElement('div');
+        controls.className = 'controls';
+        const label = document.createElement('label');
+        label.htmlFor = 'review-status-' + index;
+        label.textContent = 'Status:';
+        controls.appendChild(label);
+        controls.appendChild(makeStatusSelect(item, index));
+        card.appendChild(controls);
+
+        item.card = card;
+        card.dataset.status = item.status;
+        grid.appendChild(card);
+      });
+      applyStatusFilter();
+    }
+
+    function applyStatusFilter() {
+      const selectedStatus = statusFilter.value;
+      let visibleCount = 0;
+      reviewItems.forEach(function (item) {
+        const isVisible = selectedStatus === 'all' || item.status === selectedStatus;
+        if (item.card) item.card.style.display = isVisible ? '' : 'none';
+        if (isVisible) visibleCount += 1;
+      });
+      const suffix = selectedStatus === 'all' ? '' : ' matching ' + selectedStatus;
+      itemCount.textContent = visibleCount + ' of ' + reviewItems.length + ' item' + (reviewItems.length === 1 ? '' : 's') + ' shown' + suffix + '.';
+    }
+
+    statusFilter.addEventListener('change', applyStatusFilter);
+
+    function restoreSavedReviews() {
+      revokeReviewObjectUrls();
+      reviewItems = savedReviews.map(function (record) {
+        const name = (record.svg_path || record.svg_name).replace(/\\/g, '/');
+        const exact = selectedSvgFiles.filter(function (file) {
+          return file.webkitRelativePath === name;
+        });
+        const matches = exact.length ? exact : selectedSvgFiles.filter(function (file) {
+          return file.name === name.split('/').pop();
+        });
+        let previewUrl = record.preview_data_url || new URL(record.preview_path || name, document.baseURI).href;
+        if (matches.length === 1) {
+          previewUrl = URL.createObjectURL(matches[0]);
+          reviewObjectUrls.push(previewUrl);
+        }
+        return {
+          name: record.svg_name,
+          previewUrl: previewUrl,
+          status: record.status,
+          detail: matches.length > 1 ? 'Multiple SVGs share this filename. Select a more specific folder.' : '',
+          svgFile: matches.length === 1 ? matches[0] : null,
+          sourcePath: matches.length === 1 ? (matches[0].webkitRelativePath || matches[0].name) : name,
+          record: record
+        };
+      });
+      renderReviewItems();
+    }
+
+    fileInput.addEventListener('change', function (event) {
+      selectedSvgFiles = Array.from(event.target.files).filter(function (file) {
+        return file.name.toLowerCase().endsWith('.svg');
+      });
+      if (savedReviews) {
+        restoreSavedReviews();
+        return;
+      }
+      revokeReviewObjectUrls();
+      selectedSvgFiles.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      reviewItems = selectedSvgFiles.map(function (file) {
+        const previewUrl = URL.createObjectURL(file);
+        reviewObjectUrls.push(previewUrl);
+        return { name: file.name, previewUrl: previewUrl, status: 'pass', detail: '', svgFile: file, sourcePath: file.webkitRelativePath || file.name };
+      });
+      indexInput.value = '';
+      renderReviewItems();
+    });
+
+    indexInput.addEventListener('change', function (event) {
+      const indexFile = event.target.files[0];
+      if (!indexFile) return;
+      const reader = new FileReader();
+      reader.addEventListener('load', function () {
+        try {
+          const index = JSON.parse(String(reader.result));
+          if (Array.isArray(index)) {
+            if (!index.every(function (record) {
+              return record && typeof record.svg_name === 'string' && record.svg_name.trim() && reviewStatuses.includes(record.status);
+            })) throw new Error('Each review must have an SVG filename and a supported review status.');
+            savedReviews = index;
+            restoreSavedReviews();
+            return;
+          }
+          if (!index || !Array.isArray(index.records)) throw new Error('The file does not contain a records list.');
+          savedReviews = null;
+          revokeReviewObjectUrls();
+          reviewItems = index.records
+            .filter(function (record) { return record.preview_path || record.svg_path || record.generated_svg_path; })
+            .map(function (record) {
+              const previewPath = record.preview_path || record.svg_path || record.generated_svg_path;
+              return {
+                name: (record.dataset_name || record.dataset_id || 'Unknown dataset') + ' — ' + (record.street_name || record.street_id || 'Unnamed record'),
+                previewUrl: new URL(previewPath, document.baseURI).href,
+                status: statusFromIndexRecord(record),
+                detail: [record.production_state, record.reason_detail].filter(Boolean).join(' — '),
+                record: record
+              };
+            });
+          fileInput.value = '';
+          renderReviewItems();
+        } catch (error) {
+          alert('Could not import this file: ' + error.message);
+        }
+      });
+      reader.readAsText(indexFile);
+    });
+
+    window.exportJSON = async function () {
+      if (reviewItems.length === 0) {
+        alert('No SVG files or preprocess-index records loaded.');
+        return;
+      }
+      const results = await Promise.all(reviewItems.map(async function (item) {
+        const result = { svg_name: item.record ? (item.record.svg_name || item.record.svg_path || item.name) : item.name, status: item.status };
+        if (item.sourcePath) result.svg_path = item.sourcePath;
+        if (item.record) {
+          result.svg_path = item.record.svg_path || item.record.generated_svg_path || result.svg_path;
+          result.preview_path = item.record.preview_path;
+          result.preview_data_url = item.record.preview_data_url;
+          result.dataset_id = item.record.dataset_id;
+          result.street_id = item.record.street_id;
+          result.street_name = item.record.street_name;
+        }
+        if (item.svgFile) {
+          result.preview_data_url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(await item.svgFile.text());
+        }
+        return result;
+      }));
+      const dataUrl = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(results, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = dataUrl;
+      downloadAnchor.download = 'svg_review_results.json';
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    };
+  </script>
+</body>
+</html>
