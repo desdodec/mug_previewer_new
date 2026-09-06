@@ -24,3 +24,7 @@ diagnostics/
 
 # Generated SVGs, cached previews, and preprocessing indexes.
 /svg_previews/
+
+# Local nose-clearance review artifacts.
+/_tmp_nose_clearance_review_20260904/
+/_tmp_nose_clearance_review_20260904_cap20/
