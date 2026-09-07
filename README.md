@@ -396,3 +396,11 @@ stable identity plus verified review hash/time. A future importer must resolve
 those identities and preserve which exact snapshot was reviewed; files are not
 silently treated as fresh QA. Batch export and the final workspace redesign are
 outside Task 04B.
+
+## Production-ready batch export
+
+In preprocessed mode, select a dataset and open **Production batch...** to plan
+and export its ready artwork through Inkthreadable or Printify. Existing files
+are skipped by default. The batch window shows eligibility totals, progress,
+cancellation, and an auditable report. Search and Manual Review-only filters do
+not restrict batch scope. See [Batch export workflow](docs/batch_exports.md).

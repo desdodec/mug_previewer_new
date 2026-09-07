@@ -162,7 +162,14 @@ def open_artwork_folder(workspace: ManualSvgWorkspace) -> None:
     source = workspace.generated_svg or workspace.approved_svg
     if source is None or not source.parent.is_dir():
         raise ValueError("Artwork folder is unavailable.")
-    folder = source.parent.resolve()
+    open_local_path(source.parent)
+
+
+def open_local_path(path: Path) -> None:
+    """Open an existing local folder or report using the platform default."""
+    folder = Path(path).resolve()
+    if not folder.exists():
+        raise ValueError(f"Path is unavailable: {folder}")
     if os.name == "nt":
         os.startfile(str(folder))
     else:

@@ -16,6 +16,7 @@ from ..preprocessed_export import export_preprocessed_provider_png
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
+from .batch_export_panel import BatchExportPanel
 from .manual_review import ManualReviewController, ManualReviewWindow
 from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
@@ -147,8 +148,23 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             ttk.Checkbutton(controls, text="Manual Review only", variable=self.manual_filter_var,
                             command=self._apply_filter).grid(row=6, column=0, sticky="w")
             self._build_artwork_panel()
+            ttk.Button(controls, text="Production batch...",
+                       command=self._open_batch_window).grid(row=15, column=0, sticky="ew", pady=(8, 0))
         self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+
+    def _open_batch_window(self) -> None:
+        if not self._is_preprocessed_mode():
+            return
+        if "batch_window" not in self.__dict__:
+            self.batch_window = tk.Toplevel(self.root)
+            self.batch_window.title("Production batch")
+            self.batch_window.transient(self.root)
+            self.batch_panel = BatchExportPanel(self.batch_window, self)
+            self.batch_panel.pack(fill="both", expand=True, padx=12, pady=12)
+            self.batch_window.protocol("WM_DELETE_WINDOW", self.batch_window.withdraw)
+        self.batch_window.deiconify()
+        self.batch_window.lift()
 
     def _add_weight_control(
         self,
@@ -221,6 +237,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._invalidate_active_production_status_request()
         self._invalidate_active_render_request()
         self.state.selected_dataset = data
+        if "batch_panel" in self.__dict__:
+            self.batch_panel.invalidate()
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
         self.state.framing_mode = None
@@ -506,12 +524,16 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.root.after(25, callback)
         except tk.TclError:
             self._shutting_down = True
+            if "batch_panel" in self.__dict__:
+                self.batch_panel.cancel_event.set()
 
     def _shutdown(self) -> None:
         """Invalidate worker completions before the Tk interpreter is destroyed."""
         if self._shutting_down:
             return
         self._shutting_down = True
+        if "batch_panel" in self.__dict__:
+            self.batch_panel.cancel_event.set()
         self._invalidate_active_production_status_request()
         self._invalidate_active_render_request()
         if self._resize_pending is not None:
