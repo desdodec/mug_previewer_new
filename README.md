@@ -347,7 +347,7 @@ For `MANUAL_APPROVED` artwork, **Edit Again in Inkscape** reopens the retained
 working edit (or creates one from the generated original if it is missing).
 Existing approved artwork stays authoritative until **Approve Corrected** succeeds
 again. Failed approval preserves the previous production artwork and preview.
-**View Approved SVG**, **Open Artwork Folder**, and **Refresh Artwork** are available
+**Preview Current SVG for QA**, **Open Artwork Folder**, and **Refresh Artwork** are available
 in the panel. Refresh or another street selection restores the normal generated
 or approved cached preview. Street selection does not generate faces, score
 candidates, or render rear artwork, wraps or mugs.
@@ -361,12 +361,18 @@ blocking the app. No machine-specific executable path is committed or persisted.
 
 ### Production and human QA are separate
 
-Production status and QA review status are separate. `preprocess_index.json`
-continues to hold production classification; `review_index.json` alongside it
-stores human QA. The version-1 ledger contains a `records` list keyed by
-`dataset_id` and `street_id`. Each record stores `status`, `note`, `reviewed_at`
-(UTC), and `reviewed_svg_sha256`. Supported statuses are `pass`, `overlap`,
-`duplicates`, `missing`, `other`, and `Do Not Use`.
+**Production export requires an explicit current `pass` review for the exact authoritative SVG.**
+Production approval and human QA are separate decisions. `preprocess_index.json`
+holds production classification. Save browser review results alongside it as
+`svg_review_results.json` or `svg_review_results_<label>.json`. The label is only
+for organising files: identity comes from dataset/street IDs or unambiguous
+indexed SVG paths, never from display-name spelling.
+
+The backend normalizes those human sources on read and compares the reviewed
+SVG SHA-256 with the authoritative SVG bytes. `review_index.json` is retained as
+a compatibility snapshot for desktop review saves; it cannot grant production
+permission without the human source. No separate import or ledger maintenance
+is needed. See [Exact-artwork QA workflow](docs/qa_production_gate.md).
 
 **Save Review** applies to the labelled artwork currently shown. Normal review
 uses the approved SVG for `MANUAL_APPROVED`, or the indexed/generated SVG
@@ -377,7 +383,7 @@ If the file changes after preview, preview it again before saving a review.
 
 Export rules for individual providers:
 
-- A production-approved street with no QA record retains its existing export behavior.
+- No review blocks export, even for AUTO_APPROVED or MANUAL_APPROVED artwork.
 - A current `pass` allows export when production is approved.
 - Current problem flags (`overlap`, `duplicates`, `missing`, `other`, `Do Not Use`)
   block export. They do not delete artwork or change production classification.
@@ -390,12 +396,11 @@ The exporter rechecks QA before using the existing Task 04A production path:
 `resolve_authoritative_face_svg` -> approved SVG -> `render_authoritative_face_panel`
 -> `render_preprocessed_wrap` -> provider export. No alternate renderer is used.
 
-Importing the standalone browser reviewer's JSON is deferred: its records use
-filenames/paths and optional embedded SVG snapshots rather than the ledger's
-stable identity plus verified review hash/time. A future importer must resolve
-those identities and preserve which exact snapshot was reviewed; files are not
-silently treated as fresh QA. Batch export and the final workspace redesign are
-outside Task 04B.
+The standalone reviewer hashes the actual loaded SVG bytes. Embedded legacy SVG
+snapshots can establish the same hash; filename-only reviews must be refreshed.
+New files and changed artwork start unreviewed. Legacy live-render production
+exports are blocked because they have no reviewed authoritative SVG. Use
+preprocessed mode for production. Task 04D remains outside this change.
 
 ## Production-ready batch export
 
@@ -404,3 +409,8 @@ and export its ready artwork through Inkthreadable or Printify. Existing files
 are skipped by default. The batch window shows eligibility totals, progress,
 cancellation, and an auditable report. Search and Manual Review-only filters do
 not restrict batch scope. See [Batch export workflow](docs/batch_exports.md).
+
+Desktop **Save Review** requires **Preview Current SVG for QA** (or an explicit
+working/corrected preview) first. A cached PNG alone cannot establish which SVG
+bytes were seen. Saving checks the hash of the bytes actually loaded for review;
+if they changed, preview again. This adds no rendering to ordinary street browsing.

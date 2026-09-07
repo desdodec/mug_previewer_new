@@ -41,6 +41,8 @@ class BatchExportItem:
     authoritative_svg: Path | None = None
     authoritative_svg_sha256: str | None = None
     review_status: str | None = None
+    review_state: str | None = None
+    reviewed_svg_sha256: str | None = None
     review_stale: bool = False
     review_fingerprint: str | None = None
     record_fingerprint: str | None = None
@@ -58,6 +60,7 @@ class BatchExportSummary:
     unrenderable: int
     asset_errors: int
     existing: int
+    not_reviewed: int = 0
 
 
 @dataclass(frozen=True)
@@ -171,9 +174,11 @@ def _inspect(root, dataset, street_id, record, directory):
         review = current_review_state(root, dataset.id, street_id, resolution.path)
         item = replace(item, authoritative_svg=resolution.path,
                        review_status=review.record.status if review.record else None,
+                       review_state=review.state,
+                       reviewed_svg_sha256=review.record.reviewed_svg_sha256 if review.record else None,
                        review_stale=review.stale,
-                       review_fingerprint=json.dumps(asdict(review.record), sort_keys=True) if review.record else None)
-        if item.review_status == 'Do Not Use':
+                       review_fingerprint=json.dumps(asdict(review), sort_keys=True))
+        if item.review_status == 'Do Not Use' and not review.stale and not review.error:
             return replace(item, eligibility=Eligibility.EXCLUDED, reason='Do Not Use: intentionally excluded')
         if resolution.state.value == 'MANUAL_REVIEW':
             return replace(item, eligibility=Eligibility.MANUAL_REVIEW, reason='Artwork requires manual approval')
@@ -186,7 +191,7 @@ def _inspect(root, dataset, street_id, record, directory):
         item = replace(item, authoritative_svg_sha256=svg_sha256(resolution.path))
         if review.export_blocked:
             return replace(item, eligibility=Eligibility.QA_BLOCKED,
-                           reason=f"QA blocked: {'stale ' if review.stale else ''}{item.review_status}")
+                           reason=review.label)
         destination = directory / production_filename(dataset.id, street_id, name)
         if len(destination.name.encode('utf-16-le')) // 2 > 255:
             raise ValueError('Production filename exceeds the filesystem limit')
@@ -219,7 +224,8 @@ def build_batch_plan(root, dataset, provider_id, destination_root, *,
             destinations[key] = item
     counts = {c: sum(i.eligibility == c for i in items) for c in Eligibility}
     summary = BatchExportSummary(len(items), *(counts[c] for c in Eligibility),
-                                 sum(i.destination_exists for i in items))
+                                 sum(i.destination_exists for i in items),
+                                 sum(i.eligibility == Eligibility.QA_BLOCKED and i.review_state == "NO_REVIEW" for i in items))
     return BatchExportPlan(root, dataset, provider_id, destination_root, items, summary,
                            replace_existing, design_options)
 

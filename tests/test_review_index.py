@@ -10,7 +10,7 @@ from mug_previewer.review_index import (REVIEW_STATUSES, current_review_state, l
 def test_missing_ledger_means_no_review(tmp_path):
     assert load_review_index(tmp_path) == {}
     assert get_review_record(tmp_path, 'area', 'street') is None
-    assert not current_review_state(tmp_path, 'area', 'street', None).export_blocked
+    assert current_review_state(tmp_path, 'area', 'street', None).export_blocked
 
 
 @pytest.mark.parametrize('status', REVIEW_STATUSES)

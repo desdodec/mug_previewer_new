@@ -325,16 +325,8 @@ def export_provider_png(
     profile_lookup: Callable[[str], ProviderProfile] = get_provider_profile,
     exporter: ProviderExporter = save_provider_export,
 ) -> Path:
-    """Freshly render current UI state and save it through one provider profile."""
-    design = design_options or DesignOptions()
-    render_options = build_render_options(design, area=dataset.display_name)
-    override = approved_override_for_street(dataset, street, load_manual_overrides(), area=dataset.display_name)
-    if override is not None:
-        render_options = replace(render_options, face_options=replace(render_options.face_options, manual_override=override))
-    wrap = wrap_renderer(dataset, street, render_options)
-    if isinstance(wrap, WrapRenderResult):
-        wrap = wrap.image
-    return exporter(wrap, profile_lookup(profile_id), Path(destination))
+    """Legacy live-render production export cannot prove exact human QA."""
+    raise UIDataError('Production export requires prepared authoritative SVG artwork and a current human QA pass. Open preprocessed mode.')
 
 
 def export_inkthreadable_png(

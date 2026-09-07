@@ -1,6 +1,8 @@
 """Production composition from indexed artwork, without live face generation."""
 from dataclasses import dataclass
 from pathlib import Path
+import os
+import tempfile
 
 from PIL import Image
 
@@ -8,9 +10,9 @@ from .datasets.models import Dataset, StreetRecord
 from .design import DesignOptions, build_render_options
 from .diagnostics.front_candidates import ProductionTriageStatus
 from .exporting import save_provider_export
-from .preprocess import FaceSvgResolution, resolve_authoritative_face_svg
+from .preprocess import FaceSvgResolution, resolve_authoritative_face_svg, validate_manual_svg
 from .providers import get_provider_profile
-from .review_index import current_review_state
+from .review_index import current_review_state, svg_sha256
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
 from .rendering.svg_raster import rasterize_face_svg
@@ -75,10 +77,33 @@ def export_preprocessed_provider_png(
     design_options: DesignOptions | None = None,
 ) -> Path:
     """Export one indexed approved artwork through the existing provider system."""
-    resolution = resolve_authoritative_face_svg(preprocessed, dataset, street)
-    review = current_review_state(Path(preprocessed), dataset.id, street.id, resolution.path)
-    if review.export_blocked:
-        raise AuthoritativeArtworkError(f"Production export blocked: {review.label}")
+    def checkpoint():
+        resolution = resolve_authoritative_face_svg(preprocessed, dataset, street)
+        if resolution.state is ProductionTriageStatus.UNRENDERABLE_INPUT:
+            raise AuthoritativeArtworkError('no front artwork available; export forbidden.')
+        if not resolution.production_approved:
+            raise AuthoritativeArtworkError('Artwork is not production approved.')
+        if resolution.path is None:
+            raise AuthoritativeArtworkError('Authoritative SVG missing; asset integrity problem.')
+        try:
+            validate_manual_svg(resolution.path.read_bytes())
+            digest = svg_sha256(resolution.path)
+        except Exception as error:
+            raise AuthoritativeArtworkError(f'Authoritative SVG asset integrity problem: {error}') from error
+        review = current_review_state(Path(preprocessed), dataset.id, street.id, resolution.path)
+        if review.export_blocked:
+            raise AuthoritativeArtworkError(f'Production export blocked: {review.label}')
+        return resolution, digest, review
+
+    before = checkpoint()
     profile = get_provider_profile(profile_id)
     wrap = render_preprocessed_wrap(preprocessed, dataset, street, design_options=design_options)
-    return save_provider_export(wrap, profile, Path(destination))
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination.parent, prefix='.single-export-') as staging:
+        temporary = Path(staging) / destination.name
+        save_provider_export(wrap, profile, temporary)
+        if checkpoint() != before:
+            raise AuthoritativeArtworkError('Artwork or QA changed during export; rebuild the batch plan or retry after review.')
+        os.replace(temporary, destination)
+    return destination

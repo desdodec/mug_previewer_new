@@ -95,6 +95,7 @@ def test_full_workflow_edit_again_and_provider_authority(manual):
     assert render_authoritative_face_panel(root, data, street).image.getpixel((247, 231)) == (255, 255, 0, 255)
     assert workspace.generated_svg.read_bytes() == original
     from PIL import Image
+    save_review_record(root, data.id, street.id, 'pass', approved.path)
     export_preprocessed_provider_png(root, data, street, root / 'out.png', profile_id='inkthreadable_11oz_white')
     with Image.open(root / 'out.png') as image:
         assert image.convert('RGBA').getpixel((472, 531)) == (255, 255, 0, 255)
@@ -189,6 +190,8 @@ def test_approved_review_becomes_stale_after_new_approval(manual):
     assert not current_review_state(root, data.id, street.id, approved.path).export_blocked
     workspace.working_svg.write_text(svg('blue'))
     assert not current_review_state(root, data.id, street.id, approved.path).stale
+    export_preprocessed_provider_png(root, data, street, root / 'still-A.png', profile_id='inkthreadable_11oz_white')
+    assert (root / 'still-A.png').exists()
     workspace.repair()
     workspace.approve(data, street, root)
     review = current_review_state(root, data.id, street.id, approved.path)
@@ -196,3 +199,30 @@ def test_approved_review_becomes_stale_after_new_approval(manual):
     with pytest.raises(ValueError, match='stale'):
         export_preprocessed_provider_png(root, data, street, root / 'blocked.png', profile_id='inkthreadable_11oz_white')
     assert not (root / 'blocked.png').exists()
+
+
+def test_edit_again_pass_lifecycle_single_and_batch(manual):
+    from mug_previewer.batch_export import build_batch_plan, execute_batch_export
+    root, data, street, workspace = manual
+    workspace.create_or_get_working_edit()
+    workspace.repair()
+    approved = workspace.approve(data, street, root)
+    save_review_record(root, data.id, street.id, 'pass', approved.path)
+    profile = 'inkthreadable_11oz_white'
+    first = build_batch_plan(root, data, profile, root / 'batch-A')
+    assert first.summary.ready == 1
+    workspace.working_svg.write_text(svg('blue'))
+    assert execute_batch_export(first).summary['exported'] == 1
+    export_preprocessed_provider_png(root, data, street, root / 'single-A.png', profile_id=profile)
+    workspace.repair()
+    workspace.approve(data, street, root)
+    assert current_review_state(root, data.id, street.id, approved.path).stale
+    assert build_batch_plan(root, data, profile, root / 'blocked').summary.ready == 0
+    with pytest.raises(ValueError, match='stale'):
+        export_preprocessed_provider_png(root, data, street, root / 'single-B.png', profile_id=profile)
+    save_review_record(root, data.id, street.id, 'pass', approved.path)
+    second = build_batch_plan(root, data, profile, root / 'batch-B')
+    assert second.summary.ready == 1
+    assert execute_batch_export(second).summary['exported'] == 1
+    export_preprocessed_provider_png(root, data, street, root / 'single-B.png', profile_id=profile)
+    assert (root / 'single-B.png').exists()

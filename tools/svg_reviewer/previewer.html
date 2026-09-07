@@ -99,68 +99,17 @@
       }
     }
 
-    fileInput.addEventListener("change", (e) => {
-      grid.innerHTML = "";
-      loadedFiles = Array.from(e.target.files).filter(file => file.name.endsWith(".svg"));
-      loadedFiles.sort((a, b) => a.name.localeCompare(b.name));
-
-      loadedFiles.forEach((file, index) => {
-        const card = document.createElement("div");
-        card.className = "card";
-        const fileUrl = URL.createObjectURL(file);
-
-        card.innerHTML = `
-          <div class="card-title">${file.name}</div>
-          <div class="card-preview">
-            <img src="${fileUrl}" alt="${file.name}">
-          </div>
-          <div class="controls">
-            <label for="status-${index}">Status:</label>
-            <select id="status-${index}">
-              <option value="pass" selected>pass</option>
-              <option value="overlap">overlap</option>
-              <option value="duplicates">duplicates</option>
-              <option value="missing">missing</option>
-              <option value="other">other</option>
-              <option value="Do Not Use">Do Not Use</option>
-            </select>
-          </div>
-        `;
-        grid.appendChild(card);
-      });
-    });
-
-    function exportJSON() {
-      if (loadedFiles.length === 0) {
-        alert("No SVG files loaded.");
-        return;
-      }
-
-      const results = loadedFiles.map((file, index) => {
-        const status = document.getElementById(`status-${index}`).value;
-        return {
-          svg_name: file.name,
-          status: status
-        };
-      });
-
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(results, null, 2));
-      const downloadAnchor = document.createElement("a");
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", "svg_review_results.json");
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-    }
   </script>
+  <script src="../tools/svg_reviewer/qa_hash.js"></script>
   <script>
-    // This second review controller also supports records from preprocess_index.json.
+    // This review controller also supports records from preprocess_index.json.
     const indexInput = document.getElementById('index-input');
     const statusFilter = document.getElementById('status-filter');
     const itemCount = document.getElementById('item-count');
     const reviewStatuses = ['pass', 'overlap', 'duplicates', 'missing', 'other', 'Do Not Use'];
     let reviewItems = [];
     let savedReviews = null;
+    let reviewDownloadName = 'svg_review_results.json';
     let selectedSvgFiles = [];
     let reviewObjectUrls = [];
 
@@ -174,16 +123,18 @@
     }
 
     function statusFromIndexRecord(record) {
-      const reason = String(record.reason_detail || '').toLowerCase();
-      if (record.success === false || reason.includes('triage_failed') || reason.includes('missing')) return 'missing';
-      if (reason.includes('duplicate')) return 'duplicates';
-      if (reason.includes('overlap')) return 'overlap';
-      return record.production_state === 'AUTO_APPROVED' ? 'pass' : 'other';
+      return ''; // Production classification is never a human QA pass.
     }
 
     function makeStatusSelect(item, index) {
       const select = document.createElement('select');
       select.id = 'review-status-' + index;
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Not reviewed ? choose a status';
+      select.appendChild(placeholder);
+      select.disabled = true;
+      item.select = select;
       reviewStatuses.forEach(function (status) {
         const option = document.createElement('option');
         option.value = status;
@@ -193,6 +144,8 @@
       });
       select.addEventListener('change', function () {
         item.status = select.value;
+        item.reviewedHash = item.loadedHash;
+        item.reviewedAt = new Date().toISOString();
         if (item.card) item.card.dataset.status = item.status;
         applyStatusFilter();
       });
@@ -237,6 +190,7 @@
         controls.appendChild(label);
         controls.appendChild(makeStatusSelect(item, index));
         card.appendChild(controls);
+        item.ready = loadReviewedSvg(item, image);
 
         item.card = card;
         card.dataset.status = item.status;
@@ -269,18 +223,18 @@
         const matches = exact.length ? exact : selectedSvgFiles.filter(function (file) {
           return file.name === name.split('/').pop();
         });
-        let previewUrl = record.preview_data_url || new URL(record.preview_path || name, document.baseURI).href;
+        let previewUrl = record.preview_data_url || new URL(name, document.baseURI).href;
         if (matches.length === 1) {
           previewUrl = URL.createObjectURL(matches[0]);
           reviewObjectUrls.push(previewUrl);
         }
         return {
-          name: record.svg_name,
+          name: record.svg_name || name,
           previewUrl: previewUrl,
           status: record.status,
           detail: matches.length > 1 ? 'Multiple SVGs share this filename. Select a more specific folder.' : '',
           svgFile: matches.length === 1 ? matches[0] : null,
-          sourcePath: matches.length === 1 ? (matches[0].webkitRelativePath || matches[0].name) : name,
+          sourcePath: record.svg_path || (matches.length === 1 ? (matches[0].webkitRelativePath || matches[0].name) : name),
           record: record
         };
       });
@@ -300,7 +254,7 @@
       reviewItems = selectedSvgFiles.map(function (file) {
         const previewUrl = URL.createObjectURL(file);
         reviewObjectUrls.push(previewUrl);
-        return { name: file.name, previewUrl: previewUrl, status: 'pass', detail: '', svgFile: file, sourcePath: file.webkitRelativePath || file.name };
+        return { name: file.name, previewUrl: previewUrl, status: '', detail: '', svgFile: file, sourcePath: file.webkitRelativePath || file.name };
       });
       indexInput.value = '';
       renderReviewItems();
@@ -315,29 +269,22 @@
           const index = JSON.parse(String(reader.result));
           if (Array.isArray(index)) {
             if (!index.every(function (record) {
-              return record && typeof record.svg_name === 'string' && record.svg_name.trim() && reviewStatuses.includes(record.status);
+              return record && typeof (record.svg_name || record.svg_path) === 'string' && (record.svg_name || record.svg_path).trim() && reviewStatuses.includes(record.status);
             })) throw new Error('Each review must have an SVG filename and a supported review status.');
+            reviewDownloadName = /^svg_review_results(?:_.+)?\.json$/.test(indexFile.name) ? indexFile.name : 'svg_review_results.json';
             savedReviews = index;
             restoreSavedReviews();
             return;
           }
           if (!index || !Array.isArray(index.records)) throw new Error('The file does not contain a records list.');
-          savedReviews = null;
-          revokeReviewObjectUrls();
-          reviewItems = index.records
-            .filter(function (record) { return record.preview_path || record.svg_path || record.generated_svg_path; })
+          savedReviews = index.records
+            .filter(record => record.svg_path || record.generated_svg_path || record.approved_svg_path)
             .map(function (record) {
-              const previewPath = record.preview_path || record.svg_path || record.generated_svg_path;
-              return {
-                name: (record.dataset_name || record.dataset_id || 'Unknown dataset') + ' — ' + (record.street_name || record.street_id || 'Unnamed record'),
-                previewUrl: new URL(previewPath, document.baseURI).href,
-                status: statusFromIndexRecord(record),
-                detail: [record.production_state, record.reason_detail].filter(Boolean).join(' — '),
-                record: record
-              };
+              const path = record.production_state === 'MANUAL_APPROVED' ? record.approved_svg_path : (record.svg_path || record.generated_svg_path);
+              return Object.assign({}, record, {svg_name: (path || '').split('/').pop(), svg_path: path, status: ''});
             });
+          restoreSavedReviews();
           fileInput.value = '';
-          renderReviewItems();
         } catch (error) {
           alert('Could not import this file: ' + error.message);
         }
@@ -345,31 +292,66 @@
       reader.readAsText(indexFile);
     });
 
-    window.exportJSON = async function () {
-      if (reviewItems.length === 0) {
-        alert('No SVG files or preprocess-index records loaded.');
-        return;
+    async function loadReviewedSvg(item, image) {
+      try {
+        let bytes;
+        if (item.svgFile) bytes = new Uint8Array(await item.svgFile.arrayBuffer());
+        else {
+          const response = await fetch(item.previewUrl);
+          if (!response.ok) throw new Error('SVG unavailable');
+          bytes = new Uint8Array(await response.arrayBuffer());
+        }
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
+        if (doc.querySelector('parsererror') || doc.documentElement.localName !== 'svg') throw new Error('Load the actual SVG, not a PNG preview');
+        item.loadedHash = await reviewedSvgSha256(bytes);
+        let prior = item.record && item.record.reviewed_svg_sha256;
+        if (item.record && item.record.preview_data_url) {
+          const response = await fetch(item.record.preview_data_url);
+          const snapshotHash = await reviewedSvgSha256(new Uint8Array(await response.arrayBuffer()));
+          prior = prior && prior !== snapshotHash ? null : snapshotHash;
+        }
+        // Old statuses never transfer to newly loaded, different artwork.
+        if (!prior || prior !== item.loadedHash) item.status = '';
+        item.reviewedHash = prior === item.loadedHash ? prior : null;
+        item.bytes = bytes;
+        const url = URL.createObjectURL(new Blob([bytes], {type: 'image/svg+xml'}));
+        reviewObjectUrls.push(url);
+        image.src = url;
+        item.select.value = item.status;
+        item.select.disabled = false;
+        item.card.dataset.status = item.status;
+        applyStatusFilter();
+      } catch (error) {
+        item.status = '';
+        item.select.disabled = true;
+        item.select.title = error.message + '. Select the matching SVG folder.';
       }
-      const results = await Promise.all(reviewItems.map(async function (item) {
-        const result = { svg_name: item.record ? (item.record.svg_name || item.record.svg_path || item.name) : item.name, status: item.status };
-        if (item.sourcePath) result.svg_path = item.sourcePath;
-        if (item.record) {
-          result.svg_path = item.record.svg_path || item.record.generated_svg_path || result.svg_path;
-          result.preview_path = item.record.preview_path;
-          result.preview_data_url = item.record.preview_data_url;
-          result.dataset_id = item.record.dataset_id;
-          result.street_id = item.record.street_id;
-          result.street_name = item.record.street_name;
+    }
+
+    window.exportJSON = async function () {
+      await Promise.all(reviewItems.map(item => item.ready));
+      const results = reviewItems.filter(item => item.status && item.bytes && item.reviewedHash === item.loadedHash).map(function (item) {
+        const result = Object.assign({}, item.record || {});
+        result.svg_name = item.svgFile ? item.svgFile.name : (result.svg_name || (item.sourcePath || result.svg_path || item.name).split('/').pop());
+        result.svg_path = item.sourcePath || result.svg_path || result.generated_svg_path;
+        const identity = /^faces\/([^/]+)\/(\d+)_/.exec((result.svg_path || '').replace(/\\/g, '/'));
+        if (identity && !result.dataset_id && !result.street_id) {
+          result.dataset_id = identity[1];
+          result.street_id = identity[2];
         }
-        if (item.svgFile) {
-          result.preview_data_url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(await item.svgFile.text());
-        }
+        result.status = item.status;
+        result.reviewed_svg_sha256 = item.loadedHash;
+        if (item.reviewedAt) result.reviewed_at = item.reviewedAt;
+        // Base64 preserves BOM, CRLF and every original byte.
+        result.preview_data_url = svgBytesDataUrl(item.bytes);
         return result;
-      }));
+      });
+      if (!results.length) { alert('No reviewed SVGs to save. Load artwork and choose a status.'); return; }
       const dataUrl = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(results, null, 2));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.href = dataUrl;
-      downloadAnchor.download = 'svg_review_results.json';
+      downloadAnchor.download = reviewDownloadName;
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();

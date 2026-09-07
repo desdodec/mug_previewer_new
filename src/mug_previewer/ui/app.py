@@ -421,6 +421,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.current_production_status = result
         self.production_var.set(f"{result.title}: {result.detail}")
         self.status_var.set(f"{result.title}: {street.id} {street.display_name}")
+        if result.export_allowed and not self._is_preprocessed_mode():
+            self.status_var.set("Production export blocked: open prepared artwork with a current human QA pass.")
         self.render_button.configure(state="normal" if result.readiness != "unrenderable" else "disabled")
         self._set_export_buttons_state("normal" if result.export_allowed else "disabled")
         self.review_street_button.configure(state="normal" if result.review_required else "disabled")
@@ -603,6 +605,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         if readiness != "unknown" and (readiness is None or not readiness.export_allowed):
             self._show_error("Production export is unavailable until this street is ready for production.")
             return
+        if not self._is_preprocessed_mode():
+            self._show_error('Production export requires prepared artwork with a current human QA pass. Open preprocessed mode.')
+            return
         if self._is_preprocessed_mode():
             error = self._qa_export_error()
             if error:
@@ -662,6 +667,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._show_error(f"Could not export {provider_label}: {detail}")
 
     def _set_export_buttons_state(self, state: str) -> None:
+        if state == "normal" and not self._is_preprocessed_mode():
+            state = "disabled"
         if state == "normal" and self._is_preprocessed_mode():
             record = self._selected_artwork_record()
             if record is None or not self._preprocessed_status(record).export_allowed or self._qa_export_error():

@@ -75,7 +75,7 @@ def test_scope_status_uses_validated_manifest_without_retriaging(monkeypatch, tm
     assert (result.title, result.export_allowed, result.review_required) == ("Ready for Production", True, False)
 
 
-def test_auto_status_worker_completion_enables_ready_actions(monkeypatch) -> None:
+def test_auto_status_worker_completion_enables_preview_but_requires_qa_for_export(monkeypatch) -> None:
     data = SimpleNamespace(id="area", display_name="Area")
     street = SimpleNamespace(id="0001", display_name="Burnley-like")
     controller = _controller(data, street)
@@ -86,7 +86,8 @@ def test_auto_status_worker_completion_enables_ready_actions(monkeypatch) -> Non
     controller._drain_production_status_results()
 
     assert controller.production_var.value == "Ready for Production: detail"
-    assert (controller.render_button.state, controller.export_button.state, controller.printify_export_button.state) == ("normal", "normal", "normal")
+    assert (controller.render_button.state, controller.export_button.state, controller.printify_export_button.state) == ("normal", "disabled", "disabled")
+    assert "current human QA pass" in controller.status_var.value
     assert controller.review_street_button.state == "disabled"
 
 

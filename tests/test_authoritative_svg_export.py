@@ -12,6 +12,7 @@ from mug_previewer.preprocessed_export import (
     render_preprocessed_wrap, export_preprocessed_provider_png,
 )
 from mug_previewer.rendering.svg_raster import rasterize_face_svg
+from mug_previewer.review_index import save_review_record
 
 PROFILES = [('inkthreadable_11oz_white', (2362, 1063)),
             ('printify_generic_11oz_ceramic', (2475, 1155))]
@@ -84,6 +85,7 @@ def test_approved_artwork_reaches_actual_provider_png(prepared, profile, size, m
     wrap = render_preprocessed_wrap(root, data, street)
     assert wrap.size == (2362, 1063) and wrap.info['dpi'] == (300, 300)
     assert wrap.getpixel((472, 531)) == colour
+    save_review_record(root, data.id, street.id, 'pass', panel.resolution.path)
     destination = root / 'export.png'
     assert export_preprocessed_provider_png(root, data, street, destination, profile_id=profile) == destination
     with Image.open(destination) as exported:

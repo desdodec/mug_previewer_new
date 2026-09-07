@@ -33,6 +33,9 @@ def prepared(tmp_path):
     def write():
         (tmp_path / 'preprocess_index.json').write_text(json.dumps({'records': records}), encoding='utf-8')
     write()
+    # Explicit human passes for export mechanics fixtures.
+    for street in streets:
+        save_review_record(tmp_path, data.id, street.id, 'pass', tmp_path / f'{street.id}.svg')
     return tmp_path, data, records, write
 
 
@@ -53,6 +56,7 @@ def fake_export(calls, fail=None):
 
 def test_mixed_eligibility_and_exact_summary(prepared):
     root, data, records, write = prepared
+    (root / 'svg_review_results.json').unlink()
     for index, status in [(1, 'pass'), (2, 'overlap'), (3, 'pass'), (4, 'Do Not Use'), (7, 'pass'), (8, 'pass')]:
         save_review_record(root, data.id, data.streets[index].id, status, root / f'{index:04}.svg')
     for index in (3, 8):
@@ -66,11 +70,11 @@ def test_mixed_eligibility_and_exact_summary(prepared):
     write()
     result = plan(prepared)
     assert [i.eligibility.value for i in result.items] == [
-        'READY', 'READY', 'QA_BLOCKED', 'QA_BLOCKED', 'EXCLUDED', 'MANUAL_REVIEW',
-        'READY', 'READY', 'QA_BLOCKED', 'UNRENDERABLE', 'ASSET_ERROR']
-    assert asdict(result.summary) == dict(total=11, ready=4, manual_review=1, qa_blocked=3,
-                                        excluded=1, unrenderable=1, asset_errors=1, existing=0)
-    assert result.items[3].reason == 'QA blocked: stale pass'
+        'QA_BLOCKED', 'READY', 'QA_BLOCKED', 'QA_BLOCKED', 'EXCLUDED', 'MANUAL_REVIEW',
+        'QA_BLOCKED', 'READY', 'QA_BLOCKED', 'UNRENDERABLE', 'ASSET_ERROR']
+    assert asdict(result.summary) == dict(total=11, ready=2, manual_review=1, qa_blocked=5,
+                                        excluded=1, unrenderable=1, asset_errors=1, existing=0, not_reviewed=2)
+    assert '(stale)' in result.items[3].reason
 
 
 @pytest.mark.parametrize('payload', ['{bad', '{}', '{"records": [null]}'])
@@ -219,6 +223,9 @@ def test_sanitization_collision_is_detected_before_writes(prepared):
     write()
     data = replace(data, streets=(replace(data.streets[0], id='a/b', display_name='Same'),
                                  replace(data.streets[1], id='a:b', display_name='Same')))
+    (root / 'svg_review_results.json').unlink()
+    for street in data.streets:
+        save_review_record(root, data.id, street.id, 'pass', root / ('0000.svg' if street.id == 'a/b' else '0001.svg'))
     with pytest.raises(batch.BatchPlanningError, match='a/b.*a:b'):
         batch.build_batch_plan(root, data, PROVIDERS[0], root / 'out')
     assert not (root / 'out').exists()
@@ -251,6 +258,7 @@ def test_real_authoritative_red_and_approved_blue_batch(prepared, monkeypatch, p
     records[1]['production_state'] = 'MANUAL_APPROVED'
     records[1]['approved_svg_path'] = 'approved.svg'
     (root / 'approved.svg').write_text(svg('blue'))
+    save_review_record(root, data.id, '0001', 'pass', root / 'approved.svg')
     (root / '0001_edit.svg').write_text(svg('yellow'))
     write()
     def forbidden(*a, **k):
@@ -277,7 +285,7 @@ def test_all_qa_statuses_and_staleness(prepared, status, stale):
     if stale:
         (root / '0000.svg').write_text(svg('yellow'))
     category = plan(prepared).items[0].eligibility
-    expected = ('EXCLUDED' if status == 'Do Not Use' else
+    expected = ('EXCLUDED' if status == 'Do Not Use' and not stale else
                 'READY' if status == 'pass' and not stale else 'QA_BLOCKED')
     assert category.value == expected
 

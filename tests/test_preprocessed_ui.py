@@ -91,9 +91,9 @@ def _controller(catalogue, street: object) -> MugPreviewerApp:
 @pytest.mark.parametrize(
     ("state", "title", "export_allowed"),
     [
-        (ProductionTriageStatus.AUTO_APPROVED, "Ready for Production", True),
+        (ProductionTriageStatus.AUTO_APPROVED, "Ready for Production", False),
         (ProductionTriageStatus.MANUAL_REVIEW, "Manual Review Required", False),
-        (ProductionTriageStatus.MANUAL_APPROVED, "Manually Approved / Ready for Production", True),
+        (ProductionTriageStatus.MANUAL_APPROVED, "Manually Approved / Ready for Production", False),
     ],
 )
 def test_preprocessed_selection_loads_cached_preview_without_workers(tmp_path: Path, monkeypatch, state, title, export_allowed) -> None:

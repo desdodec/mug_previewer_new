@@ -17,7 +17,7 @@ def result_summary(result):
     heading = 'Batch cancelled' if result.cancelled else 'Batch finished'
     return (f"{heading}: {s['exported']} exported, {s['failed']} failed\n"
             f"{s['skipped_existing']} existing, {s['manual_review']} manual review, "
-            f"{s['qa_blocked']} QA attention\n{s['excluded']} Do Not Use, "
+            f"{s.get('not_reviewed', 0)} not reviewed, {s['qa_blocked'] - s.get('not_reviewed', 0)} QA problems\n{s['excluded']} Do Not Use, "
             f"{s['unrenderable']} unrenderable, {s['asset_errors']} asset errors, "
             f"{s['cancelled']} cancelled")
 
@@ -155,7 +155,7 @@ class BatchExportPanel(ttk.LabelFrame):
                 self.plan = value
                 s = value.summary
                 self.summary.set(f'{value.dataset.display_name}: {s.total} prepared\nReady: {s.ready} | Manual review: {s.manual_review}\n'
-                                 f'QA attention: {s.qa_blocked} | Do Not Use: {s.excluded}\n'
+                                 f'Not reviewed: {s.not_reviewed} | QA problems: {s.qa_blocked - s.not_reviewed} | Do Not Use: {s.excluded}\n'
                                  f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\nExisting files: {s.existing}')
                 self.start.configure(text=f'Export {s.ready} Production-Ready PNGs',
                                      state='normal' if s.ready else 'disabled')

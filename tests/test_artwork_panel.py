@@ -103,7 +103,8 @@ def test_approval_reloads_state_and_enables_edit_again(tmp_path):
     assert 'MANUAL_APPROVED' in controller.artwork_var.value
     assert controller.front_card.text == 'Approved Preview'
     assert controller.artwork_buttons['edit'].state == 'normal'
-    assert controller.export_button.state == 'normal'
+    assert controller.export_button.state == 'disabled'
+    assert 'NOT REVIEWED' in controller.qa_display_var.value
     assert controller.state.current_front_preview.getpixel((247, 231)) == (0, 0, 255, 255)
 
 
@@ -176,3 +177,22 @@ def test_manual_filter_limits_list_and_clears_transient_preview(tmp_path):
     assert len(inserted) == 1
     assert controller.state.selected_street is None
     assert controller.artwork_buttons['edit'].state == 'disabled'
+
+
+def test_cached_png_cannot_grant_pass_to_unseen_changed_svg(tmp_path):
+    controller = panel(tmp_path, Status.AUTO_APPROVED)
+    path = controller._formal_review_svg()
+    path.write_text(svg('blue'))
+    controller._select_street()  # Still displays the old cached preview.
+    assert controller.save_review_button.state == 'disabled'
+    controller.qa_status_var.set('pass')
+    controller.qa_note_var.set('')
+    controller._save_artwork_review()
+    assert 'Preview Current SVG for QA' in controller.status_var.value
+    assert not (tmp_path / 'svg_review_results.json').exists()
+    controller._preview_artwork('authoritative')
+    assert controller.state.current_front_preview.getpixel((247, 231)) == (0, 0, 255, 255)
+    assert controller.save_review_button.state == 'normal'
+    controller._save_artwork_review()
+    assert current_review_state(tmp_path, 'area', '0001', path).production_export_allowed
+    assert controller.export_button.state == 'normal'

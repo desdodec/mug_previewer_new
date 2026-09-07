@@ -26,7 +26,7 @@ class ArtworkPanelMixin:
             ("repair", "Repair Edit", self._repair_artwork),
             ("corrected", "Preview Corrected", lambda: self._preview_artwork("corrected")),
             ("approve", "Approve Corrected", self._approve_artwork),
-            ("approved", "View Approved SVG", lambda: self._preview_artwork("approved")),
+            ("approved", "Preview Current SVG for QA", lambda: self._preview_artwork("authoritative")),
             ("folder", "Open Artwork Folder", self._open_artwork_folder),
             ("refresh", "Refresh Artwork", self._refresh_selected_artwork),
         )
@@ -94,7 +94,7 @@ class ArtworkPanelMixin:
         manual = workspace.can_edit
         enabled = {"edit": manual, "working": manual and workspace.has_working,
                    "repair": manual and workspace.has_working, "corrected": manual and current,
-                   "approve": manual and current, "approved": bool(workspace.approved_svg and workspace.approved_svg.is_file() and state == "MANUAL_APPROVED"),
+                   "approve": manual and current, "approved": bool(self._formal_review_svg() and self._formal_review_svg().is_file()),
                    "folder": bool(workspace.generated_svg and workspace.generated_svg.parent.is_dir()),
                    "refresh": record is not None}
         for key, button in self.artwork_buttons.items():
@@ -109,9 +109,9 @@ class ArtworkPanelMixin:
                 self.qa_note_var.set(review.record.note if review and review.record else "")
         except (OSError, ValueError) as error:
             self.qa_display_var.set(f"QA ledger unavailable: {error}")
-        target = self.__dict__.get("_review_target") or self._formal_review_svg()
+        target = self.__dict__.get("_review_target")
         self.save_review_button.configure(state="normal" if target and target.is_file() else "disabled")
-        self.review_target_var.set(f"Save Review applies to: {self.__dict__.get('_preview_role', 'Generated Preview')}")
+        self.review_target_var.set(f"Save Review applies to: {self._preview_role}" if target else "Preview Current SVG for QA before saving a review.")
 
     def _reset_artwork_preview(self, record=None):
         self._review_target = None
@@ -162,14 +162,14 @@ class ArtworkPanelMixin:
             if role == "corrected" and not workspace.correction_current:
                 raise ValueError("Repair the latest working edit before previewing the correction.")
             path = {"working": workspace.working_svg, "corrected": workspace.corrected_svg,
-                    "approved": workspace.approved_svg}[role]
+                    "approved": workspace.approved_svg, "authoritative": self._formal_review_svg()}[role]
             if path is None:
                 raise ValueError("Requested artwork is unavailable.")
             payload = path.read_bytes()
             image = rasterize_face_svg(payload)
             self._preview_hash = hashlib.sha256(payload).hexdigest()
             self._review_target = path
-            self._preview_role = {"working": "Working Edit Preview", "corrected": "Corrected SVG Preview", "approved": "Approved Preview"}[role]
+            self._preview_role = {"working": "Working Edit Preview", "corrected": "Corrected SVG Preview", "approved": "Approved Preview", "authoritative": "Current SVG QA Preview"}[role]
             self.state.current_front_preview = image
             self.state.current_wrap = None
             self.front_card.configure(text=self._preview_role)
@@ -218,14 +218,14 @@ class ArtworkPanelMixin:
     def _save_artwork_review(self):
         try:
             record = self._selected_artwork_record()
-            target = self.__dict__.get("_review_target") or self._formal_review_svg()
+            target = self.__dict__.get("_review_target")
             if record is None or target is None:
-                raise ValueError("Select artwork before saving a review.")
+                raise ValueError("Preview Current SVG for QA before saving a review; cached PNGs cannot establish exact SVG approval.")
             preview_hash = self.__dict__.get("_preview_hash")
             if preview_hash and preview_hash != svg_sha256(target):
                 raise ValueError("Artwork changed since preview. Preview it again before saving the review.")
             save_review_record(self.preprocessed_catalogue.root, record.dataset_id, record.street_id,
-                               self.qa_status_var.get(), target, self.qa_note_var.get())
+                               self.qa_status_var.get(), target, self.qa_note_var.get(), expected_sha256=preview_hash)
             self._refresh_artwork()
             self._set_export_buttons_state("normal")
             self.status_var.set(f"Review saved against {self._preview_role}.")

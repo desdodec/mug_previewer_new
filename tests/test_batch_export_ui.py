@@ -45,7 +45,7 @@ def panel():
 
 def planned(ready=3):
     return SimpleNamespace(dataset=SimpleNamespace(id='chosen', display_name='Chosen'),
-        summary=SimpleNamespace(total=5, ready=ready, manual_review=1, qa_blocked=0,
+        summary=SimpleNamespace(total=5, ready=ready, manual_review=1, qa_blocked=0, not_reviewed=0,
                                 excluded=1, unrenderable=0, asset_errors=0, existing=0))
 
 
@@ -124,7 +124,7 @@ def test_invalid_start_does_not_spawn(panel, monkeypatch, reason):
 def test_worker_only_queues_progress_and_actual_result(panel, monkeypatch):
     result = SimpleNamespace(report_path=Path('output/report.json'), cancelled=False,
         summary=dict(exported=1, failed=1, skipped_existing=1, manual_review=1,
-                     qa_blocked=0, excluded=1, unrenderable=0, asset_errors=0, cancelled=0))
+                     qa_blocked=0, not_reviewed=0, excluded=1, unrenderable=0, asset_errors=0, cancelled=0))
     progress = SimpleNamespace(current=1, total=3,
         result=SimpleNamespace(item=SimpleNamespace(street_id='0001', street_name='One'), result='EXPORTED'))
     def execute(plan, **kwargs):

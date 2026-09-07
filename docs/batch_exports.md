@@ -7,7 +7,7 @@ small batch window leaves the existing cached street browser in place.
 2. Choose an explicit destination folder. Outputs go in a provider-ID subfolder.
 3. Leave **Skip existing** selected, or explicitly choose **Replace existing**.
 4. Select **Refresh Batch Plan** to read the latest preprocessing index and QA
-   ledger. The panel shows every eligibility count and existing-file count.
+   sources. The panel shows every eligibility count and existing-file count.
 5. Select **Export N Production-Ready PNGs** to start the background worker.
 6. Use **Open Export Folder** or **View Export Report** after the run.
 
@@ -16,18 +16,22 @@ and **Manual Review only** filters affect browsing, never batch scope. Nothing
 exports automatically when opening the app, selecting a dataset, reviewing, or
 approving artwork. Refresh the plan explicitly after review/approval changes.
 
+**Production export requires an explicit current `pass` review for the exact authoritative SVG.**
+The summary separates **Not reviewed** from other **QA problems**. A stale Do Not
+Use review requires QA attention and is not counted as an intentional exclusion.
+
 ## Eligibility
 
 | Category | Rule |
 | --- | --- |
-| READY | AUTO_APPROVED or MANUAL_APPROVED, valid authoritative SVG, and either no QA record or a current pass. |
+| READY | AUTO_APPROVED or MANUAL_APPROVED, valid authoritative SVG, and an explicit current pass for the exact authoritative SVG. |
 | MANUAL_REVIEW | Artwork requires manual approval; no export. |
-| QA_BLOCKED | Approved artwork with overlap, duplicates, missing, other, or any stale review; the specific status is reported. |
-| EXCLUDED | Do Not Use, including a stale Do Not Use review; intentional exclusion, never deleted. |
+| QA_BLOCKED | Approved artwork with no review, invalid/ambiguous review, overlap, duplicates, missing, other, or any stale review; the specific status is reported. |
+| EXCLUDED | Current exact-SVG Do Not Use review; intentional exclusion, never deleted. |
 | UNRENDERABLE | UNRENDERABLE_INPUT; source/input unusable, no regeneration. |
 | ASSET_ERROR | Missing/invalid authoritative artwork, invalid production state, failed preprocessing record, or prepared street missing from the source dataset. |
 
-Do Not Use takes precedence over ordinary workflow categories. Invalid global
+Current Do Not Use takes precedence over ordinary workflow categories. Invalid global
 preprocessing structure, duplicate identities, filename collisions, or an invalid
 QA ledger prevent planning. Asset errors are displayed prominently alongside
 READY counts; unrelated ready items may still export, with every error retained
@@ -74,7 +78,7 @@ report the error. Temporary output is cleaned after each attempted item.
 
 Immediately before exporting each READY item, the executor reloads both indexes,
 re-resolves the authoritative SVG, and compares production metadata, authoritative
-path and SHA-256, and the full QA record/stale flag against the plan. Changes
+path and SHA-256, the full QA record/stale flag, reviewed SVG hash, and all review-source byte fingerprints against the plan. Changes
 produce FAILED with a rebuild-required reason. These checks run again after the
 single-item exporter returns, before publishing its temporary PNG. Changes to
 artwork or QA during rendering therefore also prevent publication when detected.
@@ -107,5 +111,5 @@ remain distinct. Progress-observer errors are recorded without abandoning the
 batch. A report-write failure is surfaced to the UI; it never removes PNGs that
 were already successfully exported.
 
-Task 04D layout consolidation and browser-review JSON import are outside this
-change.
+See [Exact-artwork QA workflow](qa_production_gate.md) for browser JSON discovery,
+legacy snapshot handling and source authority. Task 04D is outside this change.
