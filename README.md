@@ -70,7 +70,7 @@ python -m mug_previewer dataset streets "E:\...\dataset" --search "Church" --lim
 
 ## Front-face rendering
 
-`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 Ã— 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
+`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 × 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
 
 ```powershell
 python -m mug_previewer render face `
@@ -79,7 +79,7 @@ python -m mug_previewer render face `
   --output output\0246_face.png
 ```
 
-Use `--area "â€¦"` to override display-area text; otherwise the dataset display name is used.
+Use `--area "…"` to override display-area text; otherwise the dataset display name is used.
 
 The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Task 02N adds a shared `+4 px` locality-baseline adjustment to give the title/locality stack more breathing room; title styling, face placement, and all other internal relationships remain unchanged.
 
@@ -177,7 +177,7 @@ The automatic production path contains only `AUTO_APPROVED` STANDARD or
 ADAPTED decisions. Review records do not enter automatic final export; malformed
 or unsupported input remains separate in `UNRENDERABLE_INPUT`.
 
-`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 Ã— 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 Ã— 1.75, clamped to 1400â€“2400 m, with 1.25Ã— street padding and up to 1.35Ã— expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
+`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.
 
@@ -192,7 +192,7 @@ python -m mug_previewer render context `
 
 ## Full-wrap production rendering
 
-`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 Ã— 1063 px** PNG for the 20 Ã— 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
+`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 × 1063 px** PNG for the 20 × 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
 
 The rear placement remains centred inside the fixed `(1417, 0, 945, 1063)` rear zone; the canonical canvas and seam exclusion remain unchanged.
 
@@ -223,11 +223,11 @@ profiles = list_provider_profiles()
 
 ```text
 DesignOptions
-      â†“
-canonical 2362Ã—1063 artwork
-      â†“
+      ↓
+canonical 2362×1063 artwork
+      ↓
 ProviderProfile
-      â†“
+      ↓
 future production exporter
 ```
 
