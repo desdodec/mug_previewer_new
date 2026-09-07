@@ -1,4 +1,4 @@
-﻿"""Restore original page layout while preserving edits inside SVG artwork.
+"""Restore original page layout while preserving edits inside SVG artwork.
 
 Usage: python -m mug_previewer.svg_edit_repair PATH_TO_FACE_FOLDER
 Writes separate copies into a corrected subfolder; never overwrites files.
@@ -7,6 +7,8 @@ Writes separate copies into a corrected subfolder; never overwrites files.
 from __future__ import annotations
 
 import argparse
+import os
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -78,16 +80,28 @@ def corrected_svg(original: str, edited: str) -> str:
     return ET.tostring(result, encoding="unicode", xml_declaration=True)
 
 
-def correct_edited_svg(original: Path, edited: Path, output: Path) -> Path:
-    """Save a separate corrected copy; never overwrite inputs or existing output."""
+def correct_edited_svg(original: Path, edited: Path, output: Path, *, replace: bool = False) -> Path:
+    """Save a separate correction; replacement is explicit and never touches inputs."""
     original, edited, output = Path(original), Path(edited), Path(output)
     if output.resolve() in (original.resolve(), edited.resolve()):
         raise ValueError("Output must be a separate file")
     content = corrected_svg(original.read_text(encoding="utf-8-sig"),
                             edited.read_text(encoding="utf-8-sig"))
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("x", encoding="utf-8") as stream:
-        stream.write(content)
+    if replace:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent,
+                                             prefix=".repair-", suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+            os.replace(temporary, output)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    else:
+        with output.open("x", encoding="utf-8") as stream:
+            stream.write(content)
     return output
 
 

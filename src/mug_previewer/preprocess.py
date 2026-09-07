@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -163,15 +164,20 @@ def approve_manual_svg(
         payload = source_path.read_bytes()
     except OSError as error:
         raise SvgApprovalError(f"Cannot read supplied SVG: {error}") from error
-    _validate_approved_svg(payload, dataset, street)
+    validate_manual_svg(payload, dataset, street)
 
     generated_relative = _preserve_generated_svg(record, root)
     approved_relative = _approved_svg_relative(generated_relative)
     approved_path = root / approved_relative
     approved_path.parent.mkdir(parents=True, exist_ok=True)
-    approved_path.write_bytes(payload)
     preview_relative = _preview_relative(record, generated_relative)
-    _write_preview(payload, root / preview_relative)
+    preview_path = root / preview_relative
+    # Render before changing production files. A failed rasterisation must not
+    # replace an earlier approved SVG during an Edit Again session.
+    with tempfile.TemporaryDirectory(prefix=".approval-", dir=root) as staging:
+        staged_preview = Path(staging) / "preview.png"
+        _write_preview(payload, staged_preview)
+        preview_payload = staged_preview.read_bytes()
 
     timestamp = approved_at or datetime.now(timezone.utc)
     record.update({
@@ -188,8 +194,33 @@ def approve_manual_svg(
         "success": True,
         "error_message": None,
     })
-    _write_index(index_path, records)
+    previous = {path: path.read_bytes() if path.exists() else None
+                for path in (approved_path, preview_path)}
+    try:
+        _atomic_asset_write(approved_path, payload)
+        _atomic_asset_write(preview_path, preview_payload)
+        _write_index(index_path, records)
+    except Exception:
+        for path, old_payload in previous.items():
+            if old_payload is None:
+                path.unlink(missing_ok=True)
+            else:
+                _atomic_asset_write(path, old_payload)
+        raise
     return FaceSvgResolution(ProductionTriageStatus.MANUAL_APPROVED, approved_path, True)
+
+
+def _atomic_asset_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".asset-", suffix=".tmp", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def resolve_authoritative_face_svg(
@@ -273,7 +304,8 @@ def _report_progress(
         callback(PreprocessProgress(completed, total, dataset.display_name, street.id, street.display_name, summary))
 
 
-def _validate_approved_svg(payload: bytes, dataset: Dataset, street: StreetRecord) -> None:
+def validate_manual_svg(payload: bytes, dataset: Dataset | None = None, street: StreetRecord | None = None) -> None:
+    """Validate canonical SVG content, optionally checking the selected identity."""
     if not payload or len(payload) > 10 * 1024 * 1024:
         raise SvgApprovalError("Supplied SVG must be non-empty and no larger than 10 MiB.")
     try:
@@ -293,7 +325,8 @@ def _validate_approved_svg(payload: bytes, dataset: Dataset, street: StreetRecor
             _validate_svg_reference(str(value))
         if element.text:
             _validate_svg_reference(element.text)
-    _validate_svg_metadata(root, dataset, street)
+    if dataset is not None and street is not None:
+        _validate_svg_metadata(root, dataset, street)
 
 
 def _validate_svg_dimensions(root: ET.Element) -> None:
@@ -469,8 +502,11 @@ def _write_index(path: Path, records: Iterable[dict[str, object]]) -> None:
     ordered = sorted(records, key=lambda item: (str(item.get("dataset_name", "")).casefold(), str(item.get("street_id", ""))))
     payload = {"format": "mug-previewer-preprocess-index-v1", "records": ordered}
     temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    try:
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _record_key(record: dict[str, object]) -> tuple[str, str] | None:

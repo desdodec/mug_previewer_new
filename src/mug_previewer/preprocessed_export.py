@@ -10,6 +10,7 @@ from .diagnostics.front_candidates import ProductionTriageStatus
 from .exporting import save_provider_export
 from .preprocess import FaceSvgResolution, resolve_authoritative_face_svg
 from .providers import get_provider_profile
+from .review_index import current_review_state
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
 from .rendering.svg_raster import rasterize_face_svg
@@ -74,6 +75,10 @@ def export_preprocessed_provider_png(
     design_options: DesignOptions | None = None,
 ) -> Path:
     """Export one indexed approved artwork through the existing provider system."""
+    resolution = resolve_authoritative_face_svg(preprocessed, dataset, street)
+    review = current_review_state(Path(preprocessed), dataset.id, street.id, resolution.path)
+    if review.export_blocked:
+        raise AuthoritativeArtworkError(f"Production export blocked: {review.label}")
     profile = get_provider_profile(profile_id)
     wrap = render_preprocessed_wrap(preprocessed, dataset, street, design_options=design_options)
     return save_provider_export(wrap, profile, Path(destination))

@@ -15,6 +15,7 @@ from PIL import Image, ImageTk
 from ..preprocessed_export import export_preprocessed_provider_png
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
+from .artwork_panel import ArtworkPanelMixin
 from .manual_review import ManualReviewController, ManualReviewWindow
 from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
@@ -37,7 +38,7 @@ from .state import (
 LOGGER = logging.getLogger(__name__)
 
 
-class MugPreviewerApp(ttk.Frame):
+class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
     """Widget layer that delegates data, rendering, and image operations to state."""
 
     def __init__(
@@ -137,6 +138,15 @@ class MugPreviewerApp(ttk.Frame):
         self.front_card.grid(row=0, column=1, sticky="nsew", padx=(0, 7))
         self.rear_card = self._preview_card("Rear")
         self.rear_card.grid(row=0, column=2, sticky="nsew", padx=(7, 0))
+        if self._is_preprocessed_mode():
+            design.grid_remove()
+            self.manual_review_button.grid_remove()
+            self.review_street_button.grid_remove()
+            self.summary_button.grid_remove()
+            self.manual_filter_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(controls, text="Manual Review only", variable=self.manual_filter_var,
+                            command=self._apply_filter).grid(row=6, column=0, sticky="w")
+            self._build_artwork_panel()
         self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
@@ -233,6 +243,10 @@ class MugPreviewerApp(ttk.Frame):
         self._invalidate_active_render_request()
         self.state.street_filter = self.search_var.get()
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
+        if self._is_preprocessed_mode() and self.__dict__.get("manual_filter_var") is not None and self.manual_filter_var.get():
+            self.state.filtered_streets = [street for street in self.state.filtered_streets
+                if (record := self.preprocessed_catalogue.find(data, street)) is not None
+                and record.state is not None and record.state.value == "MANUAL_REVIEW"]
         self.street_list.delete(0, tk.END)
         for street in self.state.filtered_streets:
             self.street_list.insert(tk.END, f"{street.id} \u2014 {street.display_name}")
@@ -242,6 +256,10 @@ class MugPreviewerApp(ttk.Frame):
         self.render_button.configure(state="disabled")
         self._set_export_buttons_state('disabled')
         self.review_street_button.configure(state="disabled")
+
+        if self._is_preprocessed_mode():
+            self._clear_previews()
+            self._reset_artwork_preview()
 
     def _select_street(self, _event: object | None = None) -> None:
         selection = self.street_list.curselection()
@@ -263,6 +281,7 @@ class MugPreviewerApp(ttk.Frame):
         if data is None or catalogue is None:
             return
         record = catalogue.find(data, street)
+        self._reset_artwork_preview(record)
         self.render_button.configure(state="disabled")
         self.review_street_button.configure(state="disabled")
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
@@ -562,6 +581,11 @@ class MugPreviewerApp(ttk.Frame):
         if readiness != "unknown" and (readiness is None or not readiness.export_allowed):
             self._show_error("Production export is unavailable until this street is ready for production.")
             return
+        if self._is_preprocessed_mode():
+            error = self._qa_export_error()
+            if error:
+                self._show_error(f"Production export blocked: {error}")
+                return
         destination = filedialog.asksaveasfilename(
             parent=self.root,
             title=f"Export {provider_label} PNG",
@@ -616,6 +640,10 @@ class MugPreviewerApp(ttk.Frame):
         self._show_error(f"Could not export {provider_label}: {detail}")
 
     def _set_export_buttons_state(self, state: str) -> None:
+        if state == "normal" and self._is_preprocessed_mode():
+            record = self._selected_artwork_record()
+            if record is None or not self._preprocessed_status(record).export_allowed or self._qa_export_error():
+                state = "disabled"
         self.export_button.configure(state=state)
         self.printify_export_button.configure(state=state)
 

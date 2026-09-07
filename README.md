@@ -70,7 +70,7 @@ python -m mug_previewer dataset streets "E:\...\dataset" --search "Church" --lim
 
 ## Front-face rendering
 
-`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 × 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
+`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 Ã— 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
 
 ```powershell
 python -m mug_previewer render face `
@@ -79,7 +79,7 @@ python -m mug_previewer render face `
   --output output\0246_face.png
 ```
 
-Use `--area "…"` to override display-area text; otherwise the dataset display name is used.
+Use `--area "â€¦"` to override display-area text; otherwise the dataset display name is used.
 
 The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Task 02N adds a shared `+4 px` locality-baseline adjustment to give the title/locality stack more breathing room; title styling, face placement, and all other internal relationships remain unchanged.
 
@@ -177,7 +177,7 @@ The automatic production path contains only `AUTO_APPROVED` STANDARD or
 ADAPTED decisions. Review records do not enter automatic final export; malformed
 or unsupported input remains separate in `UNRENDERABLE_INPUT`.
 
-`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
+`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 Ã— 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 Ã— 1.75, clamped to 1400â€“2400 m, with 1.25Ã— street padding and up to 1.35Ã— expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.
 
@@ -192,7 +192,7 @@ python -m mug_previewer render context `
 
 ## Full-wrap production rendering
 
-`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 × 1063 px** PNG for the 20 × 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
+`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 Ã— 1063 px** PNG for the 20 Ã— 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
 
 The rear placement remains centred inside the fixed `(1417, 0, 945, 1063)` rear zone; the canonical canvas and seam exclusion remain unchanged.
 
@@ -223,11 +223,11 @@ profiles = list_provider_profiles()
 
 ```text
 DesignOptions
-      ↓
-canonical 2362×1063 artwork
-      ↓
+      â†“
+canonical 2362Ã—1063 artwork
+      â†“
 ProviderProfile
-      ↓
+      â†“
 future production exporter
 ```
 
@@ -317,3 +317,82 @@ The reusable single-item APIs in `mug_previewer.preprocessed_export` are
 `export_preprocessed_provider_png`. Preprocessing and export share
 `rendering.svg_raster.rasterize_face_svg`. Catalogue UI metadata stays in its
 existing location; a future Workspace can reuse these APIs without moving it.
+
+
+## Manual SVG workspace (Task 04B)
+
+In preprocessed mode, the Artwork and Review panel supports this workflow:
+
+1. Select a `MANUAL_REVIEW` street; use **Manual Review only** to narrow the list.
+2. Click **Edit in Inkscape**. The first click copies the generated SVG to a
+   deterministic `*_edit.svg`; later clicks reopen the same working file.
+3. Make changes and save the working file in Inkscape.
+4. Return to Mug Previewer and click **Preview Edit**.
+5. Click **Repair Edit** to restore the canonical page dimensions, viewBox and
+   outer composition transform while preserving supported internal edits.
+6. Inspect **Corrected SVG Preview** (also available through **Preview Corrected**).
+7. Click **Approve Corrected**. Production changes to `MANUAL_APPROVED`, the cached
+   preview refreshes immediately, and provider exports use the exact approved SVG.
+8. Use **Next Manual Review** to advance in the current filtered order. It stops
+   after the last later review item and reports that none remain; it does not wrap.
+
+**The generated original SVG is never edited by the Workspace.** Working copies
+are derived from the indexed generated filename, corrections live in its
+`corrected/` subfolder, and approval uses the existing approval API. Repeated
+repairs replace only the corrected derivative, atomically. Invalid or outdated
+corrections cannot be approved. The command-line repair helper still refuses to
+replace existing output unless its Python API is explicitly given `replace=True`.
+
+For `MANUAL_APPROVED` artwork, **Edit Again in Inkscape** reopens the retained
+working edit (or creates one from the generated original if it is missing).
+Existing approved artwork stays authoritative until **Approve Corrected** succeeds
+again. Failed approval preserves the previous production artwork and preview.
+**View Approved SVG**, **Open Artwork Folder**, and **Refresh Artwork** are available
+in the panel. Refresh or another street selection restores the normal generated
+or approved cached preview. Street selection does not generate faces, score
+candidates, or render rear artwork, wraps or mugs.
+
+Inkscape is discovered using PATH, Windows App Paths registration (including
+installations on other drives), then normal Windows install locations under
+Program Files, Program Files (x86), and Local AppData. If it cannot be found, the
+app opens a file picker. **Choose Inkscape executable** also allows an explicit
+override, which is reused for this application session. The editor opens without
+blocking the app. No machine-specific executable path is committed or persisted.
+
+### Production and human QA are separate
+
+Production status and QA review status are separate. `preprocess_index.json`
+continues to hold production classification; `review_index.json` alongside it
+stores human QA. The version-1 ledger contains a `records` list keyed by
+`dataset_id` and `street_id`. Each record stores `status`, `note`, `reviewed_at`
+(UTC), and `reviewed_svg_sha256`. Supported statuses are `pass`, `overlap`,
+`duplicates`, `missing`, `other`, and `Do Not Use`.
+
+**Save Review** applies to the labelled artwork currently shown. Normal review
+uses the approved SVG for `MANUAL_APPROVED`, or the indexed/generated SVG
+otherwise. Explicit working/corrected previews change the review target only;
+they do not save QA automatically or alter production authority. If an explicitly
+reviewed working file differs from production artwork, its formal QA is stale.
+If the file changes after preview, preview it again before saving a review.
+
+Export rules for individual providers:
+
+- A production-approved street with no QA record retains its existing export behavior.
+- A current `pass` allows export when production is approved.
+- Current problem flags (`overlap`, `duplicates`, `missing`, `other`, `Do Not Use`)
+  block export. They do not delete artwork or change production classification.
+- Any stale review, including an old pass, blocks export pending another review.
+  The panel shows **(stale) - artwork changed; QA attention required**. An obsolete
+  problem flag is therefore a request to review again, not a judgement of new art.
+- `MANUAL_REVIEW` and `UNRENDERABLE_INPUT` remain unavailable for production export.
+
+The exporter rechecks QA before using the existing Task 04A production path:
+`resolve_authoritative_face_svg` -> approved SVG -> `render_authoritative_face_panel`
+-> `render_preprocessed_wrap` -> provider export. No alternate renderer is used.
+
+Importing the standalone browser reviewer's JSON is deferred: its records use
+filenames/paths and optional embedded SVG snapshots rather than the ledger's
+stable identity plus verified review hash/time. A future importer must resolve
+those identities and preserve which exact snapshot was reviewed; files are not
+silently treated as fresh QA. Batch export and the final workspace redesign are
+outside Task 04B.

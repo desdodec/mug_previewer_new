@@ -61,6 +61,8 @@ class PreprocessedRecord:
     preview_path: Path | None
     svg_path: Path | None
     editable_svg_path: Path | None
+    generated_svg_path: Path | None = None
+    approved_svg_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,8 @@ def load_preprocessed_catalogue(root: Path | str) -> PreprocessedCatalogue:
             preview_path=preview_path,
             svg_path=svg_path,
             editable_svg_path=editable_path,
+            generated_svg_path=generated_path or (svg_path if state is not ProductionTriageStatus.MANUAL_APPROVED else None),
+            approved_svg_path=approved_path,
         )
     return PreprocessedCatalogue(root_path, records)
 
