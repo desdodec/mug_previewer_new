@@ -12,7 +12,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--preprocessed", type=Path, help="Use cached previews from a preprocessing output directory.")
     parser.add_argument("--dataset-root", type=Path, help="Override the workflow-v6 dataset root.")
     args = parser.parse_args(argv)
-    from .app import launch
+    from .workspace_app import launch
     return launch(dataset_root=args.dataset_root, preprocessed=args.preprocessed)
 
 
