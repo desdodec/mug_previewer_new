@@ -34,7 +34,7 @@ def panel():
     p.generation = 0
     p.report_path = None
     for name in ('provider_box', 'choose', 'policy_box', 'start', 'cancel', 'refresh',
-                 'summary', 'progress', 'report_button'):
+                 'summary', 'progress', 'report_button', 'folder_button'):
         setattr(p, name, Widget())
     p.provider = Widget('Printify')
     p.destination = Widget('output')
@@ -201,3 +201,14 @@ def test_normal_app_poll_does_not_cancel_batch():
     app.root = SimpleNamespace(after=lambda *args: scheduled.append(args))
     app._schedule_main_thread_poll(lambda: None)
     assert scheduled and not app.batch_panel.cancel_event.is_set()
+
+
+def test_unavailable_batch_actions_disabled(panel):
+    panel.destination.set('')
+    panel.invalidate()
+    assert panel.refresh.options['state'] == 'disabled'
+    assert panel.folder_button.options['state'] == 'disabled'
+    panel.destination.set('output')
+    panel.invalidate()
+    assert panel.refresh.options['state'] == 'normal'
+    assert panel.folder_button.options['state'] == 'normal'

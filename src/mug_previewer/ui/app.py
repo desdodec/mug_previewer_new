@@ -86,7 +86,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.rowconfigure(0, weight=1)
 
         controls = ttk.Frame(self)
-        controls.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
+        controls.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
         ttk.Label(controls, text="Mug Workspace" if self._is_preprocessed_mode() else "Mug Previewer", font=("TkDefaultFont", 15, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(controls, text="Dataset").grid(row=1, column=0, sticky="w", pady=(18, 3))
         self.dataset_var = tk.StringVar()
@@ -155,6 +155,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.workflow_box = ttk.Combobox(controls, textvariable=self.workflow_var,
                                              values=WORKFLOW_FILTERS, state='readonly')
             self.workflow_box.grid(row=5, column=0, sticky='ew', pady=(8, 0))
+            street_scroll = ttk.Scrollbar(controls, orient='vertical', command=self.street_list.yview)
+            street_scroll.grid(row=6, column=1, sticky='ns', pady=(7, 10))
+            self.street_list.configure(yscrollcommand=street_scroll.set)
             self.street_list.grid(row=6)
             controls.rowconfigure(5, weight=0)
             controls.rowconfigure(6, weight=1)
@@ -232,7 +235,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.workflow_items = items
             counts = workflow_counts(items)
             self.workflow_counts_var.set(f'Workflow unavailable: {error}' if error else
-                                         ' | '.join(f'{key}: {value}' for key, value in counts.items()))
+                                         '\n'.join(f'{key}: {value}' for key, value in counts.items()))
             selected = self.state.selected_street
             self._apply_filter()
             if selected in self.state.filtered_streets:

@@ -2,12 +2,12 @@
 from collections import Counter
 from ..batch_export import Eligibility, build_batch_plan
 
-WORKFLOW_FILTERS = ('All', 'Production Ready', 'Manual Review', 'QA Attention', 'Do Not Use', 'Unrenderable')
+WORKFLOW_FILTERS = ('All', 'Production Ready', 'Manual Review', 'QA Attention', 'Asset Error', 'Do Not Use', 'Unrenderable')
 CATEGORIES = {
     Eligibility.READY: 'Production Ready',
     Eligibility.MANUAL_REVIEW: 'Manual Review',
     Eligibility.QA_BLOCKED: 'QA Attention',
-    Eligibility.ASSET_ERROR: 'QA Attention',
+    Eligibility.ASSET_ERROR: 'Asset Error',
     Eligibility.EXCLUDED: 'Do Not Use',
     Eligibility.UNRENDERABLE: 'Unrenderable',
 }

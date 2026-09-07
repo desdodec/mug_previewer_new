@@ -74,14 +74,24 @@ def main():
         root.update()
         time.sleep(.2)
         from PIL import ImageGrab
-        output = Path('output/workspace_smoke.png')
-        output.parent.mkdir(exist_ok=True)
-        ImageGrab.grab(bbox=(root.winfo_rootx(), root.winfo_rooty(),
-                            root.winfo_rootx()+root.winfo_width(), root.winfo_rooty()+root.winfo_height())).save(output)
+        screenshots = []
+        for width, height in ((1280, 850), (1440, 900)):
+            root.geometry(f'{width}x{height}+20+20')
+            for tab, label in ((0, 'workflow'), (1, 'batch')):
+                app.workflow_tabs.select(tab)
+                deadline = time.monotonic() + .5
+                while time.monotonic() < deadline:
+                    root.update()
+                    time.sleep(.01)
+                output = Path(f'output/workspace_{width}x{height}_{label}.png')
+                output.parent.mkdir(exist_ok=True)
+                ImageGrab.grab(bbox=(root.winfo_rootx(), root.winfo_rooty(),
+                                    root.winfo_rootx()+root.winfo_width(), root.winfo_rooty()+root.winfo_height())).save(output)
+                screenshots.append(str(output))
         assert not errors, errors
         assert snapshots() == before, 'Real QA changed'
         print(json.dumps(dict(counts=counts, selection_seconds=round(selection_seconds, 3),
-                              responsive_ticks=ticks, tk_errors=errors, qa_unchanged=True)))
+                              responsive_ticks=ticks, tk_errors=errors, qa_unchanged=True, screenshots=screenshots)))
     finally:
         app._shutdown()
 

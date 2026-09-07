@@ -34,8 +34,10 @@ class ArtworkPanelMixin:
             button = ttk.Button(panel, text=label, command=command, state="disabled")
             button.grid(row=1 + i // 2, column=i % 2, sticky="ew", padx=2, pady=3)
             self.artwork_buttons[key] = button
-        ttk.Button(panel, text="Choose Inkscape executable", command=self._choose_inkscape).grid(row=5, column=0, columnspan=2, sticky="ew", pady=3)
-        ttk.Button(panel, text="Next Manual Review", command=self._next_manual_review).grid(row=6, column=0, columnspan=2, sticky="ew", pady=8)
+        self.inkscape_button = ttk.Button(panel, text="Choose Inkscape executable", command=self._choose_inkscape, state="disabled")
+        self.inkscape_button.grid(row=5, column=0, columnspan=2, sticky="ew", pady=3)
+        self.next_manual_button = ttk.Button(panel, text="Next Manual Review", command=self._next_manual_review, state="disabled")
+        self.next_manual_button.grid(row=6, column=0, columnspan=2, sticky="ew", pady=8)
         self.qa_display_var = tk.StringVar(value="Review: not reviewed")
         ttk.Label(panel, textvariable=self.qa_display_var, wraplength=320).grid(row=7, column=0, columnspan=2, sticky="w", pady=8)
         self.qa_status_var = tk.StringVar(value="pass")
@@ -91,12 +93,31 @@ class ArtworkPanelMixin:
         labels = [("Generated SVG", workspace.generated_svg), ("Working edit", workspace.working_svg),
                   ("Corrected edit", workspace.corrected_svg), ("Approved SVG", workspace.approved_svg)]
         state = record.state.value if record and record.state else "not prepared"
-        text = f"Production: {state}\n\n" + "\n".join(f"{label}: {'present' if path and path.is_file() else 'missing'}" for label, path in labels)
+        authority = "Approved SVG" if state == "MANUAL_APPROVED" else "Generated SVG"
+        formal = self._formal_review_svg()
+        if not formal or not formal.is_file():
+            authority = "unavailable"
+        text = f"Production: {state}\nAuthoritative artwork: {authority}\n\n" + "\n".join(f"{label}: {'present' if path and path.is_file() else 'missing'}" for label, path in labels)
         current = workspace.correction_current
         if workspace.corrected_svg and workspace.corrected_svg.exists() and not current:
             text += "\nCorrection needs repair or is invalid."
-        self.artwork_var.set(text)
+        if state == "MANUAL_REVIEW":
+            next_action = "Approve Corrected" if current else ("Repair Edit" if workspace.has_working else "Edit in Inkscape")
+        elif state == "UNRENDERABLE_INPUT" or authority == "unavailable":
+            next_action = "Check source artwork in its folder"
+        else:
+            next_action = "Preview Current SVG for QA, or export if ready"
+        self.artwork_var.set(text + f"\n\nNext: {next_action}")
         manual = workspace.can_edit
+        if "inkscape_button" in self.__dict__:
+            self.inkscape_button.configure(state="normal" if manual else "disabled")
+            streets = self.state.filtered_streets
+            selected = self.state.selected_street
+            start = streets.index(selected) + 1 if selected in streets else 0
+            pending = any((candidate := self.preprocessed_catalogue.find(self.state.selected_dataset, street))
+                          and candidate.state and candidate.state.value == "MANUAL_REVIEW"
+                          for street in streets[start:]) if self.state.selected_dataset else False
+            self.next_manual_button.configure(state="normal" if pending else "disabled")
         enabled = {"edit": manual, "working": manual and workspace.has_working,
                    "repair": manual and workspace.has_working, "corrected": manual and current,
                    "approve": manual and current, "approved": bool(self._formal_review_svg() and self._formal_review_svg().is_file()),

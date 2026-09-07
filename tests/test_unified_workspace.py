@@ -26,7 +26,7 @@ def test_workflow_filters_are_navigation_only(prepared, selected):
     items = load_workflow(root, data)
     counts = workflow_counts(items)
     assert counts == {'All': 11, 'Production Ready': 7, 'Manual Review': 1,
-                      'QA Attention': 1, 'Do Not Use': 1, 'Unrenderable': 1}
+                      'QA Attention': 1, 'Asset Error': 0, 'Do Not Use': 1, 'Unrenderable': 1}
     visible = filter_workflow(data.streets, items, selected)
     assert len(visible) == counts[selected]
     plan = build_batch_plan(root, data, 'inkthreadable_11oz_white', root / 'out')
@@ -126,3 +126,48 @@ def test_mug_result_keeps_face_preview_separate(tmp_path):
     assert app.state.current_front_preview is face
     assert app._mug_front_image is pair.front
     assert app.state.current_rear_preview is pair.rear
+
+
+def test_asset_error_is_separate_from_qa_and_does_not_change_scope(prepared):
+    root, data, records, write = prepared
+    items = load_workflow(root, data)
+    ready = next(item for item in items.values() if item.eligibility == Eligibility.READY)
+    from dataclasses import replace
+    items[ready.street_id] = replace(ready, eligibility=Eligibility.ASSET_ERROR)
+    counts = workflow_counts(items)
+    assert counts['Asset Error'] == 1
+    assert counts['QA Attention'] == 0
+    assert sum(value for key, value in counts.items() if key != 'All') == counts['All'] == 11
+    assert [street.id for street in filter_workflow(data.streets, items, 'Asset Error')] == [ready.street_id]
+    assert len(build_batch_plan(root, data, 'inkthreadable_11oz_white', root / 'out').items) == 11
+
+
+def test_authority_and_export_reason_are_visible(tmp_path):
+    from test_artwork_panel import Var
+    app = panel(tmp_path, Status.AUTO_APPROVED)
+    app.export_state_var = Var()
+    app._set_export_buttons_state('normal')
+    assert 'Authoritative artwork: Generated SVG' in app.artwork_var.value
+    assert 'Next: Preview Current SVG for QA' in app.artwork_var.value
+    assert 'BLOCKED' in app.export_state_var.value
+    save_review_record(tmp_path, 'area', '0001', 'pass', app._formal_review_svg())
+    app._refresh_selected_artwork()
+    assert app.export_state_var.value == 'Export: READY'
+
+
+def test_selection_stays_non_rendering_with_contextual_actions(tmp_path, monkeypatch):
+    from test_artwork_panel import Widget
+    import mug_previewer.ui.artwork_panel as artwork_module
+    app = panel(tmp_path, Status.MANUAL_REVIEW)
+    app.inkscape_button = Widget()
+    app.next_manual_button = Widget()
+    monkeypatch.setattr(artwork_module, 'rasterize_face_svg', lambda *a, **k: pytest.fail('selection rendered SVG'))
+    monkeypatch.setattr(state_module, 'render_wrap_result', lambda *a, **k: pytest.fail('selection rendered wrap'))
+    app._select_street()
+    assert app.state.current_wrap is None
+    assert app.inkscape_button.state == 'normal'
+    assert app.next_manual_button.state == 'disabled'
+    app.state.selected_street = None
+    app._reset_artwork_preview()
+    assert app.inkscape_button.state == 'disabled'
+    assert app.next_manual_button.state == 'normal'

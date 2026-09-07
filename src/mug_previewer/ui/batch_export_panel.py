@@ -44,22 +44,23 @@ class BatchExportPanel(ttk.LabelFrame):
         self.provider_box.bind('<<ComboboxSelected>>', lambda e: self.invalidate())
         self.choose = ttk.Button(self, text='Choose destination folder', command=self.choose_folder)
         self.choose.grid(row=1, column=0, sticky='ew')
-        ttk.Label(self, textvariable=self.destination, wraplength=265).grid(row=2, column=0, sticky='w')
+        ttk.Label(self, textvariable=self.destination, wraplength=320).grid(row=2, column=0, sticky='w')
         self.policy_box = ttk.Combobox(self, textvariable=self.policy,
                                       values=['Skip existing', 'Replace existing'], state='readonly')
         self.policy_box.grid(row=3, column=0, sticky='ew')
         self.policy_box.bind('<<ComboboxSelected>>', lambda e: self.invalidate())
-        ttk.Label(self, textvariable=self.summary, wraplength=265).grid(row=4, column=0, sticky='w')
-        self.refresh = ttk.Button(self, text='Refresh Batch Plan', command=self.refresh_plan)
+        ttk.Label(self, textvariable=self.summary, wraplength=320).grid(row=4, column=0, sticky='w')
+        self.refresh = ttk.Button(self, text='Refresh Batch Plan', command=self.refresh_plan, state='disabled')
         self.refresh.grid(row=5, column=0, sticky='ew')
         self.start = ttk.Button(self, text='Export 0 Production-Ready PNGs', command=self.start_batch, state='disabled')
         self.start.grid(row=6, column=0, sticky='ew')
         self.cancel = ttk.Button(self, text='Cancel Batch', command=self.cancel_event.set, state='disabled')
         self.cancel.grid(row=7, column=0, sticky='ew')
-        ttk.Label(self, textvariable=self.progress, wraplength=265).grid(row=8, column=0, sticky='w')
+        ttk.Label(self, textvariable=self.progress, wraplength=320).grid(row=8, column=0, sticky='w')
         links = ttk.Frame(self)
         links.grid(row=9, column=0, sticky='ew')
-        ttk.Button(links, text='Open Export Folder', command=self.open_folder).pack(side='left')
+        self.folder_button = ttk.Button(links, text='Open Export Folder', command=self.open_folder, state='disabled')
+        self.folder_button.pack(side='left')
         self.report_button = ttk.Button(links, text='View Export Report', command=self.open_report, state='disabled')
         self.report_button.pack(side='left')
         self.after(50, self.drain)
@@ -70,7 +71,9 @@ class BatchExportPanel(ttk.LabelFrame):
         self.generation += 1
         self.plan = None
         self.start.configure(state='disabled', text='Export 0 Production-Ready PNGs')
-        self.summary.set('Refresh the plan for the selected dataset')
+        self.summary.set('Refresh the plan for the selected dataset' if self.app.state.selected_dataset and self.destination.get() else 'Select a dataset and destination first')
+        self.refresh.configure(state='normal' if self.app.state.selected_dataset and self.destination.get() else 'disabled')
+        self.folder_button.configure(state='normal' if self.destination.get() or self.report_path else 'disabled')
 
     def choose_folder(self):
         if self.busy:
@@ -83,8 +86,9 @@ class BatchExportPanel(ttk.LabelFrame):
 
     def set_busy(self, busy, *, exporting=False):
         self.busy = busy
-        for widget in (self.choose, self.refresh):
+        for widget in (self.choose,):
             widget.configure(state='disabled' if busy else 'normal')
+        self.refresh.configure(state='normal' if not busy and self.app.state.selected_dataset and self.destination.get() else 'disabled')
         for widget in (self.provider_box, self.policy_box):
             widget.configure(state='disabled' if busy else 'readonly')
         self.start.configure(state='disabled')
