@@ -19,7 +19,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .ui.workspace_app import launch
 
         root = parsed.dataset_root or load_settings().dataset_root
-        return launch(dataset_root=root, preprocessed=parsed.preprocessed)
+        preprocessed = parsed.preprocessed
+        if preprocessed is None and root is not None:
+            candidate = Path(root) / "svg_previews"
+            if (candidate / "preprocess_index.json").is_file():
+                preprocessed = candidate
+        return launch(dataset_root=root, preprocessed=preprocessed)
 
     from .cli import main as cli_main
     return cli_main(args)
