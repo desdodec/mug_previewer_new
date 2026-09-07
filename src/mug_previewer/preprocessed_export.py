@@ -60,10 +60,11 @@ def render_authoritative_face_panel(
 def render_preprocessed_wrap(
     preprocessed: Path | str, dataset: Dataset, street: StreetRecord,
     *, design_options: DesignOptions | None = None,
+    require_production_approved: bool = True,
 ) -> Image.Image:
     """Compose production-approved SVG artwork with the existing rear renderer."""
     front = render_authoritative_face_panel(
-        preprocessed, dataset, street, require_production_approved=True,
+        preprocessed, dataset, street, require_production_approved=require_production_approved,
     )
     options = build_render_options(design_options or DesignOptions(), area=dataset.display_name)
     rear = render_context_map_result(dataset, street, options.context_options)

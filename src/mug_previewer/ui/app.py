@@ -33,8 +33,11 @@ from .state import (
     load_preprocessed_catalogue,
     load_preprocessed_preview,
     render_preview_pair,
+    render_prepared_preview_pair,
     resolve_dataset_root,
 )
+
+from .workspace import WORKFLOW_FILTERS, filter_workflow, load_workflow, workflow_counts
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,6 +64,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._production_status_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, ProductionStatus | None, Exception | None]] = queue.SimpleQueue()
         self._render_generation = 0
         self._render_results: queue.SimpleQueue[tuple[int, Dataset, StreetRecord, PreviewPair | None, Exception | None]] = queue.SimpleQueue()
+        self._workflow_generation = 0
+        self._workflow_results = queue.SimpleQueue()
         self._shutting_down = False
         self._build_widgets()
         self.grid(sticky="nsew")
@@ -69,10 +74,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         root.protocol("WM_DELETE_WINDOW", self._shutdown)
         root.after(25, self._drain_production_status_results)
         root.after(25, self._drain_render_results)
+        root.after(25, self._drain_workflow_results)
         root.after_idle(self.refresh_datasets)
 
     def _build_widgets(self) -> None:
-        self.root.title("Mug Previewer")
+        self.root.title("Mug Workspace" if self._is_preprocessed_mode() else "Mug Previewer")
         self.root.minsize(1050, 650)
         self.columnconfigure(0, weight=0, minsize=285)
         self.columnconfigure(1, weight=1)
@@ -81,7 +87,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
 
         controls = ttk.Frame(self)
         controls.grid(row=0, column=0, sticky="nsw", padx=(0, 14))
-        ttk.Label(controls, text="Mug Previewer", font=("TkDefaultFont", 15, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(controls, text="Mug Workspace" if self._is_preprocessed_mode() else "Mug Previewer", font=("TkDefaultFont", 15, "bold")).grid(row=0, column=0, sticky="w")
         ttk.Label(controls, text="Dataset").grid(row=1, column=0, sticky="w", pady=(18, 3))
         self.dataset_var = tk.StringVar()
         self.dataset_box = ttk.Combobox(controls, state="readonly", textvariable=self.dataset_var, width=32)
@@ -144,27 +150,99 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.manual_review_button.grid_remove()
             self.review_street_button.grid_remove()
             self.summary_button.grid_remove()
-            self.manual_filter_var = tk.BooleanVar(value=False)
-            ttk.Checkbutton(controls, text="Manual Review only", variable=self.manual_filter_var,
-                            command=self._apply_filter).grid(row=6, column=0, sticky="w")
-            self._build_artwork_panel()
-            ttk.Button(controls, text="Production batch...",
-                       command=self._open_batch_window).grid(row=15, column=0, sticky="ew", pady=(8, 0))
+            self.workflow_var = tk.StringVar(value='All')
+            self.workflow_items = {}
+            self.workflow_box = ttk.Combobox(controls, textvariable=self.workflow_var,
+                                             values=WORKFLOW_FILTERS, state='readonly')
+            self.workflow_box.grid(row=5, column=0, sticky='ew', pady=(8, 0))
+            self.street_list.grid(row=6)
+            controls.rowconfigure(5, weight=0)
+            controls.rowconfigure(6, weight=1)
+            self.workflow_box.bind('<<ComboboxSelected>>', lambda e: self._apply_filter())
+            self.workflow_counts_var = tk.StringVar()
+            ttk.Label(controls, textvariable=self.workflow_counts_var, wraplength=260).grid(row=15, column=0, sticky='ew')
+            self.export_button.grid_remove()
+            self.printify_export_button.grid_remove()
+            self.render_button.configure(text='Preview Mug')
+            self.render_button.grid()
+            self._build_unified_workspace()
         self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
-    def _open_batch_window(self) -> None:
-        if not self._is_preprocessed_mode():
+    def _build_unified_workspace(self):
+        self.columnconfigure(2, weight=0, minsize=360)
+        self.front_card.grid_remove()
+        self.rear_card.grid_remove()
+        self.preview_tabs = ttk.Notebook(self)
+        self.preview_tabs.grid(row=0, column=1, sticky='nsew', padx=8)
+        for title, attribute in (('Face', 'front'), ('Mug Front', 'mug_front'), ('Mug Rear', 'rear'), ('Full Wrap', 'wrap')):
+            card = ttk.LabelFrame(self.preview_tabs, text=title, padding=8)
+            card.columnconfigure(0, weight=1)
+            card.rowconfigure(0, weight=1)
+            label = ttk.Label(card, anchor='center', text='Choose Preview Mug to load this view')
+            label.grid(sticky='nsew')
+            label.bind('<Configure>', self._preview_resized)
+            setattr(self, attribute + '_label', label)
+            if attribute == 'front':
+                self.front_card = card
+            self.preview_tabs.add(card, text=title)
+        self.workflow_tabs = ttk.Notebook(self)
+        self.workflow_tabs.grid(row=0, column=2, sticky='nsew')
+        self.workflow_card = ttk.Frame(self.workflow_tabs, padding=6)
+        self.workflow_card.columnconfigure(0, weight=1)
+        self.workflow_tabs.add(self.workflow_card, text='Workflow / Single export')
+        self._build_artwork_panel()
+        self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a street')
+        ttk.Label(self.workflow_card, textvariable=self.export_state_var, wraplength=330).grid(row=1, column=0, sticky='ew', pady=8)
+        self.export_button = ttk.Button(self.workflow_card, text='Export Inkthreadable PNG', command=self._start_inkthreadable_export, state='disabled')
+        self.export_button.grid(row=2, column=0, sticky='ew', pady=3)
+        self.printify_export_button = ttk.Button(self.workflow_card, text='Export Printify PNG', command=self._start_printify_export, state='disabled')
+        self.printify_export_button.grid(row=3, column=0, sticky='ew', pady=3)
+        self.batch_panel = BatchExportPanel(self.workflow_tabs, self)
+        self.workflow_tabs.add(self.batch_panel, text='Batch export')
+        self._mug_front_image = None
+
+    def _reload_workflow(self):
+        if 'workflow_items' not in self.__dict__ or self.state.selected_dataset is None:
             return
-        if "batch_window" not in self.__dict__:
-            self.batch_window = tk.Toplevel(self.root)
-            self.batch_window.title("Production batch")
-            self.batch_window.transient(self.root)
-            self.batch_panel = BatchExportPanel(self.batch_window, self)
-            self.batch_panel.pack(fill="both", expand=True, padx=12, pady=12)
-            self.batch_window.protocol("WM_DELETE_WINDOW", self.batch_window.withdraw)
-        self.batch_window.deiconify()
-        self.batch_window.lift()
+        self._workflow_generation += 1
+        self.workflow_items = {}
+        self.workflow_counts_var.set('Checking prepared workflow...')
+        self._set_export_buttons_state('disabled')
+        threading.Thread(target=self._workflow_worker,
+                         args=(self._workflow_generation, self.state.selected_dataset), daemon=True).start()
+
+    def _workflow_worker(self, generation, dataset):
+        try:
+            items = load_workflow(self.preprocessed_catalogue.root, dataset)
+            self._workflow_results.put((generation, items, None))
+        except Exception as error:
+            self._workflow_results.put((generation, {}, str(error)))
+
+    def _drain_workflow_results(self):
+        if self._shutting_down:
+            return
+        while True:
+            try:
+                generation, items, error = self._workflow_results.get_nowait()
+            except queue.Empty:
+                break
+            if generation != self._workflow_generation:
+                continue
+            self.workflow_items = items
+            counts = workflow_counts(items)
+            self.workflow_counts_var.set(f'Workflow unavailable: {error}' if error else
+                                         ' | '.join(f'{key}: {value}' for key, value in counts.items()))
+            selected = self.state.selected_street
+            self._apply_filter()
+            if selected in self.state.filtered_streets:
+                self.street_list.selection_set(self.state.filtered_streets.index(selected))
+                self._select_street()
+        self._schedule_main_thread_poll(self._drain_workflow_results)
+
+    def _open_batch_window(self):
+        if self._is_preprocessed_mode():
+            self.workflow_tabs.select(self.batch_panel)
 
     def _add_weight_control(
         self,
@@ -247,6 +325,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.current_production_status = None
         self.production_var.set("Production status: select a street")
         self.review_street_button.configure(state="disabled")
+        self._reload_workflow()
         self._apply_filter()
         self.status_var.set(f"{data.display_name}: {len(data.streets)} streets available.")
 
@@ -261,10 +340,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._invalidate_active_render_request()
         self.state.street_filter = self.search_var.get()
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
-        if self._is_preprocessed_mode() and self.__dict__.get("manual_filter_var") is not None and self.manual_filter_var.get():
-            self.state.filtered_streets = [street for street in self.state.filtered_streets
-                if (record := self.preprocessed_catalogue.find(data, street)) is not None
-                and record.state is not None and record.state.value == "MANUAL_REVIEW"]
+        if 'workflow_var' in self.__dict__:
+            self.state.filtered_streets = filter_workflow(self.state.filtered_streets, self.workflow_items, self.workflow_var.get())
         self.street_list.delete(0, tk.END)
         for street in self.state.filtered_streets:
             self.street_list.insert(tk.END, f"{street.id} \u2014 {street.display_name}")
@@ -300,6 +377,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             return
         record = catalogue.find(data, street)
         self._reset_artwork_preview(record)
+        self._mug_front_image = None
         self.render_button.configure(state="disabled")
         self.review_street_button.configure(state="disabled")
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
@@ -315,6 +393,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
 
         result = self._preprocessed_status(record)
         self.current_production_status = result
+        self.render_button.configure(state="normal" if result.readiness != "unrenderable" else "disabled")
         detail = result.detail
         if record.editable_svg_path is not None and record.state is not None and record.state.value in {"MANUAL_REVIEW", "MANUAL_APPROVED"}:
             detail = f"{detail}\nEditable SVG: {record.editable_svg_path}"
@@ -494,7 +573,10 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
     def _render_worker(self, generation: int, data: Dataset, street: StreetRecord, design_options: DesignOptions) -> None:
         """Render off the UI thread and hand the result to the main-thread poller."""
         try:
-            pair = render_preview_pair(data, street, design_options=design_options)
+            if self._is_preprocessed_mode():
+                pair = render_prepared_preview_pair(self.preprocessed_catalogue.root, data, street, design_options=design_options)
+            else:
+                pair = render_preview_pair(data, street, design_options=design_options)
         except Exception as error:
             LOGGER.exception("Preview rendering failed")
             self._render_results.put((generation, data, street, None, error))
@@ -561,7 +643,10 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
 
     def _render_finished(self, pair: PreviewPair, data: Dataset, street: StreetRecord) -> None:
         self.state.current_wrap = pair.wrap
-        self.state.current_front_preview = pair.front
+        if self._is_preprocessed_mode():
+            self._mug_front_image = pair.front
+        else:
+            self.state.current_front_preview = pair.front
         self.state.current_rear_preview = pair.rear
         self.state.framing_mode = pair.framing_mode
         self.state.render_status = "Ready"
@@ -667,14 +752,25 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._show_error(f"Could not export {provider_label}: {detail}")
 
     def _set_export_buttons_state(self, state: str) -> None:
-        if state == "normal" and not self._is_preprocessed_mode():
-            state = "disabled"
-        if state == "normal" and self._is_preprocessed_mode():
+        reason = 'select a street'
+        if not self._is_preprocessed_mode():
+            state = 'disabled'
+        else:
             record = self._selected_artwork_record()
-            if record is None or not self._preprocessed_status(record).export_allowed or self._qa_export_error():
-                state = "disabled"
+            if record is None:
+                state = 'disabled'
+            elif not self._preprocessed_status(record).export_allowed:
+                reason = 'production approval required'
+                state = 'disabled'
+            else:
+                reason = self._qa_export_error()
+                if reason:
+                    state = 'disabled'
         self.export_button.configure(state=state)
         self.printify_export_button.configure(state=state)
+        if 'export_state_var' in self.__dict__:
+            self.export_state_var.set('Export: READY' if state == 'normal' else
+                                     f"Export: BLOCKED - {reason or 'export temporarily unavailable'}")
 
     @staticmethod
     def _provider_filename(dataset: Dataset, street: StreetRecord, suffix: str) -> str:
@@ -697,6 +793,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._resize_pending = None
         self._front_photo = self._set_preview(self.front_label, self.state.current_front_preview)
         self._rear_photo = self._set_preview(self.rear_label, self.state.current_rear_preview)
+        if 'mug_front_label' in self.__dict__:
+            self._mug_front_photo = self._set_preview(self.mug_front_label, self._mug_front_image)
+            self._wrap_photo = self._set_preview(self.wrap_label, self.state.current_wrap)
 
     def _set_preview(self, label: ttk.Label, image: Image.Image | None) -> ImageTk.PhotoImage | None:
         if image is None:
@@ -713,6 +812,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         text = "No cached preview" if self._is_preprocessed_mode() else "Render a street to view this mug"
         self.front_label.configure(image="", text=text)
         self.rear_label.configure(image="", text=text)
+        if 'mug_front_label' in self.__dict__:
+            self._mug_front_image = None
+            self._mug_front_photo = self._wrap_photo = None
+            self.mug_front_label.configure(image='', text=text)
+            self.wrap_label.configure(image='', text=text)
 
     def _show_error(self, detail: str) -> None:
         self.state.error = detail

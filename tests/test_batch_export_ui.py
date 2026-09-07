@@ -168,14 +168,15 @@ def test_batch_window_is_preprocessed_only(monkeypatch):
     assert 'batch_window' not in app.__dict__
 
 
-def test_open_batch_window_reuses_existing_window():
+def test_open_batch_selects_integrated_panel():
     from mug_previewer.ui.app import MugPreviewerApp
     app = MugPreviewerApp.__new__(MugPreviewerApp)
     app.preprocessed_catalogue = object()
     actions = []
-    app.batch_window = SimpleNamespace(deiconify=lambda: actions.append('show'), lift=lambda: actions.append('lift'))
+    app.batch_panel = object()
+    app.workflow_tabs = SimpleNamespace(select=lambda panel: actions.append(panel))
     app._open_batch_window()
-    assert actions == ['show', 'lift']
+    assert actions == [app.batch_panel]
 
 
 def test_app_shutdown_cancels_running_batch():

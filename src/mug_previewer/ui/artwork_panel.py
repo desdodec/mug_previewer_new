@@ -6,15 +6,14 @@ from tkinter import filedialog, ttk
 
 from ..manual_svg_workspace import ManualSvgWorkspace, find_inkscape_executable, launch_inkscape, open_artwork_folder
 from ..review_index import REVIEW_STATUSES, current_review_state, save_review_record, svg_sha256
+from ..preprocess import resolve_authoritative_face_svg, validate_manual_svg
 from ..rendering.svg_raster import rasterize_face_svg
 from .state import load_preprocessed_catalogue
 
 
 class ArtworkPanelMixin:
     def _build_artwork_panel(self):
-        self.rear_label.grid_remove()
-        self.rear_card.configure(text="Artwork and Review")
-        panel = ttk.Frame(self.rear_card)
+        panel = ttk.Frame(self.workflow_card)
         panel.grid(row=0, column=0, sticky="new")
         panel.columnconfigure(0, weight=1)
         panel.columnconfigure(1, weight=1)
@@ -72,8 +71,14 @@ class ArtworkPanelMixin:
         if record is None:
             return "Select prepared artwork before exporting."
         try:
+            resolution = resolve_authoritative_face_svg(self.preprocessed_catalogue.root, self.state.selected_dataset, self.state.selected_street)
+            if not resolution.production_approved:
+                return 'Production approval required'
+            if resolution.path is None:
+                return 'Authoritative SVG missing'
+            validate_manual_svg(resolution.path.read_bytes())
             review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id,
-                                          record.street_id, self._formal_review_svg())
+                                          record.street_id, resolution.path)
             return review.label if review.export_blocked else None
         except (OSError, ValueError) as error:
             return f"QA ledger unavailable: {error}"
@@ -86,7 +91,7 @@ class ArtworkPanelMixin:
         labels = [("Generated SVG", workspace.generated_svg), ("Working edit", workspace.working_svg),
                   ("Corrected edit", workspace.corrected_svg), ("Approved SVG", workspace.approved_svg)]
         state = record.state.value if record and record.state else "not prepared"
-        text = f"PRODUCTION: {state}\n\n" + "\n".join(f"{label}: {'present' if path and path.is_file() else 'missing'}" for label, path in labels)
+        text = f"Production: {state}\n\n" + "\n".join(f"{label}: {'present' if path and path.is_file() else 'missing'}" for label, path in labels)
         current = workspace.correction_current
         if workspace.corrected_svg and workspace.corrected_svg.exists() and not current:
             text += "\nCorrection needs repair or is invalid."
@@ -103,7 +108,7 @@ class ArtworkPanelMixin:
         try:
             review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id, record.street_id,
                                           self._formal_review_svg()) if record else None
-            self.qa_display_var.set(review.label if review else "Review: select a street")
+            self.qa_display_var.set(review.label.replace("production export allowed", "current exact-SVG pass") if review else "QA: select a street")
             if reset_review:
                 self.qa_status_var.set(review.record.status if review and review.record else "pass")
                 self.qa_note_var.set(review.record.note if review and review.record else "")
@@ -165,6 +170,9 @@ class ArtworkPanelMixin:
                     "approved": workspace.approved_svg, "authoritative": self._formal_review_svg()}[role]
             if path is None:
                 raise ValueError("Requested artwork is unavailable.")
+            self._invalidate_active_render_request()
+            self._mug_front_image = None
+            self.state.current_rear_preview = None
             payload = path.read_bytes()
             image = rasterize_face_svg(payload)
             self._preview_hash = hashlib.sha256(payload).hexdigest()
@@ -202,7 +210,11 @@ class ArtworkPanelMixin:
 
     def _refresh_selected_artwork(self):
         try:
+            self._invalidate_active_render_request()
             self.preprocessed_catalogue = load_preprocessed_catalogue(self.preprocessed_catalogue.root)
+            self._reload_workflow()
+            if "batch_panel" in self.__dict__:
+                self.batch_panel.invalidate()
             if self.state.selected_dataset and self.state.selected_street:
                 self._show_preprocessed_selection(self.state.selected_dataset, self.state.selected_street)
         except Exception as error:
@@ -228,6 +240,9 @@ class ArtworkPanelMixin:
                                self.qa_status_var.get(), target, self.qa_note_var.get(), expected_sha256=preview_hash)
             self._refresh_artwork()
             self._set_export_buttons_state("normal")
+            self._reload_workflow()
+            if "batch_panel" in self.__dict__:
+                self.batch_panel.invalidate()
             self.status_var.set(f"Review saved against {self._preview_role}.")
         except Exception as error:
             self._show_error(f"Could not save review: {error}")

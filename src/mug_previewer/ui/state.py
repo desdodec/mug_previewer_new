@@ -373,3 +373,12 @@ def export_printify_png(
         profile_lookup=profile_lookup,
         exporter=exporter,
     )
+
+
+def render_prepared_preview_pair(root, dataset, street, *, design_options=None):
+    """Preview the existing authoritative wrap, without generating a face."""
+    from ..preprocessed_export import render_preprocessed_wrap
+    wrap = render_preprocessed_wrap(root, dataset, street, design_options=design_options, require_production_approved=False)
+    front = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
+    rear = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.REAR_HANDLE_LEFT))
+    return PreviewPair(wrap, front, rear, 'prepared artwork')

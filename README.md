@@ -298,25 +298,33 @@ The dataset root follows the existing precedence: the explicit `--dataset-root` 
 
 ## Desktop production workflow
 
-1. Start Mug Previewer and choose a dataset and street.
-2. Wait for the plain-language production status: **Ready for Production**, **Manual Review Required**, or **Cannot Render**.
-3. Preview ready streets, or use **Review Selected Street** to open the matching manual-review record.
-4. Approve a standard or edited placement only when satisfied; preview adjustments are not saved until approval. Clear a saved decision to return the street to review.
-5. Use the provider export buttons only when the status is ready. Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI; Printify exports are 2475 x 1155 RGBA PNGs at 300 DPI.
+Prepared artwork opens in the Mug Workspace. Choose a dataset, search, and use
+All, Production Ready, Manual Review, QA Attention, Do Not Use, or Unrenderable
+to navigate. Counts use the existing batch classification and load in the
+background. Filters never change batch scope: batch exports include the whole
+selected prepared dataset.
 
-Manual decisions are stored in data/manual_overrides.json and are keyed by dataset ID plus street ID. Streets marked **Cannot Render** need corrected source input and cannot be sent to Manual Review or export.
+The center tabs show Face, Mug Front, Mug Rear, and Full Wrap. Selecting a street
+loads only its cached face image. **Preview Current SVG for QA** displays the exact
+SVG for human review; **Preview Mug** explicitly composes the authoritative
+prepared artwork without regenerating the face.
 
-In preprocessed mode, provider exports use the authoritative indexed SVG.
-`MANUAL_APPROVED` exports use the approved human-edited SVG rather than
-regenerating the front face. `MANUAL_REVIEW` and `UNRENDERABLE_INPUT` cannot
-be exported for production. Missing or invalid authoritative artwork fails
-clearly without regeneration. Cached street selection remains preview-only.
+The right panel separates production state, QA state, and export eligibility.
+Use the existing Inkscape edit, repair, and approval actions for manual artwork.
+Approving changed artwork makes an old QA pass stale. **Refresh Artwork** reloads
+external QA changes and workflow counts. Inkthreadable and Printify exports
+require production approval, a valid authoritative SVG, and a current exact-SVG
+QA pass. The Batch export tab retains background planning, progress, and cancellation.
+
+`svg_review_results*.json` is authoritative production QA. `review_index.json`
+is a compatibility snapshot; corruption in it alone does not block a valid batch.
+Malformed or ambiguous authoritative review results still block production.
 
 The reusable single-item APIs in `mug_previewer.preprocessed_export` are
 `render_authoritative_face_panel`, `render_preprocessed_wrap`, and
 `export_preprocessed_provider_png`. Preprocessing and export share
 `rendering.svg_raster.rasterize_face_svg`. Catalogue UI metadata stays in its
-existing location; a future Workspace can reuse these APIs without moving it.
+existing location and the Workspace reuses these APIs.
 
 
 ## Manual SVG workspace (Task 04B)

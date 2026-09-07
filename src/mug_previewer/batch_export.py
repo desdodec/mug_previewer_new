@@ -14,7 +14,7 @@ from .design import DesignOptions
 from .preprocess import INDEX_FILENAME, resolve_authoritative_face_svg, validate_manual_svg
 from .preprocessed_export import export_preprocessed_provider_png
 from .providers import get_provider_profile
-from .review_index import current_review_state, load_review_index, svg_sha256
+from .review_index import current_review_state, svg_sha256
 
 
 class BatchPlanningError(ValueError):
@@ -136,28 +136,14 @@ def _records(root):
 
 
 def _validate_qa(root):
+    from .review_results import read_review_results
     try:
-        # Validate identities/types before the ledger lookup can collapse duplicates
-        # or accidentally treat a malformed identity as an unreviewed street.
-        path = root / 'review_index.json'
-        if path.exists():
-            payload = json.loads(path.read_text(encoding='utf-8-sig'))
-            if not isinstance(payload, dict) or not isinstance(payload.get('records'), list):
-                raise ValueError('missing records list')
-            seen = set()
-            for record in payload['records']:
-                fields = ('dataset_id', 'street_id', 'status', 'reviewed_svg_sha256', 'reviewed_at')
-                if not isinstance(record, dict) or not all(isinstance(record.get(k), str) and record[k] for k in fields):
-                    raise ValueError('invalid QA record fields')
-                if 'note' in record and not isinstance(record['note'], str):
-                    raise ValueError('invalid QA note')
-                key = record['dataset_id'], record['street_id']
-                if key in seen:
-                    raise ValueError('duplicate QA identity')
-                seen.add(key)
-        return load_review_index(root)
-    except Exception as error:
-        raise BatchPlanningError('QA ledger is invalid. Repair review_index.json before production export.') from error
+        entries, errors, _ = read_review_results(root)
+        if errors:
+            raise ValueError('; '.join(errors.values()))
+        return entries
+    except (OSError, ValueError) as error:
+        raise BatchPlanningError('QA ledger is invalid. Repair svg_review_results*.json before production export.') from error
 
 
 def _inspect(root, dataset, street_id, record, directory):

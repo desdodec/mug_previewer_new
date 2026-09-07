@@ -79,7 +79,7 @@ def test_mixed_eligibility_and_exact_summary(prepared):
 
 @pytest.mark.parametrize('payload', ['{bad', '{}', '{"records": [null]}'])
 def test_invalid_global_qa_fails_closed(prepared, payload):
-    (prepared[0] / 'review_index.json').write_text(payload)
+    (prepared[0] / 'svg_review_results.json').write_text(payload)
     with pytest.raises(batch.BatchPlanningError, match='QA ledger is invalid'):
         plan(prepared)
     assert not (prepared[0] / 'out').exists()
@@ -155,7 +155,7 @@ def test_changes_after_plan_never_export_changed_item(prepared, monkeypatch, cha
         records[0]['approved_svg_path'] = 'new.svg'
         write()
     elif change == 'ledger':
-        (root / 'review_index.json').write_text('{broken')
+        (root / 'svg_review_results.json').write_text('{broken')
     else:
         records[0]['production_state'] = 'MANUAL_REVIEW'
         write()
@@ -294,14 +294,14 @@ def test_all_qa_statuses_and_staleness(prepared, status, stale):
 def test_structurally_invalid_qa_cannot_disappear(prepared, kind):
     root, data, records, write = prepared
     save_review_record(root, data.id, '0000', 'overlap', root / '0000.svg')
-    path = root / 'review_index.json'
+    path = root / 'svg_review_results.json'
     payload = json.loads(path.read_text())
     if kind == 'identity_type':
-        payload['records'][0]['dataset_id'] = 123
+        payload[0]['dataset_id'] = 123
     elif kind == 'duplicate':
-        payload['records'].append(payload['records'][0])
+        payload.append(payload[0])
     else:
-        payload['records'][0]['note'] = []
+        payload[0]['note'] = []
     path.write_text(json.dumps(payload))
     with pytest.raises(batch.BatchPlanningError, match='QA ledger is invalid'):
         plan(prepared)
@@ -329,3 +329,16 @@ def test_exporter_file_exists_error_is_runtime_failure(prepared, monkeypatch):
     monkeypatch.setattr(batch, 'export_preprocessed_provider_png', exporter)
     result = batch.execute_batch_export(plan(prepared))
     assert result.summary['failed'] == 11 and result.summary['skipped_existing'] == 0
+
+
+@pytest.mark.parametrize('payload', ['{bad', '{}', '{"records": [null]}'])
+def test_corrupt_compatibility_index_does_not_override_browser_qa(prepared, monkeypatch, payload):
+    root = prepared[0]
+    (root / 'review_index.json').write_text(payload)
+    planned = plan(prepared)
+    assert planned.summary.ready == 11
+    calls = []
+    monkeypatch.setattr(batch, 'export_preprocessed_provider_png', fake_export(calls))
+    result = batch.execute_batch_export(planned)
+    assert result.summary['exported'] == 11
+    assert len(calls) == 11

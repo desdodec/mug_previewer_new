@@ -167,7 +167,9 @@ def test_manual_filter_limits_list_and_clears_transient_preview(tmp_path):
     auto_street = SimpleNamespace(id='0002', display_name='Automatic')
     controller.state.selected_dataset.streets = [review_street, auto_street]
     controller.search_var = Var()
-    controller.manual_filter_var = SimpleNamespace(get=lambda: True)
+    controller.workflow_var = SimpleNamespace(get=lambda: 'Manual Review')
+    from mug_previewer.batch_export import Eligibility
+    controller.workflow_items = {'0001': SimpleNamespace(eligibility=Eligibility.MANUAL_REVIEW)}
     controller._production_status_generation = 0
     inserted = []
     controller.street_list.delete = lambda *args: None
