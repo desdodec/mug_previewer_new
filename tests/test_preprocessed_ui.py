@@ -249,3 +249,43 @@ def test_cli_missing_default_preprocessed_index_is_clear_and_does_not_launch(mon
     output = capsys.readouterr().out
     assert str(tmp_path / "svg_previews" / "preprocess_index.json") in output
     assert "Run `mug-previewer preprocess --dataset-root <root>` first" in output
+
+@pytest.mark.parametrize('preprocessed_mode', [False, True])
+def test_export_worker_routes_cached_and_live_modes(tmp_path, monkeypatch, preprocessed_mode):
+    from mug_previewer.design import DesignOptions
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.preprocessed_catalogue = SimpleNamespace(root=tmp_path) if preprocessed_mode else None
+    callbacks = []
+    controller.root = SimpleNamespace(after=lambda delay, callback: callbacks.append(callback))
+    calls = []
+    def export(*args, **kwargs):
+        calls.append((args, kwargs))
+        return tmp_path / 'export.png'
+    def forbidden(*args, **kwargs):
+        pytest.fail('wrong export route')
+    monkeypatch.setattr(app_module, 'export_preprocessed_provider_png', export if preprocessed_mode else forbidden)
+    monkeypatch.setattr(app_module, 'export_provider_png', forbidden if preprocessed_mode else export)
+    data, street, design = object(), object(), DesignOptions()
+    destination = tmp_path / 'export.png'
+    controller._export_worker(data, street, design, destination, 'inkthreadable_11oz_white', 'Inkthreadable')
+    expected = (tmp_path, data, street, destination) if preprocessed_mode else (data, street, destination)
+    assert calls == [(expected, {'profile_id': 'inkthreadable_11oz_white', 'design_options': design})]
+    finished = []
+    controller._export_finished = lambda *args: finished.append(args)
+    callbacks[0]()
+    assert finished == [('Inkthreadable', destination)]
+
+
+def test_export_worker_preserves_error_for_ui_callback(tmp_path, monkeypatch):
+    controller = MugPreviewerApp.__new__(MugPreviewerApp)
+    controller.preprocessed_catalogue = SimpleNamespace(root=tmp_path)
+    callbacks = []
+    controller.root = SimpleNamespace(after=lambda delay, callback: callbacks.append(callback))
+    def fail(*args, **kwargs):
+        raise ValueError('authoritative SVG is missing')
+    monkeypatch.setattr(app_module, 'export_preprocessed_provider_png', fail)
+    controller._export_worker(None, None, None, tmp_path / 'out.png', 'profile', 'Provider')
+    failed = []
+    controller._export_failed = lambda *args: failed.append(args)
+    callbacks[0]()
+    assert failed == [('Provider', 'authoritative SVG is missing')]

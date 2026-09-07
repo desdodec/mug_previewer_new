@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import re
 import shutil
@@ -13,12 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
-import cairosvg
-from PIL import Image
-
 from .datasets.models import Dataset, StreetRecord
 from .diagnostics.front_candidates import ProductionTriageStatus
-from .rendering.face import FACE_SVG_GENERATOR, FRONT_PANEL_PX, SOURCE_CANVAS_PX, FaceRenderOptions, render_face_svg
+from .rendering.face import FACE_SVG_GENERATOR, SOURCE_CANVAS_PX, FaceRenderOptions, render_face_svg
+from .rendering.svg_raster import rasterize_face_svg
 from .ui.production import production_triage_state
 
 PREPROCESS_GENERATOR = "mug-previewer/preprocess"
@@ -372,12 +369,9 @@ def _preview_relative(record: dict[str, object], generated: Path) -> Path:
 
 def _write_preview(svg: str | bytes, path: Path) -> None:
     """Rasterise an editable SVG to the existing 495 x 462 screen panel."""
-    payload = svg.encode("utf-8") if isinstance(svg, str) else svg
-    png = cairosvg.svg2png(bytestring=payload, output_width=990, output_height=462)
-    with Image.open(io.BytesIO(png)) as rendered:
-        preview = rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1]))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        preview.save(path, format="PNG", optimize=True)
+    preview = rasterize_face_svg(svg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    preview.save(path, format="PNG", optimize=True)
 
 
 def _base_record(

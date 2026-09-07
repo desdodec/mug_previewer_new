@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
+from ..preprocessed_export import export_preprocessed_provider_png
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .manual_review import ManualReviewController, ManualReviewWindow
@@ -588,16 +589,19 @@ class MugPreviewerApp(ttk.Frame):
         provider_label: str,
     ) -> None:
         try:
-            saved = export_provider_png(
-                data,
-                street,
-                destination,
-                profile_id=profile_id,
-                design_options=design_options,
-            )
+            if self._is_preprocessed_mode():
+                saved = export_preprocessed_provider_png(
+                    self.preprocessed_catalogue.root, data, street, destination,
+                    profile_id=profile_id, design_options=design_options,
+                )
+            else:
+                saved = export_provider_png(
+                    data, street, destination,
+                    profile_id=profile_id, design_options=design_options,
+                )
         except Exception as error:
             LOGGER.exception("%s export failed", provider_label)
-            self.root.after(0, lambda: self._export_failed(provider_label, str(error)))
+            self.root.after(0, lambda detail=str(error): self._export_failed(provider_label, detail))
             return
         self.root.after(0, lambda: self._export_finished(provider_label, saved))
 
@@ -609,7 +613,7 @@ class MugPreviewerApp(ttk.Frame):
     def _export_failed(self, provider_label: str, detail: str) -> None:
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
         LOGGER.error("%s export error: %s", provider_label, detail)
-        self._show_error("Could not write the export file. Check the destination folder and try again.")
+        self._show_error(f"Could not export {provider_label}: {detail}")
 
     def _set_export_buttons_state(self, state: str) -> None:
         self.export_button.configure(state=state)

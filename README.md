@@ -305,3 +305,15 @@ The dataset root follows the existing precedence: the explicit `--dataset-root` 
 5. Use the provider export buttons only when the status is ready. Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI; Printify exports are 2475 x 1155 RGBA PNGs at 300 DPI.
 
 Manual decisions are stored in data/manual_overrides.json and are keyed by dataset ID plus street ID. Streets marked **Cannot Render** need corrected source input and cannot be sent to Manual Review or export.
+
+In preprocessed mode, provider exports use the authoritative indexed SVG.
+`MANUAL_APPROVED` exports use the approved human-edited SVG rather than
+regenerating the front face. `MANUAL_REVIEW` and `UNRENDERABLE_INPUT` cannot
+be exported for production. Missing or invalid authoritative artwork fails
+clearly without regeneration. Cached street selection remains preview-only.
+
+The reusable single-item APIs in `mug_previewer.preprocessed_export` are
+`render_authoritative_face_panel`, `render_preprocessed_wrap`, and
+`export_preprocessed_provider_png`. Preprocessing and export share
+`rendering.svg_raster.rasterize_face_svg`. Catalogue UI metadata stays in its
+existing location; a future Workspace can reuse these APIs without moving it.
