@@ -189,11 +189,15 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             if attribute == 'front':
                 self.front_card = card
             self.preview_tabs.add(card, text=title)
+        from .face_grid import FaceGrid
+        self.face_grid = FaceGrid(self.preview_tabs, self)
+        self.preview_tabs.insert(0, self.face_grid, text='Review / Edit Faces')
+        self.preview_tabs.select(self.face_grid)
         self.workflow_tabs = ttk.Notebook(self)
         self.workflow_tabs.grid(row=0, column=2, sticky='nsew')
         self.workflow_card = ttk.Frame(self.workflow_tabs, padding=6)
         self.workflow_card.columnconfigure(0, weight=1)
-        self.workflow_tabs.add(self.workflow_card, text='Workflow / Single export')
+        self.workflow_tabs.add(self.workflow_card, text='Create Faces')
         self._build_artwork_panel()
         self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a street')
         ttk.Label(self.workflow_card, textvariable=self.export_state_var, wraplength=330).grid(row=1, column=0, sticky='ew', pady=8)
@@ -202,7 +206,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.printify_export_button = ttk.Button(self.workflow_card, text='Export Printify PNG', command=self._start_printify_export, state='disabled')
         self.printify_export_button.grid(row=3, column=0, sticky='ew', pady=3)
         self.batch_panel = BatchExportPanel(self.workflow_tabs, self)
-        self.workflow_tabs.add(self.batch_panel, text='Batch export')
+        self.workflow_tabs.add(self.batch_panel, text='Export PNG')
         self._mug_front_image = None
 
     def _reload_workflow(self):
@@ -345,6 +349,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         if 'workflow_var' in self.__dict__:
             self.state.filtered_streets = filter_workflow(self.state.filtered_streets, self.workflow_items, self.workflow_var.get())
+        if 'face_grid' in self.__dict__:
+            self.face_grid.set_streets(self.state.filtered_streets)
         self.street_list.delete(0, tk.END)
         for street in self.state.filtered_streets:
             self.street_list.insert(tk.END, f"{street.id} \u2014 {street.display_name}")
@@ -424,7 +430,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         if record.state is not None and record.state.value == "AUTO_APPROVED":
             return ProductionStatus("ready", "Ready for Production", detail, True, False)
         if record.state is not None and record.state.value == "MANUAL_REVIEW":
-            return ProductionStatus("manual_review", "Manual Review Required", detail, False, True)
+            return ProductionStatus("manual_review", "Needs Attention (included)", detail, True, True)
         if record.state is not None and record.state.value == "MANUAL_APPROVED":
             return ProductionStatus("ready", "Manually Approved / Ready for Production", detail, True, False)
         if record.state is not None and record.state.value == "UNRENDERABLE_INPUT":

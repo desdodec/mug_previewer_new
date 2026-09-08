@@ -70,11 +70,11 @@ def test_mixed_eligibility_and_exact_summary(prepared):
     write()
     result = plan(prepared)
     assert [i.eligibility.value for i in result.items] == [
-        'QA_BLOCKED', 'READY', 'QA_BLOCKED', 'QA_BLOCKED', 'EXCLUDED', 'MANUAL_REVIEW',
-        'QA_BLOCKED', 'READY', 'QA_BLOCKED', 'UNRENDERABLE', 'ASSET_ERROR']
-    assert asdict(result.summary) == dict(total=11, ready=2, manual_review=1, qa_blocked=5,
-                                        excluded=1, unrenderable=1, asset_errors=1, existing=0, not_reviewed=2)
-    assert '(stale)' in result.items[3].reason
+        'READY', 'READY', 'EXCLUDED', 'READY', 'EXCLUDED', 'READY',
+        'READY', 'READY', 'READY', 'UNRENDERABLE', 'ASSET_ERROR']
+    assert asdict(result.summary) == dict(total=11, ready=7, manual_review=0, qa_blocked=0,
+                                        excluded=2, unrenderable=1, asset_errors=1, existing=0, not_reviewed=0)
+
 
 
 @pytest.mark.parametrize('payload', ['{bad', '{}', '{"records": [null]}'])
@@ -123,19 +123,19 @@ def test_executor_only_calls_authoritative_exporter_and_continues(prepared, monk
     result = batch.execute_batch_export(p, on_progress=progress.append)
     expected = [i for i in p.items if i.eligibility == batch.Eligibility.READY]
     assert calls == [(i.street_id, i.destination.name, p.provider_id) for i in expected]
-    assert result.summary['exported'] == 9 and result.summary['failed'] == 1
+    assert result.summary['exported'] == 10 and result.summary['failed'] == 1
     assert result.results[0].result == 'EXPORTED'
     assert result.results[1].reason == 'test failure'
     assert result.results[2].result == 'EXPORTED'
-    assert len(progress) == 10 and progress[-1].current == 10
+    assert len(progress) == 11 and progress[-1].current == 11
     payload = json.loads(result.report_path.read_text(encoding='utf-8'))
     assert payload['version'] == 1 and payload['dataset_id'] == data.id
     assert payload['provider_id'] == PROVIDERS[0]
     assert payload['started_at'] <= payload['completed_at']
     assert len(payload['items']) == 11
     assert payload['items'][0]['authoritative_svg_sha256'] == svg_sha256(root / '0000.svg')
-    assert payload['items'][3]['reason'] == 'Artwork requires manual approval'
-    assert len(list(p.output_directory.glob('*.png'))) == 9
+    assert payload['items'][3]['result'] == 'EXPORTED'
+    assert len(list(p.output_directory.glob('*.png'))) == 10
     assert not list(p.output_directory.glob('.batch-*'))
 
 
@@ -238,7 +238,7 @@ def test_scope_is_selected_dataset_only_and_plan_reloads(prepared):
     assert plan(prepared).summary.total == 11
     records[0]['production_state'] = 'MANUAL_REVIEW'
     write()
-    assert plan(prepared).summary.manual_review == 1
+    assert plan(prepared).summary.ready == 11
 
 
 def test_cancel_keeps_finished_exports_and_writes_report(prepared, monkeypatch):
@@ -285,8 +285,7 @@ def test_all_qa_statuses_and_staleness(prepared, status, stale):
     if stale:
         (root / '0000.svg').write_text(svg('yellow'))
     category = plan(prepared).items[0].eligibility
-    expected = ('EXCLUDED' if status == 'Do Not Use' and not stale else
-                'READY' if status == 'pass' and not stale else 'QA_BLOCKED')
+    expected = ('READY' if status == 'pass' else 'EXCLUDED')
     assert category.value == expected
 
 

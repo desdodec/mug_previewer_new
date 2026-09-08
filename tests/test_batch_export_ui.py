@@ -93,9 +93,9 @@ def test_plan_result_updates_counts_and_start_safely(panel, ready):
     panel.events.put(('plan', 0, planned(ready)))
     panel.drain()
     assert panel.start.options['state'] == ('normal' if ready else 'disabled')
-    assert panel.start.options['text'] == f'Export {ready} Production-Ready PNGs'
-    assert 'Manual review: 1' in panel.summary.get()
-    assert 'Do Not Use: 1' in panel.summary.get()
+    assert panel.start.options['text'] == f'Export {ready} Included PNGs'
+    assert 'Excluded: 1' in panel.summary.get()
+    assert 'Unrenderable: 0' in panel.summary.get()
 
 
 def test_export_thread_and_duplicate_launch_guard(panel, monkeypatch):
@@ -123,7 +123,7 @@ def test_invalid_start_does_not_spawn(panel, monkeypatch, reason):
 
 def test_worker_only_queues_progress_and_actual_result(panel, monkeypatch):
     result = SimpleNamespace(report_path=Path('output/report.json'), cancelled=False,
-        summary=dict(exported=1, failed=1, skipped_existing=1, manual_review=1,
+        summary=dict(ready=3, exported=1, failed=1, skipped_existing=1, manual_review=1,
                      qa_blocked=0, not_reviewed=0, excluded=1, unrenderable=0, asset_errors=0, cancelled=0))
     progress = SimpleNamespace(current=1, total=3,
         result=SimpleNamespace(item=SimpleNamespace(street_id='0001', street_name='One'), result='EXPORTED'))
@@ -135,7 +135,7 @@ def test_worker_only_queues_progress_and_actual_result(panel, monkeypatch):
     assert panel.summary.get() == '' and panel.progress.get() == ''
     panel.drain()
     assert '1 exported, 1 failed' in panel.summary.get()
-    assert '1 existing' in panel.summary.get()
+    assert 'Existing outputs: 1' in panel.summary.get()
     assert panel.report_path == result.report_path and panel.plan is None
     assert panel.start.options['state'] == 'disabled'
 

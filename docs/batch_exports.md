@@ -1,54 +1,12 @@
-# Production-ready batch export
+# Included face batch export
 
-In preprocessed mode, select a dataset and open **Production batch...**. The
-small batch window leaves the existing cached street browser in place.
+The **Export PNG** tab plans every prepared record in the selected dataset,
+regardless of search/grid filters. Counts show Included, Excluded, Unrenderable,
+Asset errors and Existing outputs. Choose Inkthreadable or Printify and a destination,
+then export the included PNGs. Existing outputs are skipped by default. The report
+names every item and its export/skip/failure reason. Export rechecks artwork and
+exclusions before publishing through the existing provider pipeline.
 
-1. Select **Inkthreadable** or **Printify**.
-2. Choose an explicit destination folder. Outputs go in a provider-ID subfolder.
-3. Leave **Skip existing** selected, or explicitly choose **Replace existing**.
-4. Select **Refresh Batch Plan** to read the latest preprocessing index and QA
-   sources. The panel shows every eligibility count and existing-file count.
-5. Select **Export N Production-Ready PNGs** to start the background worker.
-6. Use **Open Export Folder** or **View Export Report** after the run.
-
-Batch scope is every prepared record in the currently selected dataset. Search
-and **Manual Review only** filters affect browsing, never batch scope. Nothing
-exports automatically when opening the app, selecting a dataset, reviewing, or
-approving artwork. Refresh the plan explicitly after review/approval changes.
-
-**Production export requires an explicit current `pass` review for the exact authoritative SVG.**
-The summary separates **Not reviewed** from other **QA problems**. A stale Do Not
-Use review requires QA attention and is not counted as an intentional exclusion.
-
-## Eligibility
-
-| Category | Rule |
-| --- | --- |
-| READY | AUTO_APPROVED or MANUAL_APPROVED, valid authoritative SVG, and an explicit current pass for the exact authoritative SVG. |
-| MANUAL_REVIEW | Artwork requires manual approval; no export. |
-| QA_BLOCKED | Approved artwork with no review, invalid/ambiguous review, overlap, duplicates, missing, other, or any stale review; the specific status is reported. |
-| EXCLUDED | Current exact-SVG Do Not Use review; intentional exclusion, never deleted. |
-| UNRENDERABLE | UNRENDERABLE_INPUT; source/input unusable, no regeneration. |
-| ASSET_ERROR | Missing/invalid authoritative artwork, invalid production state, failed preprocessing record, or prepared street missing from the source dataset. |
-
-Current Do Not Use takes precedence over ordinary workflow categories. Invalid global
-preprocessing structure, duplicate identities, filename collisions, or an invalid
-QA ledger prevent planning. Asset errors are displayed prominently alongside
-READY counts; unrelated ready items may still export, with every error retained
-in the report. Production classification and human QA remain separate.
-
-## Production authority
-
-`execute_batch_export` calls `export_preprocessed_provider_png` exactly once for
-each eligible attempted item. That exporter retains the Task 04A authoritative
-SVG composition and Task 04B backend QA protection. There is no batch renderer,
-preprocessing fallback, automatic repair, approval, or QA clearing.
-
-Planning resolves artwork through `resolve_authoritative_face_svg` and compares
-QA against that authoritative path through `current_review_state`. Manual
-approval uses the indexed approved SVG; working edits and corrected drafts never
-become production inputs automatically. Provider dimensions, DPI and colour mode
-come from the existing provider profiles, which are unchanged.
 
 ## Safe destinations and filenames
 
@@ -111,5 +69,4 @@ remain distinct. Progress-observer errors are recorded without abandoning the
 batch. A report-write failure is surfaced to the UI; it never removes PNGs that
 were already successfully exported.
 
-See [Exact-artwork QA workflow](qa_production_gate.md) for browser JSON discovery,
-legacy snapshot handling and source authority. Task 04D is outside this change.
+See [Face inclusion and legacy reviews](qa_production_gate.md) for migration and exclusion rules.

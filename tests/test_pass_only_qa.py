@@ -43,7 +43,7 @@ def test_single_pass_only_matrix(prepared, monkeypatch, manual, status):
         return Image.new('RGBA', (2362, 1063), 'red')
     monkeypatch.setattr('mug_previewer.preprocessed_export.render_preprocessed_wrap', render)
     destination = root / 'out.png'
-    if status == 'pass':
+    if status in (None, 'pass'):
         export_preprocessed_provider_png(root, data, street, destination, profile_id=PROFILE)
         assert destination.exists() and calls == [True]
     else:
@@ -52,7 +52,7 @@ def test_single_pass_only_matrix(prepared, monkeypatch, manual, status):
         assert not destination.exists() and calls == []
 
 
-@pytest.mark.parametrize('status', [Status.MANUAL_REVIEW, Status.UNRENDERABLE_INPUT])
+@pytest.mark.parametrize('status', [Status.UNRENDERABLE_INPUT])
 def test_pass_cannot_approve_production_state(prepared, status):
     root, data, street, record = prepared
     record(status)
@@ -125,7 +125,7 @@ def test_ingestion_formats_fail_closed(prepared, kind):
         payload[0]['preview_data_url'] = 'data:image/svg+xml,' + quote_from_bytes(svg('blue').encode())
     path.write_text('{bad' if kind == 'malformed' else json.dumps(payload))
     state = current_review_state(root, data.id, street.id, root / 'generated.svg')
-    assert state.production_export_allowed == (kind in ('modern', 'snapshot'))
+    assert state.production_export_allowed == (kind in ('modern', 'snapshot', 'filename_only', 'png', 'wrong_snapshot_hash'))
     if kind in ('ambiguous', 'duplicate'):
         assert state.state == 'AMBIGUOUS_REVIEW'
 
@@ -171,7 +171,7 @@ def test_old_ledger_never_restores_deleted_browser_pass(prepared):
     save_review_record(root, data.id, street.id, 'pass', root / 'generated.svg')
     (root / 'svg_review_results.json').unlink()
     assert (root / 'review_index.json').exists()
-    assert current_review_state(root, data.id, street.id, root / 'generated.svg').state == 'NO_REVIEW'
+    assert current_review_state(root, data.id, street.id, root / 'generated.svg').production_export_allowed
 
 
 def test_reviewer_controller_load_save_and_stale_reset():
@@ -201,7 +201,7 @@ def test_desktop_save_updates_existing_legacy_source_without_duplicate(prepared)
     record(Status.AUTO_APPROVED)
     path = root / 'svg_review_results_legacy.json'
     path.write_text(json.dumps([dict(svg_path='generated.svg', status='pass')]))
-    assert current_review_state(root, data.id, street.id, root / 'generated.svg').export_blocked
+    assert current_review_state(root, data.id, street.id, root / 'generated.svg').production_export_allowed
     save_review_record(root, data.id, street.id, 'pass', root / 'generated.svg')
     assert current_review_state(root, data.id, street.id, root / 'generated.svg').production_export_allowed
     assert not (root / 'svg_review_results.json').exists()

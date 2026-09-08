@@ -37,7 +37,7 @@ class ManualSvgWorkspace:
         if approved is None and generated:
             approved = generated.with_name(generated.stem.removesuffix(".generated") + ".approved.svg")
         return cls(generated, working, corrected, approved,
-                   state in {"MANUAL_REVIEW", "MANUAL_APPROVED"},
+                   state in {"AUTO_APPROVED", "MANUAL_REVIEW", "MANUAL_APPROVED"},
                    tuple(path for item in records for path in
                          (item.generated_svg_path, item.svg_path, item.approved_svg_path) if path))
 
@@ -86,7 +86,8 @@ class ManualSvgWorkspace:
             with tempfile.NamedTemporaryFile(dir=self.working_svg.parent, prefix=".working-",
                                              suffix=".tmp", delete=False) as stream:
                 temporary = Path(stream.name)
-                stream.write(self.generated_svg.read_bytes())
+                source = self.approved_svg if self.approved_svg and self.approved_svg.is_file() else self.generated_svg
+                stream.write(source.read_bytes())
             try:
                 os.link(temporary, self.working_svg)
             except FileExistsError:
@@ -174,3 +175,55 @@ def open_local_path(path: Path) -> None:
         os.startfile(str(folder))
     else:
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(folder)], shell=False)
+
+
+class EditSaveMonitor:
+    """Debounce saved bytes; only valid repaired artwork reaches approval."""
+    def __init__(self, workspace, dataset, street, root):
+        self.workspace, self.dataset, self.street, self.root = workspace, dataset, street, root
+        self.accepted = workspace.working_svg.read_bytes()
+        self.pending = None
+
+    def poll(self):
+        payload = self.workspace.working_svg.read_bytes()
+        if payload == self.accepted:
+            self.pending = None
+            return False
+        if payload != self.pending:
+            self.pending = payload
+            return False
+        # Record failed bytes too, so invalid saves do not produce endless alerts.
+        self.accepted = payload
+        self.workspace.repair()
+        if self.workspace.working_svg.read_bytes() != payload:
+            return False
+        self.workspace.approve(self.dataset, self.street, self.root)
+        return True
+
+
+def revert_generated(dataset, street, root):
+    from .preprocess import (_load_index, _record_key, INDEX_FILENAME, _write_index,
+                             _write_preview, _atomic_asset_write)
+    root = Path(root)
+    records = _load_index(root / INDEX_FILENAME)
+    record = next(r for r in records if _record_key(r) == (dataset.id, street.id))
+    generated = root / record['generated_svg_path']
+    payload = generated.read_bytes()
+    validate_manual_svg(payload, dataset, street)
+    preview = root / record['preview_path']
+    with tempfile.TemporaryDirectory(dir=root) as staging:
+        staged = Path(staging) / 'preview.png'
+        _write_preview(payload, staged)
+        preview_bytes = staged.read_bytes()
+    previous = preview.read_bytes() if preview.exists() else None
+    record['svg_path'] = record['generated_svg_path']
+    record['production_state'] = record.get('generated_production_state', 'MANUAL_REVIEW')
+    for key in ('approved_svg_path', 'approved_svg_sha256', 'approved_at'):
+        record.pop(key, None)
+    try:
+        _atomic_asset_write(preview, preview_bytes)
+        _write_index(root / INDEX_FILENAME, records)
+    except Exception:
+        if previous is not None:
+            _atomic_asset_write(preview, previous)
+        raise

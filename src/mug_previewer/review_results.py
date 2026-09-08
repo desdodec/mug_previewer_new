@@ -101,7 +101,6 @@ def _normalize(index_bytes, source_bytes):
                     raise ValueError('Unsupported review status.')
                 if not isinstance(record.get('note', ''), str):
                     raise ValueError('Invalid review note.')
-                review_hash(record)
             except (ValueError, ET.ParseError) as error:
                 errors[key] = 'INVALID_REVIEW: ' + str(error)
     return entries, errors, tuple(fingerprints)

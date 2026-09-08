@@ -16,10 +16,10 @@ def result_summary(result):
     s = result.summary
     heading = 'Batch cancelled' if result.cancelled else 'Batch finished'
     return (f"{heading}: {s['exported']} exported, {s['failed']} failed\n"
-            f"{s['skipped_existing']} existing, {s['manual_review']} manual review, "
-            f"{s.get('not_reviewed', 0)} not reviewed, {s['qa_blocked'] - s.get('not_reviewed', 0)} QA problems\n{s['excluded']} Do Not Use, "
-            f"{s['unrenderable']} unrenderable, {s['asset_errors']} asset errors, "
-            f"{s['cancelled']} cancelled")
+            f"Included: {s['ready']} | Excluded: {s['excluded']}\n"
+            f"Unrenderable: {s['unrenderable']} | Asset errors: {s['asset_errors']}\n"
+            f"Existing outputs: {s['skipped_existing']} | Cancelled: {s['cancelled']}")
+
 
 
 class BatchExportPanel(ttk.LabelFrame):
@@ -52,7 +52,7 @@ class BatchExportPanel(ttk.LabelFrame):
         ttk.Label(self, textvariable=self.summary, wraplength=320).grid(row=4, column=0, sticky='w')
         self.refresh = ttk.Button(self, text='Refresh Batch Plan', command=self.refresh_plan, state='disabled')
         self.refresh.grid(row=5, column=0, sticky='ew')
-        self.start = ttk.Button(self, text='Export 0 Production-Ready PNGs', command=self.start_batch, state='disabled')
+        self.start = ttk.Button(self, text='Export 0 Included PNGs', command=self.start_batch, state='disabled')
         self.start.grid(row=6, column=0, sticky='ew')
         self.cancel = ttk.Button(self, text='Cancel Batch', command=self.cancel_event.set, state='disabled')
         self.cancel.grid(row=7, column=0, sticky='ew')
@@ -70,7 +70,7 @@ class BatchExportPanel(ttk.LabelFrame):
             return
         self.generation += 1
         self.plan = None
-        self.start.configure(state='disabled', text='Export 0 Production-Ready PNGs')
+        self.start.configure(state='disabled', text='Export 0 Included PNGs')
         self.summary.set('Refresh the plan for the selected dataset' if self.app.state.selected_dataset and self.destination.get() else 'Select a dataset and destination first')
         self.refresh.configure(state='normal' if self.app.state.selected_dataset and self.destination.get() else 'disabled')
         self.folder_button.configure(state='normal' if self.destination.get() or self.report_path else 'disabled')
@@ -158,10 +158,9 @@ class BatchExportPanel(ttk.LabelFrame):
             if kind == 'plan':
                 self.plan = value
                 s = value.summary
-                self.summary.set(f'{value.dataset.display_name}: {s.total} prepared\nReady: {s.ready} | Manual review: {s.manual_review}\n'
-                                 f'Not reviewed: {s.not_reviewed} | QA problems: {s.qa_blocked - s.not_reviewed} | Do Not Use: {s.excluded}\n'
-                                 f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\nExisting files: {s.existing}')
-                self.start.configure(text=f'Export {s.ready} Production-Ready PNGs',
+                self.summary.set(f'{value.dataset.display_name}: {s.total} prepared\nIncluded: {s.ready} | Excluded: {s.excluded}\n'
+                                 f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\nExisting outputs: {s.existing}')
+                self.start.configure(text=f'Export {s.ready} Included PNGs',
                                      state='normal' if s.ready else 'disabled')
             elif kind == 'result':
                 self.report_path = value.report_path

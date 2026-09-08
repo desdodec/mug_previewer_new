@@ -92,7 +92,7 @@ def _controller(catalogue, street: object) -> MugPreviewerApp:
     ("state", "title", "export_allowed"),
     [
         (ProductionTriageStatus.AUTO_APPROVED, "Ready for Production", False),
-        (ProductionTriageStatus.MANUAL_REVIEW, "Manual Review Required", False),
+        (ProductionTriageStatus.MANUAL_REVIEW, "Needs Attention (included)", False),
         (ProductionTriageStatus.MANUAL_APPROVED, "Manually Approved / Ready for Production", False),
     ],
 )

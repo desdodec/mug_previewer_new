@@ -1,4 +1,4 @@
-"""Exact-artwork QA state; browser results are authoritative, ledger is a snapshot."""
+"""Identity-based inclusion with readable legacy review metadata."""
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import base64
@@ -35,7 +35,7 @@ class ReviewState:
 
     @property
     def production_export_allowed(self) -> bool:
-        return self.record is not None and not self.error and not self.stale and self.record.status == "pass"
+        return not self.error and (self.record is None or self.record.status == "pass")
 
     @property
     def state(self) -> str:
@@ -50,11 +50,9 @@ class ReviewState:
     @property
     def label(self) -> str:
         if self.error:
-            return f"QA: {self.error} - export blocked"
-        if self.record is None:
-            return "QA: NOT REVIEWED - no human QA review; export blocked"
-        suffix = " (stale) - artwork changed; QA attention required" if self.stale else ""
-        return f"QA: {self.record.status}{suffix} - " + ("production export allowed" if self.production_export_allowed else "export blocked; requires current pass")
+            return f"Review data error: {self.error}"
+        return "Included" if self.production_export_allowed else "Excluded"
+
 
 
 def svg_sha256(path: Path) -> str:
@@ -94,16 +92,20 @@ def get_review_record(root: Path, dataset_id: str, street_id: str) -> ReviewReco
 
 
 def current_review_state(root: Path, dataset_id: str, street_id: str, svg: Path | None) -> ReviewState:
-    from .review_results import read_review_results, review_hash
+    from .review_results import read_review_results
     try:
         entries, errors, fingerprint = read_review_results(root)
         key = dataset_id, street_id
+        overrides = load_exclusions(root)
+        if key in overrides:
+            record = ReviewRecord(dataset_id, street_id, "Do Not Use" if overrides[key] else "pass", "", "")
+            return ReviewState(record)
         if key in errors:
             return ReviewState(None, error=errors[key], source_fingerprint=fingerprint)
         if key not in entries:
-            return ReviewState(None, source_fingerprint=fingerprint)
+            return ReviewState(load_review_index(root).get(key), source_fingerprint=fingerprint)
         item, _ = entries[key]
-        record = ReviewRecord(dataset_id, street_id, item['status'], review_hash(item),
+        record = ReviewRecord(dataset_id, street_id, item['status'], item.get('reviewed_svg_sha256', ''),
                               item.get('reviewed_at', ''), item.get('note', ''))
         try:
             current = svg_sha256(svg) if svg else None
@@ -169,3 +171,36 @@ def save_review_record(root: Path, dataset_id: str, street_id: str, status: str,
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return record
+
+
+def load_exclusions(root):
+    path = Path(root) / 'face_exclusions.json'
+    if not path.exists():
+        return {}
+    try:
+        records = json.loads(path.read_text(encoding='utf-8'))['records']
+        if not isinstance(records, list):
+            raise ValueError('Invalid exclusion records')
+        result = {}
+        for item in records:
+            key = item['dataset_id'], item['street_id']
+            if not all(isinstance(v, str) and v for v in key) or type(item['excluded']) is not bool:
+                raise ValueError('Invalid exclusion record')
+            if key in result:
+                raise ValueError('Duplicate exclusion identity')
+            result[key] = item['excluded']
+    except (KeyError, TypeError) as error:
+        raise ValueError('Invalid exclusion data') from error
+    return result
+
+
+def set_excluded(root, dataset_id, street_id, excluded):
+    """Persist an explicit choice by identity, independent of artwork bytes."""
+    from .preprocess import _atomic_asset_write
+    if not all(isinstance(v, str) and v for v in (dataset_id, street_id)) or type(excluded) is not bool:
+        raise ValueError('Invalid exclusion identity or value')
+    records = load_exclusions(root)
+    records[dataset_id, street_id] = bool(excluded)
+    payload = {'version': 1, 'records': [dict(dataset_id=d, street_id=s, excluded=value)
+                for (d, s), value in sorted(records.items())]}
+    _atomic_asset_write(Path(root) / 'face_exclusions.json', json.dumps(payload, indent=2).encode())

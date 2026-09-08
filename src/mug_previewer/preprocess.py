@@ -156,8 +156,8 @@ def approve_manual_svg(
     if record is None:
         raise SvgApprovalError(f"No preprocessing index record exists for {dataset.display_name} / {street.id}.")
     state = _record_state(record)
-    if state not in (ProductionTriageStatus.MANUAL_REVIEW, ProductionTriageStatus.MANUAL_APPROVED):
-        raise SvgApprovalError("Only MANUAL_REVIEW or MANUAL_APPROVED records may receive an approved SVG.")
+    if state not in (ProductionTriageStatus.AUTO_APPROVED, ProductionTriageStatus.MANUAL_REVIEW, ProductionTriageStatus.MANUAL_APPROVED):
+        raise SvgApprovalError("Only prepared renderable records may receive an approved SVG.")
 
     source_path = Path(supplied_svg)
     try:
@@ -180,6 +180,8 @@ def approve_manual_svg(
         preview_payload = staged_preview.read_bytes()
 
     timestamp = approved_at or datetime.now(timezone.utc)
+    record.setdefault("generated_production_state",
+                      ProductionTriageStatus.MANUAL_REVIEW.value if state is ProductionTriageStatus.MANUAL_APPROVED else state.value)
     record.update({
         "production_state": ProductionTriageStatus.MANUAL_APPROVED.value,
         "reason_detail": "Human-edited SVG accepted.",
@@ -240,7 +242,7 @@ def resolve_authoritative_face_svg(
     path = root / relative if isinstance(relative, str) else None
     if path is not None and not path.is_file():
         path = None
-    return FaceSvgResolution(state, path, state in (ProductionTriageStatus.AUTO_APPROVED, ProductionTriageStatus.MANUAL_APPROVED))
+    return FaceSvgResolution(state, path, state in (ProductionTriageStatus.AUTO_APPROVED, ProductionTriageStatus.MANUAL_REVIEW, ProductionTriageStatus.MANUAL_APPROVED))
 
 
 def _preprocess_one(

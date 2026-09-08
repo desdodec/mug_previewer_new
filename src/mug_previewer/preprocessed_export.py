@@ -87,6 +87,7 @@ def export_preprocessed_provider_png(
         if resolution.path is None:
             raise AuthoritativeArtworkError('Authoritative SVG missing; asset integrity problem.')
         try:
+            resolution.path.resolve().relative_to(Path(preprocessed).resolve())
             validate_manual_svg(resolution.path.read_bytes())
             digest = svg_sha256(resolution.path)
         except Exception as error:

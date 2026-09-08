@@ -195,10 +195,9 @@ def test_approved_review_becomes_stale_after_new_approval(manual):
     workspace.repair()
     workspace.approve(data, street, root)
     review = current_review_state(root, data.id, street.id, approved.path)
-    assert review.stale and review.export_blocked
-    with pytest.raises(ValueError, match='stale'):
-        export_preprocessed_provider_png(root, data, street, root / 'blocked.png', profile_id='inkthreadable_11oz_white')
-    assert not (root / 'blocked.png').exists()
+    assert review.stale and not review.export_blocked
+    export_preprocessed_provider_png(root, data, street, root / 'blocked.png', profile_id='inkthreadable_11oz_white')
+    assert (root / 'blocked.png').exists()
 
 
 def test_edit_again_pass_lifecycle_single_and_batch(manual):
@@ -217,9 +216,8 @@ def test_edit_again_pass_lifecycle_single_and_batch(manual):
     workspace.repair()
     workspace.approve(data, street, root)
     assert current_review_state(root, data.id, street.id, approved.path).stale
-    assert build_batch_plan(root, data, profile, root / 'blocked').summary.ready == 0
-    with pytest.raises(ValueError, match='stale'):
-        export_preprocessed_provider_png(root, data, street, root / 'single-B.png', profile_id=profile)
+    assert build_batch_plan(root, data, profile, root / 'included').summary.ready == 1
+    export_preprocessed_provider_png(root, data, street, root / 'single-B.png', profile_id=profile)
     save_review_record(root, data.id, street.id, 'pass', approved.path)
     second = build_batch_plan(root, data, profile, root / 'batch-B')
     assert second.summary.ready == 1

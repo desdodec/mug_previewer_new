@@ -39,7 +39,7 @@ def main():
             app.workflow_var.set(selected)
             app._apply_filter()
             assert len(app.state.filtered_streets) == counts[selected]
-        app.workflow_var.set('Production Ready')
+        app.workflow_var.set('Included')
         app._apply_filter()
         app.street_list.selection_set(0)
         started = time.perf_counter()
@@ -48,8 +48,8 @@ def main():
         assert app.state.current_front_preview is not None
         assert app.state.current_wrap is None
         assert str(app.export_button['state']) == 'normal'
-        app._preview_artwork('authoritative')
-        assert app._review_target is not None
+        assert app.face_grid.columns.get() == 2
+        assert app.face_grid.cards
         app._start_render()
         deadline = time.monotonic() + 60
         ticks = 0

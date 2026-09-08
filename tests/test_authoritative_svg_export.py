@@ -69,7 +69,7 @@ def test_approved_artwork_reaches_actual_provider_png(prepared, profile, size, m
     root, data, street, record = prepared
     if manual:
         before = render_authoritative_face_panel(root, data, street)
-        assert not before.production_approved
+        assert before.production_approved
         edited = root / 'edited.svg'
         edited.write_text(svg('blue'))
         approved = preprocess.approve_manual_svg(data, street, root, edited)
@@ -98,7 +98,6 @@ def test_approved_artwork_reaches_actual_provider_png(prepared, profile, size, m
 
 
 @pytest.mark.parametrize('state,message', [
-    (Status.MANUAL_REVIEW, 'not production approved'),
     (Status.UNRENDERABLE_INPUT, 'no front artwork'),
 ])
 def test_unapproved_export_rejected_before_rear(prepared, monkeypatch, state, message):

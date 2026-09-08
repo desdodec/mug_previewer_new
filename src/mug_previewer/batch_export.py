@@ -154,6 +154,8 @@ def _inspect(root, dataset, street_id, record, directory):
     try:
         if street is None:
             raise ValueError('Prepared street is missing from the selected source dataset')
+        if record.get('production_state') == 'UNRENDERABLE_INPUT':
+            return replace(item, eligibility=Eligibility.UNRENDERABLE, reason='Source/input unusable')
         if not record.get('success'):
             raise ValueError('Preprocessing record reports an asset error')
         resolution = resolve_authoritative_face_svg(root, dataset, street)
@@ -164,19 +166,15 @@ def _inspect(root, dataset, street_id, record, directory):
                        reviewed_svg_sha256=review.record.reviewed_svg_sha256 if review.record else None,
                        review_stale=review.stale,
                        review_fingerprint=json.dumps(asdict(review), sort_keys=True))
-        if item.review_status == 'Do Not Use' and not review.stale and not review.error:
-            return replace(item, eligibility=Eligibility.EXCLUDED, reason='Do Not Use: intentionally excluded')
-        if resolution.state.value == 'MANUAL_REVIEW':
-            return replace(item, eligibility=Eligibility.MANUAL_REVIEW, reason='Artwork requires manual approval')
         if resolution.state.value == 'UNRENDERABLE_INPUT':
             return replace(item, eligibility=Eligibility.UNRENDERABLE, reason='Source/input unusable')
-        if not resolution.production_approved or resolution.path is None:
+        if resolution.path is None:
             raise ValueError('Authoritative SVG missing or approval unavailable')
         resolution.path.resolve().relative_to(root.resolve())
         validate_manual_svg(resolution.path.read_bytes())
         item = replace(item, authoritative_svg_sha256=svg_sha256(resolution.path))
         if review.export_blocked:
-            return replace(item, eligibility=Eligibility.QA_BLOCKED,
+            return replace(item, eligibility=Eligibility.ASSET_ERROR if review.error else Eligibility.EXCLUDED,
                            reason=review.label)
         destination = directory / production_filename(dataset.id, street_id, name)
         if len(destination.name.encode('utf-16-le')) // 2 > 255:

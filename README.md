@@ -14,7 +14,7 @@ Python 3.11 or later is required. Workflow-v6 datasets are external input and ar
 
 The dataset root can also be supplied with the --dataset-root option, in local_config.toml (or the file named by MUG_PREVIEWER_LOCAL_CONFIG), or in .env. Precedence is explicit CLI option, environment variable, local config, .env, then config/default.toml.
 
-In the desktop application, select a dataset and street, read its production status, preview a ready record, and choose the appropriate provider export. For Manual Review Required, use Review Selected Street, compare the standard and current edit, then approve a standard placement or the constrained edit. Preview changes are not saved until approval. Saved choices live in data/manual_overrides.json; clearing a decision returns that record to the pending queue.
+In the desktop application, create prepared faces, review the cached face grid, edit in Inkscape when needed, and export every valid included SVG. Use Exclude to opt streets out. See the Desktop production workflow below for details.
 
 Inkthreadable exports are 2362 x 1063 RGBA PNGs at 300 DPI. The bundled generic Printify 11oz profile exports 2475 x 1155 RGBA PNGs at 300 DPI.
 
@@ -70,7 +70,7 @@ python -m mug_previewer dataset streets "E:\...\dataset" --search "Church" --lim
 
 ## Front-face rendering
 
-`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 × 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
+`mug_previewer.rendering.face.render_face(street, options=None)` accepts a typed `StreetRecord` and returns an RGBA **495 Ã— 462 px** front panel. It is a direct crop from V28's fast-preview canvas, retaining its glyph placement, face geometry, colour, line weights, typography, and spacing.
 
 ```powershell
 python -m mug_previewer render face `
@@ -79,7 +79,7 @@ python -m mug_previewer render face `
   --output output\0246_face.png
 ```
 
-Use `--area "…"` to override display-area text; otherwise the dataset display name is used.
+Use `--area "â€¦"` to override display-area text; otherwise the dataset display name is used.
 
 The complete front composition (street name, locality, and face) is physically scaled to `1.18` and shifted down by `60 px`. Task 02N adds a shared `+4 px` locality-baseline adjustment to give the title/locality stack more breathing room; title styling, face placement, and all other internal relationships remain unchanged.
 
@@ -177,7 +177,7 @@ The automatic production path contains only `AUTO_APPROVED` STANDARD or
 ADAPTED decisions. Review records do not enter automatic final export; malformed
 or unsupported input remains separate in `UNRENDERABLE_INPUT`.
 
-`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 × 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 × 1.75, clamped to 1400–2400 m, with 1.25× street padding and up to 1.35× expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
+`mug_previewer.rendering.context_map.render_context_map(dataset, street, options=None)` returns an RGBA **495 Ã— 462 px** rear panel. It contains the fixed 2:3 physical map artwork box and its OpenStreetMap attribution. Metric framing is applied inside this renderer before any wrap composition: P90 Ã— 1.75, clamped to 1400â€“2400 m, with 1.25Ã— street padding and up to 1.35Ã— expansion. SVGs without usable metric metadata use the supported legacy SVG-space crop.
 
 The final rear physical presentation scale is `1.20`, applied uniformly to the map-and-attribution group within the existing rear zone. This is separate from, and does not change, geographic framing.
 
@@ -192,7 +192,7 @@ python -m mug_previewer render context `
 
 ## Full-wrap production rendering
 
-`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 × 1063 px** PNG for the 20 × 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
+`mug_previewer.rendering.artwork.render_wrap(dataset, street, options=None)` composes the completed front and rear panels into the template-v2 production master. It produces a transparent RGBA **2362 Ã— 1063 px** PNG for the 20 Ã— 9 cm, 300 ppi template. The two 945 px-wide handle-side print zones use uniform `contain` scaling; metric rear framing has already happened before composition.
 
 The rear placement remains centred inside the fixed `(1417, 0, 945, 1063)` rear zone; the canonical canvas and seam exclusion remain unchanged.
 
@@ -223,11 +223,11 @@ profiles = list_provider_profiles()
 
 ```text
 DesignOptions
-      ↓
-canonical 2362×1063 artwork
-      ↓
+      â†“
+canonical 2362Ã—1063 artwork
+      â†“
 ProviderProfile
-      ↓
+      â†“
 future production exporter
 ```
 
@@ -298,127 +298,35 @@ The dataset root follows the existing precedence: the explicit `--dataset-root` 
 
 ## Desktop production workflow
 
-Prepared artwork opens in the Mug Workspace. Choose a dataset, search, and use
-All, Production Ready, Manual Review, QA Attention, Do Not Use, or Unrenderable
-to navigate. Counts use the existing batch classification and load in the
-background. Filters never change batch scope: batch exports include the whole
-selected prepared dataset.
+Create Faces ? Review / Edit Faces ? Export PNG.
 
-The center tabs show Face, Mug Front, Mug Rear, and Full Wrap. Selecting a street
-loads only its cached face image. **Preview Current SVG for QA** displays the exact
-SVG for human review; **Preview Mug** explicitly composes the authoritative
-prepared artwork without regenerating the face.
+Generate prepared faces for the selected dataset, then use the scrollable face
+grid. It defaults to two columns, with column and card-size controls. Cards load
+cached PNGs only; scrolling never generates or renders SVG artwork. Search and
+All / Included / Excluded / Edited / Needs Attention filters affect browsing only.
 
-The right panel separates production state, QA state, and export eligibility.
-Use the existing Inkscape edit, repair, and approval actions for manual artwork.
-Approving changed artwork makes an old QA pass stale. **Refresh Artwork** reloads
-external QA changes and workflow counts. Inkthreadable and Printify exports
-require production approval, a valid authoritative SVG, and a current exact-SVG
-QA pass. The Batch export tab retains background planning, progress, and cancellation.
+Every valid prepared SVG is included by default, including MANUAL_REVIEW records.
+Use **Exclude** to opt a street out. Choices persist in `face_exclusions.json` by
+dataset/street identity, independently of SVG hashes. Legacy browser reviews and
+`review_index.json` remain readable: pass means included; Do Not Use, overlap,
+duplicates, missing and other mean excluded. An explicit checkbox choice overrides
+legacy status. Invalid or ambiguous review identities remain errors.
 
-`svg_review_results*.json` is authoritative production QA. `review_index.json`
-is a compatibility snapshot; corruption in it alone does not block a valid batch.
-Malformed or ambiguous authoritative review results still block production.
+Click **Edit in Inkscape** and save there. The app retains the generated original,
+reuses a working SVG, detects saved changes, and runs the existing repair and
+validation backend in the background. Valid corrected artwork automatically
+becomes authoritative and receives an updated cached preview. Invalid edits
+leave current artwork and its preview intact. Right-click an edited card to
+**Revert to generated original**. Inkscape is discovered automatically; if absent,
+the app asks for its executable. Keep the app open while editing for save detection.
 
-The reusable single-item APIs in `mug_previewer.preprocessed_export` are
-`render_authoritative_face_panel`, `render_preprocessed_wrap`, and
-`export_preprocessed_provider_png`. Preprocessing and export share
-`rendering.svg_raster.rasterize_face_svg`. Catalogue UI metadata stays in its
-existing location and the Workspace reuses these APIs.
+The **Export PNG** tab plans every prepared record in the selected dataset,
+regardless of search/grid filters. Counts show Included, Excluded, Unrenderable,
+Asset errors and Existing outputs. Choose Inkthreadable or Printify and a destination,
+then export the included PNGs. Existing outputs are skipped by default. The report
+names every item and its export/skip/failure reason. Export rechecks artwork and
+exclusions before publishing through the existing provider pipeline.
 
-
-## Manual SVG workspace (Task 04B)
-
-In preprocessed mode, the Artwork and Review panel supports this workflow:
-
-1. Select a `MANUAL_REVIEW` street; use **Manual Review only** to narrow the list.
-2. Click **Edit in Inkscape**. The first click copies the generated SVG to a
-   deterministic `*_edit.svg`; later clicks reopen the same working file.
-3. Make changes and save the working file in Inkscape.
-4. Return to Mug Previewer and click **Preview Edit**.
-5. Click **Repair Edit** to restore the canonical page dimensions, viewBox and
-   outer composition transform while preserving supported internal edits.
-6. Inspect **Corrected SVG Preview** (also available through **Preview Corrected**).
-7. Click **Approve Corrected**. Production changes to `MANUAL_APPROVED`, the cached
-   preview refreshes immediately, and provider exports use the exact approved SVG.
-8. Use **Next Manual Review** to advance in the current filtered order. It stops
-   after the last later review item and reports that none remain; it does not wrap.
-
-**The generated original SVG is never edited by the Workspace.** Working copies
-are derived from the indexed generated filename, corrections live in its
-`corrected/` subfolder, and approval uses the existing approval API. Repeated
-repairs replace only the corrected derivative, atomically. Invalid or outdated
-corrections cannot be approved. The command-line repair helper still refuses to
-replace existing output unless its Python API is explicitly given `replace=True`.
-
-For `MANUAL_APPROVED` artwork, **Edit Again in Inkscape** reopens the retained
-working edit (or creates one from the generated original if it is missing).
-Existing approved artwork stays authoritative until **Approve Corrected** succeeds
-again. Failed approval preserves the previous production artwork and preview.
-**Preview Current SVG for QA**, **Open Artwork Folder**, and **Refresh Artwork** are available
-in the panel. Refresh or another street selection restores the normal generated
-or approved cached preview. Street selection does not generate faces, score
-candidates, or render rear artwork, wraps or mugs.
-
-Inkscape is discovered using PATH, Windows App Paths registration (including
-installations on other drives), then normal Windows install locations under
-Program Files, Program Files (x86), and Local AppData. If it cannot be found, the
-app opens a file picker. **Choose Inkscape executable** also allows an explicit
-override, which is reused for this application session. The editor opens without
-blocking the app. No machine-specific executable path is committed or persisted.
-
-### Production and human QA are separate
-
-**Production export requires an explicit current `pass` review for the exact authoritative SVG.**
-Production approval and human QA are separate decisions. `preprocess_index.json`
-holds production classification. Save browser review results alongside it as
-`svg_review_results.json` or `svg_review_results_<label>.json`. The label is only
-for organising files: identity comes from dataset/street IDs or unambiguous
-indexed SVG paths, never from display-name spelling.
-
-The backend normalizes those human sources on read and compares the reviewed
-SVG SHA-256 with the authoritative SVG bytes. `review_index.json` is retained as
-a compatibility snapshot for desktop review saves; it cannot grant production
-permission without the human source. No separate import or ledger maintenance
-is needed. See [Exact-artwork QA workflow](docs/qa_production_gate.md).
-
-**Save Review** applies to the labelled artwork currently shown. Normal review
-uses the approved SVG for `MANUAL_APPROVED`, or the indexed/generated SVG
-otherwise. Explicit working/corrected previews change the review target only;
-they do not save QA automatically or alter production authority. If an explicitly
-reviewed working file differs from production artwork, its formal QA is stale.
-If the file changes after preview, preview it again before saving a review.
-
-Export rules for individual providers:
-
-- No review blocks export, even for AUTO_APPROVED or MANUAL_APPROVED artwork.
-- A current `pass` allows export when production is approved.
-- Current problem flags (`overlap`, `duplicates`, `missing`, `other`, `Do Not Use`)
-  block export. They do not delete artwork or change production classification.
-- Any stale review, including an old pass, blocks export pending another review.
-  The panel shows **(stale) - artwork changed; QA attention required**. An obsolete
-  problem flag is therefore a request to review again, not a judgement of new art.
-- `MANUAL_REVIEW` and `UNRENDERABLE_INPUT` remain unavailable for production export.
-
-The exporter rechecks QA before using the existing Task 04A production path:
-`resolve_authoritative_face_svg` -> approved SVG -> `render_authoritative_face_panel`
--> `render_preprocessed_wrap` -> provider export. No alternate renderer is used.
-
-The standalone reviewer hashes the actual loaded SVG bytes. Embedded legacy SVG
-snapshots can establish the same hash; filename-only reviews must be refreshed.
-New files and changed artwork start unreviewed. Legacy live-render production
-exports are blocked because they have no reviewed authoritative SVG. Use
-preprocessed mode for production. Task 04D remains outside this change.
-
-## Production-ready batch export
-
-In preprocessed mode, select a dataset and open **Production batch...** to plan
-and export its ready artwork through Inkthreadable or Printify. Existing files
-are skipped by default. The batch window shows eligibility totals, progress,
-cancellation, and an auditable report. Search and Manual Review-only filters do
-not restrict batch scope. See [Batch export workflow](docs/batch_exports.md).
-
-Desktop **Save Review** requires **Preview Current SVG for QA** (or an explicit
-working/corrected preview) first. A cached PNG alone cannot establish which SVG
-bytes were seen. Saving checks the hash of the bytes actually loaded for review;
-if they changed, preview again. This adds no rendering to ordinary street browsing.
+UNRENDERABLE_INPUT and invalid/missing SVGs remain blocked. Production states are
+advisory; an exact-SVG PASS is no longer required. Face geometry, 8 px clearance,
+20 px maximum automatic shift, rear map, mug composition and provider sizes are unchanged.
