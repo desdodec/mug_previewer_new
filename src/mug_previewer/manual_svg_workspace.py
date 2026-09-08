@@ -179,9 +179,24 @@ def open_local_path(path: Path) -> None:
 
 class EditSaveMonitor:
     """Debounce saved bytes; only valid repaired artwork reaches approval."""
-    def __init__(self, workspace, dataset, street, root):
+    def __init__(self, workspace, dataset, street, root, on_detected=None):
         self.workspace, self.dataset, self.street, self.root = workspace, dataset, street, root
-        self.accepted = workspace.working_svg.read_bytes()
+        from .preprocess import resolve_authoritative_face_svg
+        authority = resolve_authoritative_face_svg(root, dataset, street).path
+        payload = workspace.working_svg.read_bytes()
+        authoritative = authority.read_bytes() if authority else None
+        self.accepted = authoritative
+        # Repair can normalize saved bytes; compare that result to avoid repeatedly
+        # promoting an already accepted edit when the editor is reopened.
+        if payload != authoritative:
+            try:
+                repaired = corrected_svg(workspace.generated_svg.read_text(encoding='utf-8-sig'),
+                                         payload.decode('utf-8-sig'))
+                if authoritative and repaired == authoritative.decode('utf-8-sig').replace('\r\n', '\n'):
+                    self.accepted = payload
+            except (ValueError, UnicodeError, ET.ParseError):
+                pass
+        self.on_detected = on_detected
         self.pending = None
 
     def poll(self):
@@ -191,6 +206,8 @@ class EditSaveMonitor:
             return False
         if payload != self.pending:
             self.pending = payload
+            if self.on_detected:
+                self.on_detected()
             return False
         # Record failed bytes too, so invalid saves do not produce endless alerts.
         self.accepted = payload

@@ -168,6 +168,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.printify_export_button.grid_remove()
             self.render_button.configure(text='Preview Mug')
             self.render_button.grid()
+            self.current_face_var = tk.StringVar(value='Select a face')
+            ttk.Label(controls, textvariable=self.current_face_var, wraplength=270,
+                      justify='left').grid(row=9, column=0, sticky='ew', pady=8)
             self._build_unified_workspace()
         self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -241,10 +244,15 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.workflow_counts_var.set(f'Workflow unavailable: {error}' if error else
                                          '\n'.join(f'{key}: {value}' for key, value in counts.items()))
             selected = self.state.selected_street
+            feedback = self.status_var.get()
             self._apply_filter()
             if selected in self.state.filtered_streets:
                 self.street_list.selection_set(self.state.filtered_streets.index(selected))
                 self._select_street()
+            if feedback in ('Face updated from Inkscape.',
+                            'Edit detected \u2014 updating face...',
+                            'Edit not applied \u2014 previous valid face preserved.'):
+                self.status_var.set(feedback)
         self._schedule_main_thread_poll(self._drain_workflow_results)
 
     def _open_batch_window(self):
@@ -349,6 +357,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         if 'workflow_var' in self.__dict__:
             self.state.filtered_streets = filter_workflow(self.state.filtered_streets, self.workflow_items, self.workflow_var.get())
+        self.state.selected_street = None
         if 'face_grid' in self.__dict__:
             self.face_grid.set_streets(self.state.filtered_streets)
         self.street_list.delete(0, tk.END)
@@ -371,6 +380,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             return
         self._invalidate_active_render_request()
         self.state.selected_street = self.state.filtered_streets[selection[0]]
+        if "face_grid" in self.__dict__:
+            self.face_grid.sync_selection()
         if self._is_preprocessed_mode():
             self._show_preprocessed_selection(self.state.selected_dataset, self.state.selected_street)
             return

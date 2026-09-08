@@ -64,6 +64,7 @@ class ArtworkPanelMixin:
             return f"QA ledger unavailable: {error}"
 
     def _refresh_artwork(self, *, reset_review=False):
+        self._refresh_current_face_label()
         if "artwork_var" not in self.__dict__:
             return
         record = self._selected_artwork_record()
@@ -73,6 +74,23 @@ class ArtworkPanelMixin:
         review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id, record.street_id,
                                       self._formal_review_svg()) if record else None
         self.exclude_var.set(bool(review and review.export_blocked))
+
+    def _refresh_current_face_label(self):
+        if 'current_face_var' not in self.__dict__:
+            return
+        data, street = self.state.selected_dataset, self.state.selected_street
+        if data is None or street is None:
+            self.current_face_var.set('Select a face')
+            return
+        using = 'Face unavailable'
+        try:
+            resolution = resolve_authoritative_face_svg(self.preprocessed_catalogue.root, data, street)
+            record = self._selected_artwork_record()
+            if resolution.path is not None and resolution.path.is_file():
+                using = 'Edited face' if record and resolution.path == record.approved_svg_path else 'Generated face'
+        except (OSError, ValueError):
+            pass
+        self.current_face_var.set(f'{street.id} \u2014 {street.display_name}\nUsing: {using}')
 
     def _reset_artwork_preview(self, record=None):
         self._review_target = None

@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import math
+import queue
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
@@ -29,6 +30,7 @@ class FaceGrid(ttk.Frame):
         self.monitors = {}
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='face-edit')
         self.pending = None
+        self.edit_events = queue.SimpleQueue()
         self.columns = tk.IntVar(value=2)
         self.size = tk.IntVar(value=320)
         bar = ttk.Frame(self)
@@ -95,7 +97,7 @@ class FaceGrid(ttk.Frame):
         for index in sorted(visible - self.cards.keys()):
             street = self.streets[index]
             record = catalogue.find(data, street)
-            card = ttk.Frame(self.canvas, padding=6, relief='groove')
+            card = ttk.LabelFrame(self.canvas, padding=6, relief='groove')
             window = self.canvas.create_window((index % columns) * width, (index // columns) * height,
                                                window=card, anchor='nw', width=width, height=height)
             self.cards[index] = card, window
@@ -108,7 +110,7 @@ class FaceGrid(ttk.Frame):
                 label.image = photo
             except (AttributeError, OSError, ValueError):
                 label.configure(text='Preview unavailable')
-            ttk.Label(card, text=f'{street.id} — {street.display_name}', wraplength=width-16).pack()
+            ttk.Label(card, text=f'{street.id} \u2014 {street.display_name}', wraplength=width-16).pack()
             if record and record.state and record.state.value == 'MANUAL_REVIEW':
                 ttk.Label(card, text='Needs Attention').pack()
             actions = ttk.Frame(card)
@@ -125,11 +127,42 @@ class FaceGrid(ttk.Frame):
             menu.add_command(label='Revert to generated original', command=lambda s=street: self.revert(s),
                              state='normal' if record and record.state and record.state.value == 'MANUAL_APPROVED' else 'disabled')
             def bind(widget, popup=menu):
+                widget.bind('<Button-1>', lambda e, s=street: self.select(s))
                 widget.bind('<MouseWheel>', self.wheel)
                 widget.bind('<Button-3>', lambda e: popup.tk_popup(e.x_root, e.y_root))
                 for child in widget.winfo_children():
                     bind(child, popup)
             bind(card)
+        self.highlight_selection()
+
+    def select(self, street):
+        index = self.app.state.filtered_streets.index(street)
+        self.app.street_list.selection_clear(0, tk.END)
+        self.app.street_list.selection_set(index)
+        self.app.street_list.activate(index)
+        self.app.street_list.see(index)
+        self.app._select_street()
+
+    def highlight_selection(self):
+        selected = getattr(self.app.state, 'selected_street', None)
+        for index, (card, _) in self.cards.items():
+            active = self.streets[index] == selected
+            card.configure(text='Current face' if active else '',
+                           relief='solid' if active else 'groove', borderwidth=3 if active else 1)
+
+    def sync_selection(self):
+        selected = self.app.state.selected_street
+        if selected in self.streets:
+            columns = self.columns.get()
+            width = max(120, self.canvas.winfo_width() // columns)
+            height = min(self.size.get(), width - 20) // 2 + 110
+            top = (self.streets.index(selected) // columns) * height
+            view_top = self.canvas.canvasy(0)
+            if top < view_top or top + height > view_top + self.canvas.winfo_height():
+                total = max(1, math.ceil(len(self.streets) / columns) * height)
+                self.canvas.yview_moveto(top / total)
+            self.draw_visible()
+        self.highlight_selection()
 
     def exclude(self, street, value):
         try:
@@ -140,6 +173,7 @@ class FaceGrid(ttk.Frame):
             self.app._show_error(str(error))
 
     def edit(self, street):
+        self.select(street)
         try:
             data = self.app.state.selected_dataset
             catalogue = self.app.preprocessed_catalogue
@@ -156,7 +190,8 @@ class FaceGrid(ttk.Frame):
     def watch_edit(self, workspace, data, street):
         key = data.id, street.id
         if key not in self.monitors:
-            self.monitors[key] = EditSaveMonitor(workspace, data, street, self.app.preprocessed_catalogue.root)
+            self.monitors[key] = EditSaveMonitor(workspace, data, street, self.app.preprocessed_catalogue.root,
+                                                  on_detected=lambda: self.edit_events.put(key))
 
     @staticmethod
     def check_saves(monitors):
@@ -173,17 +208,18 @@ class FaceGrid(ttk.Frame):
         if self.app._shutting_down:
             self.executor.shutdown(wait=False)
             return
+        while not self.edit_events.empty():
+            self.edit_events.get_nowait()
+            self.app.status_var.set('Edit detected \u2014 updating face...')
         if self.pending is not None and self.pending.done():
             changes, errors = self.pending.result()
             self.pending = None
             if changes:
-                self.app.preprocessed_catalogue = load_preprocessed_catalogue(self.app.preprocessed_catalogue.root)
-                self.app._reload_workflow()
-                self.app.batch_panel.invalidate()
+                self.app._refresh_selected_artwork()
                 self.redraw()
-                self.app.status_var.set(f'Updated {len(changes)} saved face(s).')
+                self.app.status_var.set('Face updated from Inkscape.')
             if errors:
-                self.app.status_var.set('Edit not applied; current artwork preserved. ' + '; '.join(errors))
+                self.app.status_var.set('Edit not applied \u2014 previous valid face preserved.')
         if self.pending is None and self.monitors:
             self.pending = self.executor.submit(self.check_saves, tuple(self.monitors.items()))
         self.after(600, self.poll)
@@ -196,9 +232,7 @@ class FaceGrid(ttk.Frame):
             data = self.app.state.selected_dataset
             revert_generated(data, street, self.app.preprocessed_catalogue.root)
             self.monitors.pop((data.id, street.id), None)
-            self.app.preprocessed_catalogue = load_preprocessed_catalogue(self.app.preprocessed_catalogue.root)
-            self.app._reload_workflow()
-            self.app.batch_panel.invalidate()
+            self.app._refresh_selected_artwork()
             self.redraw()
         except Exception as error:
             self.app._show_error(str(error))
