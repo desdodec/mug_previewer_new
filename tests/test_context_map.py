@@ -25,6 +25,7 @@ from mug_previewer.rendering.context_map import (
     REAR_MAP_HEIGHT_RATIO,
     REAR_PANEL_SCALE,
     REAR_PANEL_PX,
+    REAR_COMPOSITION_OFFSET_Y_PX,
     REAR_STREET_HIGHLIGHT_SCALE,
     LEGACY_MAX_RASTER_MAGNIFICATION,
     _legacy_crop_markup,
@@ -103,7 +104,7 @@ def test_rear_stroke_option_preserves_metric_framing_and_panel_dimensions(tmp_pa
     assert (baseline.centre_x_m, baseline.centre_y_m) == (refined.centre_x_m, refined.centre_y_m)
 
 
-def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None:
+def test_enlarged_rear_map_and_attribution_remain_inside_panel() -> None:
     panel_width, panel_height = REAR_PANEL_PX
     map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
 
@@ -113,7 +114,8 @@ def test_enlarged_rear_map_and_attribution_remain_centred_inside_panel() -> None
     assert map_x >= 0 and map_y >= 0
     assert map_x + map_width <= panel_width
     assert attribution_y - (map_y + map_height) == pytest.approx(17.0)
-    assert attribution_y + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES) <= panel_height
+    # attribution_y is the first baseline, not the top of the text block.
+    assert attribution_y + ATTRIBUTION_LINE_HEIGHT * (len(ATTRIBUTION_LINES) - 1) + ATTRIBUTION_FONT_SIZE <= panel_height
     assert ATTRIBUTION_FONT_SIZE == pytest.approx(9.6)
     assert ATTRIBUTION_FONT_SIZE == pytest.approx(12.0 * 0.80)
     assert ATTRIBUTION_MAP_GAP > 11.0
@@ -322,3 +324,26 @@ def test_rear_highlight_and_supplied_halo_scale_together() -> None:
 
     assert 'stroke="#ffffff" stroke-width="25.00"' in adjusted
     assert 'stroke="#e83e8c" stroke-width="12.50"' in adjusted
+
+def test_rear_composition_moves_down_fifteen_pixels_as_one_group(tmp_path: Path, monkeypatch) -> None:
+    from mug_previewer.rendering import context_map
+
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    shifted_layout = _rear_panel_layout(*REAR_PANEL_PX)
+    shifted = render_context_map_result(data, street).image
+    assert REAR_COMPOSITION_OFFSET_Y_PX == 15
+    monkeypatch.setattr(context_map, "REAR_COMPOSITION_OFFSET_Y_PX", 0)
+    baseline_layout = _rear_panel_layout(*REAR_PANEL_PX)
+    baseline = render_context_map_result(data, street).image
+
+    assert shifted_layout[1] - baseline_layout[1] == pytest.approx(15)
+    assert shifted_layout[4] - baseline_layout[4] == pytest.approx(15)
+    for index in (0, 2, 3):
+        assert shifted_layout[index] == baseline_layout[index]
+    assert shifted.size == baseline.size == REAR_PANEL_PX
+    bounds = baseline.getbbox()
+    assert bounds is not None and bounds[3] + 15 < shifted.height
+    expected = Image.new("RGBA", REAR_PANEL_PX)
+    expected.alpha_composite(baseline, (0, 15))
+    assert shifted.tobytes() == expected.tobytes()

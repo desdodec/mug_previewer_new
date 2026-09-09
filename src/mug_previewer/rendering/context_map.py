@@ -29,6 +29,8 @@ REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
 # it enlarges the map-and-attribution group without changing map geography.
 REAR_PANEL_BASE_SCALE = 1.00
 REAR_PANEL_SCALE = 1.20
+# Downward optical correction in rear-panel pixels, after geographic framing.
+REAR_COMPOSITION_OFFSET_Y_PX = 15
 REAR_MAP_BASE_HEIGHT_RATIO = 0.70
 REAR_MAP_HEIGHT_RATIO = REAR_MAP_BASE_HEIGHT_RATIO * (REAR_PANEL_SCALE / REAR_PANEL_BASE_SCALE)
 # Keep the required credit plainly legible while making it visually secondary
@@ -505,13 +507,13 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
 
 
 def _rear_panel_layout(panel_width: int, panel_height: int) -> tuple[float, float, float, float, float]:
-    """Return centred map bounds and first attribution baseline in panel pixels."""
+    """Return optically aligned map bounds and first attribution baseline."""
     map_height = panel_height * REAR_MAP_HEIGHT_RATIO
     map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
     content_height = map_height + ATTRIBUTION_MAP_GAP + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES)
     if content_height > panel_height:
         raise ContextRenderError("Rear map and attribution do not fit inside the context panel.")
-    map_y = (panel_height - content_height) / 2
+    map_y = (panel_height - content_height) / 2 + REAR_COMPOSITION_OFFSET_Y_PX
     map_x = (panel_width - map_width) / 2
     return map_x, map_y, map_width, map_height, map_y + map_height + ATTRIBUTION_MAP_GAP
 
