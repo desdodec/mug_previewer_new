@@ -27,6 +27,64 @@ def history_paths(canonical):
     return folder / 'generated.svg', folder / 'last-good.svg'
 
 
+def _layout_reference_candidates(record, root, canonical):
+    """Return same-street legacy files that may carry canonical page placement."""
+    root, canonical = Path(root), Path(canonical)
+    original, good = history_paths(canonical)
+    generated = record.get('generated_svg_path')
+    candidates = [canonical]
+    if isinstance(generated, str) and generated:
+        candidates.append(root / generated)
+    candidates.extend((
+        good,
+        original,
+        canonical.with_name(canonical.stem + '.generated.svg'),
+        canonical.with_name(canonical.stem + '_edit.svg'),
+        canonical.parent / 'corrected' / (canonical.stem + '_edit.svg'),
+        canonical.parent / 'corrected' / canonical.name,
+    ))
+    seen = set()
+    for candidate in candidates:
+        candidate = Path(candidate)
+        marker = candidate.resolve()
+        if marker in seen:
+            continue
+        seen.add(marker)
+        yield candidate
+
+
+def _canonicalized_payload(record, root, canonical, source_path, payload):
+    """Return valid canonical bytes, repairing page drift from a safe layout reference."""
+    from .preprocess import SvgApprovalError, validate_manual_svg
+    try:
+        validate_manual_svg(payload)
+        return payload
+    except SvgApprovalError as validation_error:
+        validation_failure = validation_error
+
+    try:
+        edited = payload.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        raise validation_failure
+
+    from .svg_edit_repair import corrected_svg
+    source_path = Path(source_path).resolve()
+    for reference in _layout_reference_candidates(record, root, canonical):
+        if reference.resolve() == source_path or not reference.is_file():
+            continue
+        try:
+            reference_payload = reference.read_bytes()
+            validate_manual_svg(reference_payload)
+            repaired = corrected_svg(
+                reference_payload.decode('utf-8-sig'), edited
+            ).encode('utf-8')
+            validate_manual_svg(repaired)
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        return repaired
+    raise validation_failure
+
+
 def preserve_original(record, root):
     from .preprocess import _atomic_asset_write, SvgApprovalError
     canonical = canonical_relative(record)
@@ -43,7 +101,7 @@ def preserve_original(record, root):
 def migrate_legacy_records(root, *, key=None):
     """Publish legacy authoritative bytes and preview before switching the index."""
     from .preprocess import (_load_index, INDEX_FILENAME, _write_index,
-                             _atomic_asset_write, _write_preview, validate_manual_svg)
+                             _atomic_asset_write, _write_preview)
     root = Path(root)
     records = _load_index(root / INDEX_FILENAME)
     count = 0
@@ -57,8 +115,8 @@ def migrate_legacy_records(root, *, key=None):
         source = source or record['svg_path']
         if source == canonical.as_posix() and record['svg_path'] == canonical.as_posix():
             continue
-        payload = (root / source).read_bytes()
-        validate_manual_svg(payload)
+        source_path = root / source
+        payload = _canonicalized_payload(record, root, root / canonical, source_path, source_path.read_bytes())
         original = preserve_original(record, root)
         preview = Path(record.get('preview_path') or (Path('previews') / canonical.with_suffix('.png').name))
         with tempfile.TemporaryDirectory(dir=root) as staging:
@@ -91,13 +149,52 @@ def migrate_legacy_records(root, *, key=None):
 
 @serialized
 def prepare_edit(root, dataset_id, street_id):
-    from .preprocess import _load_index, INDEX_FILENAME, _write_index, _atomic_asset_write, validate_manual_svg
+    from .preprocess import (_load_index, INDEX_FILENAME, _write_index, _atomic_asset_write,
+                             _write_preview, validate_manual_svg)
     root = Path(root)
     migrate_legacy_records(root, key=(dataset_id, street_id))
     records = _load_index(root / INDEX_FILENAME)
     record = next(r for r in records if (r.get('dataset_id'), r.get('street_id')) == (dataset_id, street_id))
     canonical = root / canonical_relative(record)
     original, good = history_paths(canonical)
+
+    # Older Inkscape sessions could save an A-series document page around otherwise
+    # valid face artwork. Repair only the page/outer placement from a same-street
+    # canonical reference, keeping the edited artwork itself.
+    payload = canonical.read_bytes()
+    canonical_payload = _canonicalized_payload(record, root, canonical, canonical, payload)
+    if canonical_payload != payload:
+        preview_value = record.get('preview_path')
+        preview = root / preview_value if isinstance(preview_value, str) and preview_value else None
+        preview_bytes = None
+        if preview is not None:
+            with tempfile.TemporaryDirectory(dir=root) as staging:
+                staged = Path(staging) / 'preview.png'
+                _write_preview(canonical_payload, staged)
+                preview_bytes = staged.read_bytes()
+        previous = {
+            path: path.read_bytes() if path.exists() else None
+            for path in (canonical, original, good, *((preview,) if preview is not None else ()))
+        }
+        old_record = record.copy()
+        try:
+            _atomic_asset_write(canonical, canonical_payload)
+            generated_relative = preserve_original(record, root)
+            _atomic_asset_write(good, canonical_payload)
+            if preview is not None and preview_bytes is not None:
+                _atomic_asset_write(preview, preview_bytes)
+            record['generated_svg_path'] = generated_relative.as_posix()
+            _write_index(root / INDEX_FILENAME, records)
+        except Exception:
+            record.clear()
+            record.update(old_record)
+            for path, old_payload in previous.items():
+                if old_payload is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _atomic_asset_write(path, old_payload)
+            raise
+
     # Never replace recovery bytes with an unprocessed save on reopening.
     if not good.exists():
         payload = canonical.read_bytes()
