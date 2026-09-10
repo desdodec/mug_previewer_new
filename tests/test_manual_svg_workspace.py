@@ -270,7 +270,7 @@ def test_second_save_during_render_is_not_overwritten_or_published_with_old_prev
         assert preview.convert('RGBA').getpixel((247, 231)) == (255, 255, 0, 255)
 
 
-def test_selecting_face_before_timer_reports_invalid_save_recovery(manual):
+def test_selecting_face_before_timer_leaves_save_recovery_to_background_monitor(manual):
     from test_preprocessed_ui import _controller, _Var
     root, data, street, workspace = manual
     app = _controller(load_preprocessed_catalogue(root), street)
@@ -280,7 +280,16 @@ def test_selecting_face_before_timer_reports_invalid_save_recovery(manual):
     warnings = []
     app._show_error = warnings.append
     original = workspace.working_svg.read_bytes()
+    monitor = EditSaveMonitor(workspace, data, street, root)
     workspace.working_svg.write_text('<invalid')
+
+    # Selection/status refresh must remain read-only on Tk's main thread.
     app._refresh_current_face_label()
+    assert workspace.working_svg.read_bytes() == b'<invalid'
+    assert warnings == []
+
+    # The existing edit monitor owns validation/recovery off the Tk thread.
+    assert not monitor.poll()
+    with pytest.raises(ValueError, match='last-known-good SVG restored'):
+        monitor.poll()
     assert workspace.working_svg.read_bytes() == original
-    assert len(warnings) == 1 and 'last-known-good SVG restored' in warnings[0]
