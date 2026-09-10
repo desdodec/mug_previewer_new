@@ -281,18 +281,32 @@ def _scale_highlight_stroke(markup: str, scale: float) -> str:
     legacy = re.search(r'"highlight_color"\s*:\s*"(#[0-9A-Fa-f]{6})"', markup)
     legacy_colour = legacy.group(1).casefold() if legacy else None
 
+    root = ET.fromstring(markup)
+    shapes = [element for element in root.iter()
+              if element.tag.rsplit("}", 1)[-1] in {"polyline", "path"}]
+    marked = {
+        element for element in shapes
+        if {"highlighted-street", "highlighted-street-halo"}.intersection(element.get("class", "").split())
+        or (legacy_colour is not None and element.get("stroke", "").casefold() == legacy_colour)
+    }
+    # Production legacy SVGs have no classes: the white halo is the preceding
+    # sibling with exactly the same path and transform as the coloured road.
+    # Do not scale unrelated white roads elsewhere in the map.
+    for parent in root.iter():
+        children = list(parent)
+        for halo, road in zip(children, children[1:]):
+            geometry = "points" if road.tag.rsplit("}", 1)[-1] == "polyline" else "d"
+            if (road in marked and halo.tag == road.tag
+                    and halo.get("stroke", "").casefold() in {"#ffffff", "#fff", "white"}
+                    and road.get(geometry) is not None
+                    and halo.get(geometry) == road.get(geometry)
+                    and halo.get("transform") == road.get("transform")):
+                marked.add(halo)
+    selected = iter(element in marked for element in shapes)
+
     def replace(match: re.Match[str]) -> str:
         tag = match.group(0)
-        classes = tag.split('class="', 1)[1].split('"', 1)[0].split() if 'class="' in tag else []
-        stroke = re.search(r'\bstroke="(#[0-9A-Fa-f]{6})"', tag)
-        marked = (
-            "highlighted-street" in classes
-            or "highlighted-street-halo" in classes
-            or (
-                legacy_colour is not None and stroke is not None and stroke.group(1).casefold() == legacy_colour
-            )
-        )
-        if not marked:
+        if not next(selected):
             return tag
         width = re.search(r'\bstroke-width="([0-9.]+)"', tag)
         if width is None:
