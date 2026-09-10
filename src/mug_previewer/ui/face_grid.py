@@ -10,7 +10,7 @@ from PIL import Image, ImageTk
 from ..manual_svg_workspace import (ManualSvgWorkspace, EditSaveMonitor,
                                    launch_inkscape, find_inkscape_executable, revert_generated)
 from ..review_index import load_exclusions, set_excluded
-from .state import load_preprocessed_catalogue
+from .state import load_preprocessed_catalogue, load_preprocessed_preview
 
 
 @lru_cache(maxsize=64)
@@ -104,6 +104,10 @@ class FaceGrid(ttk.Frame):
             label = ttk.Label(card, anchor='center')
             label.pack(fill='x')
             try:
+                # Keep the cached PNG synchronized with the canonical SVG before
+                # handing it to the thumbnail cache. This also repairs a cache
+                # left stale by an app close/crash just after an Inkscape save.
+                load_preprocessed_preview(record)
                 path = record.preview_path
                 photo = ImageTk.PhotoImage(cached_thumbnail(str(path), path.stat().st_mtime_ns, thumb))
                 label.configure(image=photo)
