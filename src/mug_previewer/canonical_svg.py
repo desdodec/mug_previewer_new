@@ -3,6 +3,7 @@ from functools import wraps
 from pathlib import Path
 import tempfile
 from threading import RLock
+import xml.etree.ElementTree as ET
 
 _lock = RLock()
 
@@ -79,7 +80,7 @@ def _canonicalized_payload(record, root, canonical, source_path, payload):
                 reference_payload.decode('utf-8-sig'), edited
             ).encode('utf-8')
             validate_manual_svg(repaired)
-        except (OSError, UnicodeDecodeError, ValueError):
+        except (OSError, UnicodeDecodeError, ValueError, ET.ParseError):
             continue
         return repaired
     raise validation_failure
