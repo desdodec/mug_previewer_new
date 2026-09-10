@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from mug_previewer.ui import batch_export_panel as ui
+from mug_previewer.ui.workspace_app import MugWorkspaceApp
 
 
 class Value:
@@ -112,6 +113,17 @@ def test_export_selector_follows_current_prepared_workspace_dataset():
 
     assert panel.dataset.get() == prepared[1].label
     assert panel._selected_dataset() is prepared[1].dataset
+
+
+def test_workspace_refresh_explicitly_repopulates_batch_export_selector():
+    """Regression: the panel is built before after-idle dataset discovery, so it must be refreshed afterwards."""
+    app = MugWorkspaceApp.__new__(MugWorkspaceApp)
+    calls = []
+    app.batch_panel = SimpleNamespace(refresh_dataset_options=lambda: calls.append('refresh'))
+
+    app._refresh_batch_dataset_options()
+
+    assert calls == ['refresh']
 
 
 def test_batch_export_uses_explicit_prepared_face_set_without_street_selection(monkeypatch):
