@@ -159,6 +159,10 @@ def _inspect(root, dataset, street_id, record, directory):
         if not record.get('success'):
             raise ValueError('Preprocessing record reports an asset error')
         resolution = resolve_authoritative_face_svg(root, dataset, street)
+        # Resolution can migrate a legacy path or accept a pending canonical save.
+        record = _records(root)[(dataset.id, street_id)]
+        item = replace(item, production_state=resolution.state.value,
+                       record_fingerprint=json.dumps(record, sort_keys=True))
         review = current_review_state(root, dataset.id, street_id, resolution.path)
         item = replace(item, authoritative_svg=resolution.path,
                        review_status=review.record.status if review.record else None,

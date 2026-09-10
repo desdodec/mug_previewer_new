@@ -36,7 +36,8 @@ def test_saved_edit_promotes_and_refreshes_preview_preserving_original(manual):
     assert record.preview_path.read_bytes() == preview
     assert workspace.generated_svg.read_bytes() == original
     revert_generated(data, street, root)
-    assert resolve_authoritative_face_svg(root, data, street).path == workspace.generated_svg
+    assert resolve_authoritative_face_svg(root, data, street).path == working
+    assert working.read_bytes() == original
 
 
 @pytest.mark.parametrize('status', ['pass', 'Do Not Use', 'overlap', 'duplicates', 'missing', 'other'])
@@ -44,12 +45,12 @@ def test_hashless_legacy_migration_and_persistent_override(manual, status):
     root, data, street, workspace = manual
     (root / 'svg_review_results_old.json').write_text(json.dumps([
         dict(svg_name='face.svg', status=status)]))
-    assert current_review_state(root, data.id, street.id, workspace.generated_svg).export_blocked == (status != 'pass')
+    assert current_review_state(root, data.id, street.id, workspace.working_svg).export_blocked == (status != 'pass')
     set_excluded(root, data.id, street.id, True)
-    workspace.generated_svg.write_text(svg('yellow'))
-    assert current_review_state(root, data.id, street.id, workspace.generated_svg).export_blocked
+    workspace.working_svg.write_text(svg('yellow'))
+    assert current_review_state(root, data.id, street.id, workspace.working_svg).export_blocked
     set_excluded(root, data.id, street.id, False)
-    assert not current_review_state(root, data.id, street.id, workspace.generated_svg).export_blocked
+    assert not current_review_state(root, data.id, street.id, workspace.working_svg).export_blocked
 
 
 def test_batch_exports_all_valid_included(prepared, monkeypatch):

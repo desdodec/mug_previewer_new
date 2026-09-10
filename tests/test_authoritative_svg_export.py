@@ -131,3 +131,5 @@ def test_missing_or_invalid_authoritative_asset_never_falls_back(prepared, monke
     with pytest.raises(AuthoritativeArtworkError, match='cannot rasterise|asset integrity'):
         export_preprocessed_provider_png(root, data, street, root / 'bad.png', profile_id=PROFILES[0][0])
     assert not (root / 'bad.png').exists()
+    if manual:
+        assert path.read_text() == svg('blue')  # Last-good bytes restored in place.

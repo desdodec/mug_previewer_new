@@ -129,7 +129,9 @@ def load_preprocessed_catalogue(root: Path | str) -> PreprocessedCatalogue:
     index_path = root_path / PREPROCESS_INDEX_FILENAME
     if not index_path.is_file():
         raise UIDataError(f"Preprocessing index does not exist: {index_path}")
+    from ..canonical_svg import migrate_legacy_records
     try:
+        migrate_legacy_records(root_path)
         payload = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise UIDataError(f"Cannot read preprocessing index {index_path}: {error}") from error
@@ -152,7 +154,7 @@ def load_preprocessed_catalogue(root: Path | str) -> PreprocessedCatalogue:
         svg_path = _preprocessed_asset_path(root_path, item.get("svg_path"))
         generated_path = _preprocessed_asset_path(root_path, item.get("generated_svg_path"))
         approved_path = _preprocessed_asset_path(root_path, item.get("approved_svg_path"))
-        editable_path = generated_path if state is ProductionTriageStatus.MANUAL_REVIEW else approved_path or svg_path
+        editable_path = svg_path
         records[(dataset_id, street_id)] = PreprocessedRecord(
             dataset_id=dataset_id,
             street_id=street_id,

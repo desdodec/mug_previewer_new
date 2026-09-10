@@ -55,7 +55,7 @@ def _catalogue(tmp_path: Path, state: ProductionTriageStatus, *, preview: bool =
     if state is ProductionTriageStatus.MANUAL_REVIEW:
         record["generated_svg_path"] = "faces/street.generated.svg"
     if state is ProductionTriageStatus.MANUAL_APPROVED:
-        record["approved_svg_path"] = "faces/street.approved.svg"
+        record["approved_svg_path"] = "faces/street.svg"
     (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [record]}), encoding="utf-8")
     return load_preprocessed_catalogue(tmp_path)
 

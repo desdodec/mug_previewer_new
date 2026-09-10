@@ -79,7 +79,10 @@ def export_preprocessed_provider_png(
 ) -> Path:
     """Export one indexed approved artwork through the existing provider system."""
     def checkpoint():
-        resolution = resolve_authoritative_face_svg(preprocessed, dataset, street)
+        try:
+            resolution = resolve_authoritative_face_svg(preprocessed, dataset, street)
+        except (OSError, ValueError) as error:
+            raise AuthoritativeArtworkError(f'Authoritative SVG asset integrity problem: {error}') from error
         if resolution.state is ProductionTriageStatus.UNRENDERABLE_INPUT:
             raise AuthoritativeArtworkError('no front artwork available; export forbidden.')
         if not resolution.production_approved:

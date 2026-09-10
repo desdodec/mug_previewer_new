@@ -136,7 +136,7 @@ def test_manual_svg_approval_preserves_review_artwork_and_preprocess_protects_it
     resolution = preprocess.approve_manual_svg(data, street, tmp_path, edited)
 
     index_record = json.loads((tmp_path / preprocess.INDEX_FILENAME).read_text(encoding="utf-8"))["records"][0]
-    approved = tmp_path / index_record["approved_svg_path"]
+    approved = tmp_path / index_record["svg_path"]
     assert resolution == preprocess.FaceSvgResolution(ProductionTriageStatus.MANUAL_APPROVED, approved, True)
     assert index_record["production_state"] == "MANUAL_APPROVED"
     assert generated.read_text(encoding="utf-8") == original_review_svg

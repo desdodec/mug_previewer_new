@@ -8,107 +8,46 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import xml.etree.ElementTree as ET
 
-from .preprocess import approve_manual_svg, validate_manual_svg
-from .svg_edit_repair import correct_edited_svg, corrected_svg
+from .preprocess import validate_manual_svg
+from .canonical_svg import serialized
 
 
 @dataclass(frozen=True)
 class ManualSvgWorkspace:
     generated_svg: Path | None
     working_svg: Path | None
-    corrected_svg: Path | None
-    approved_svg: Path | None
     eligible: bool
-    protected_svg_paths: tuple[Path, ...] = ()
+    root: Path | None = None
+    dataset_id: str = ""
+    street_id: str = ""
 
     @classmethod
     def from_record(cls, record, records=()):
-        if record is None:
-            return cls(None, None, None, None, False)
-        generated = record.generated_svg_path
+        from .canonical_svg import history_paths
+        if record is None or record.svg_path is None:
+            return cls(None, None, False)
+        canonical = record.svg_path
+        original, _ = history_paths(canonical)
+        root = next((p for p in canonical.parents if (p / 'preprocess_index.json').is_file()), None)
         state = record.state.value if record.state else ""
-        if generated is None and state != "MANUAL_APPROVED":
-            generated = record.editable_svg_path or record.svg_path
-        working = generated.with_name(generated.stem.removesuffix(".generated") + "_edit.svg") if generated else None
-        corrected = working.parent / "corrected" / working.name if working else None
-        approved = record.approved_svg_path
-        if approved is None and generated:
-            approved = generated.with_name(generated.stem.removesuffix(".generated") + ".approved.svg")
-        return cls(generated, working, corrected, approved,
+        return cls(original, canonical,
                    state in {"AUTO_APPROVED", "MANUAL_REVIEW", "MANUAL_APPROVED"},
-                   tuple(path for item in records for path in
-                         (item.generated_svg_path, item.svg_path, item.approved_svg_path) if path))
+                   root, record.dataset_id, record.street_id)
 
     @property
     def can_edit(self) -> bool:
-        return self.eligible and self.generated_svg is not None and self.generated_svg.is_file()
+        return self.eligible and self.working_svg is not None and self.working_svg.is_file()
 
     @property
     def has_working(self) -> bool:
         return self.working_svg is not None and self.working_svg.is_file()
 
-    @property
-    def correction_current(self) -> bool:
-        """Reject invalid or outdated corrections without running a renderer."""
-        if not self.can_edit or not self.has_working or not self.corrected_svg.is_file():
-            return False
-        try:
-            expected = corrected_svg(self.generated_svg.read_text(encoding="utf-8-sig"),
-                                     self.working_svg.read_text(encoding="utf-8-sig"))
-            payload = self.corrected_svg.read_bytes()
-            validate_manual_svg(payload)
-            return payload.decode("utf-8").replace("\r\n", "\n") == expected
-        except (OSError, ValueError, ET.ParseError):
-            return False
-
-    def _require_editable(self):
-        if not self.can_edit:
-            raise ValueError("Asset integrity error: canonical generated SVG is missing or this street is not eligible for manual editing.")
-        paths = [self.generated_svg, self.working_svg, self.corrected_svg, self.approved_svg]
-        if len({p.resolve() for p in paths}) != len(paths):
-            raise ValueError("Asset integrity error: artwork roles must use separate files.")
-        for target in (self.working_svg, self.corrected_svg):
-            for protected in (*self.protected_svg_paths, self.generated_svg, self.approved_svg):
-                if target.resolve() == protected.resolve() or (target.exists() and protected.exists() and target.samefile(protected)):
-                    raise ValueError("Asset integrity error: edit path collides with indexed artwork.")
-
     def create_or_get_working_edit(self) -> Path:
-        self._require_editable()
-        if self.working_svg.exists():
-            if not self.working_svg.is_file():
-                raise ValueError("Working edit path is not a file.")
-            return self.working_svg
-        # Publish a fully written copy without ever replacing an existing edit.
-        temporary = None
-        try:
-            with tempfile.NamedTemporaryFile(dir=self.working_svg.parent, prefix=".working-",
-                                             suffix=".tmp", delete=False) as stream:
-                temporary = Path(stream.name)
-                source = self.approved_svg if self.approved_svg and self.approved_svg.is_file() else self.generated_svg
-                stream.write(source.read_bytes())
-            try:
-                os.link(temporary, self.working_svg)
-            except FileExistsError:
-                pass
-        finally:
-            if temporary is not None:
-                temporary.unlink(missing_ok=True)
-        return self.working_svg
-
-    def repair(self) -> Path:
-        self._require_editable()
-        if not self.has_working:
-            raise ValueError("Create and save a working edit before repairing it.")
-        return correct_edited_svg(self.generated_svg, self.working_svg, self.corrected_svg, replace=True)
-
-    def approve(self, dataset, street, preprocessed):
-        self._require_editable()
-        if not self.correction_current:
-            raise ValueError("Repair the latest working edit before approving the corrected SVG.")
-        validate_manual_svg(self.corrected_svg.read_bytes(), dataset, street)
-        return approve_manual_svg(dataset, street, preprocessed, self.corrected_svg)
+        from .canonical_svg import prepare_edit
+        if not self.can_edit or self.root is None:
+            raise ValueError("Asset integrity error: canonical SVG is missing or this street is not eligible for editing.")
+        return prepare_edit(self.root, self.dataset_id, self.street_id)
 
 
 def find_inkscape_executable(configured: Path | None = None) -> Path | None:
@@ -160,7 +99,7 @@ def launch_inkscape(workspace: ManualSvgWorkspace, configured: Path | None = Non
 
 
 def open_artwork_folder(workspace: ManualSvgWorkspace) -> None:
-    source = workspace.generated_svg or workspace.approved_svg
+    source = workspace.working_svg
     if source is None or not source.parent.is_dir():
         raise ValueError("Artwork folder is unavailable.")
     open_local_path(source.parent)
@@ -178,29 +117,20 @@ def open_local_path(path: Path) -> None:
 
 
 class EditSaveMonitor:
-    """Debounce saved bytes; only valid repaired artwork reaches approval."""
+    """Debounce canonical saves without transforming the editor's bytes."""
     def __init__(self, workspace, dataset, street, root, on_detected=None):
+        from .canonical_svg import history_paths
         self.workspace, self.dataset, self.street, self.root = workspace, dataset, street, root
-        from .preprocess import resolve_authoritative_face_svg
-        authority = resolve_authoritative_face_svg(root, dataset, street).path
-        payload = workspace.working_svg.read_bytes()
-        authoritative = authority.read_bytes() if authority else None
-        self.accepted = authoritative
-        # Repair can normalize saved bytes; compare that result to avoid repeatedly
-        # promoting an already accepted edit when the editor is reopened.
-        if payload != authoritative:
-            try:
-                repaired = corrected_svg(workspace.generated_svg.read_text(encoding='utf-8-sig'),
-                                         payload.decode('utf-8-sig'))
-                if authoritative and repaired == authoritative.decode('utf-8-sig').replace('\r\n', '\n'):
-                    self.accepted = payload
-            except (ValueError, UnicodeError, ET.ParseError):
-                pass
+        workspace.create_or_get_working_edit()
+        _, good = history_paths(workspace.working_svg)
+        self.accepted = good.read_bytes()
         self.on_detected = on_detected
         self.pending = None
 
     def poll(self):
-        payload = self.workspace.working_svg.read_bytes()
+        from .canonical_svg import accept_saved_svg, history_paths
+        path = self.workspace.working_svg
+        payload = path.read_bytes() if path.exists() else b''
         if payload == self.accepted:
             self.pending = None
             return False
@@ -209,22 +139,26 @@ class EditSaveMonitor:
             if self.on_detected:
                 self.on_detected()
             return False
-        # Record failed bytes too, so invalid saves do not produce endless alerts.
-        self.accepted = payload
-        self.workspace.repair()
-        if self.workspace.working_svg.read_bytes() != payload:
-            return False
-        self.workspace.approve(self.dataset, self.street, self.root)
+        try:
+            accept_saved_svg(self.root, self.dataset, self.street)
+        finally:
+            _, good = history_paths(path)
+            self.accepted = good.read_bytes()
+            self.pending = None
+        # A synchronous Preview/Export may already have accepted this save.
         return True
 
 
+@serialized
 def revert_generated(dataset, street, root):
     from .preprocess import (_load_index, _record_key, INDEX_FILENAME, _write_index,
                              _write_preview, _atomic_asset_write)
+    from .canonical_svg import history_paths
     root = Path(root)
     records = _load_index(root / INDEX_FILENAME)
     record = next(r for r in records if _record_key(r) == (dataset.id, street.id))
-    generated = root / record['generated_svg_path']
+    canonical = root / record['svg_path']
+    generated, good = history_paths(canonical)
     payload = generated.read_bytes()
     validate_manual_svg(payload, dataset, street)
     preview = root / record['preview_path']
@@ -232,15 +166,19 @@ def revert_generated(dataset, street, root):
         staged = Path(staging) / 'preview.png'
         _write_preview(payload, staged)
         preview_bytes = staged.read_bytes()
-    previous = preview.read_bytes() if preview.exists() else None
-    record['svg_path'] = record['generated_svg_path']
+    previous = {p: p.read_bytes() if p.exists() else None for p in (canonical, preview, good)}
     record['production_state'] = record.get('generated_production_state', 'MANUAL_REVIEW')
     for key in ('approved_svg_path', 'approved_svg_sha256', 'approved_at'):
         record.pop(key, None)
     try:
+        _atomic_asset_write(canonical, payload)
         _atomic_asset_write(preview, preview_bytes)
+        _atomic_asset_write(good, payload)
         _write_index(root / INDEX_FILENAME, records)
     except Exception:
-        if previous is not None:
-            _atomic_asset_write(preview, previous)
+        for path, old in previous.items():
+            if old is None:
+                path.unlink(missing_ok=True)
+            else:
+                _atomic_asset_write(path, old)
         raise

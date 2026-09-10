@@ -219,7 +219,8 @@ class FaceGrid(ttk.Frame):
                 self.redraw()
                 self.app.status_var.set('Face updated from Inkscape.')
             if errors:
-                self.app.status_var.set('Edit not applied \u2014 previous valid face preserved.')
+                self.app.status_var.set('Save rejected \u2014 last-known-good SVG restored; previous preview kept.')
+                self.app._show_error('\n'.join(errors))
         if self.pending is None and self.monitors:
             self.pending = self.executor.submit(self.check_saves, tuple(self.monitors.items()))
         self.after(600, self.poll)
@@ -231,7 +232,10 @@ class FaceGrid(ttk.Frame):
                 return
             data = self.app.state.selected_dataset
             revert_generated(data, street, self.app.preprocessed_catalogue.root)
-            self.monitors.pop((data.id, street.id), None)
+            monitor = self.monitors.get((data.id, street.id))
+            if monitor:
+                monitor.accepted = monitor.workspace.working_svg.read_bytes()
+                monitor.pending = None
             self.app._refresh_selected_artwork()
             self.redraw()
         except Exception as error:

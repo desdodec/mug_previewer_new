@@ -5,7 +5,7 @@ from tkinter import filedialog, ttk
 
 from ..manual_svg_workspace import ManualSvgWorkspace, find_inkscape_executable, launch_inkscape
 from ..review_index import current_review_state, svg_sha256
-from ..preprocess import resolve_authoritative_face_svg, validate_manual_svg
+from ..preprocess import resolve_authoritative_face_svg, validate_manual_svg, SvgApprovalError
 from .state import load_preprocessed_catalogue
 
 
@@ -42,9 +42,7 @@ class ArtworkPanelMixin:
         record = self._selected_artwork_record()
         if record is None:
             return None
-        if record.state and record.state.value == "MANUAL_APPROVED":
-            return record.approved_svg_path
-        return record.svg_path or record.generated_svg_path
+        return record.svg_path
 
     def _qa_export_error(self):
         record = self._selected_artwork_record()
@@ -87,9 +85,10 @@ class ArtworkPanelMixin:
             resolution = resolve_authoritative_face_svg(self.preprocessed_catalogue.root, data, street)
             record = self._selected_artwork_record()
             if resolution.path is not None and resolution.path.is_file():
-                using = 'Edited face' if record and resolution.path == record.approved_svg_path else 'Generated face'
-        except (OSError, ValueError):
-            pass
+                using = 'Edited face' if resolution.state.value == 'MANUAL_APPROVED' else 'Generated face'
+        except (OSError, ValueError) as error:
+            if isinstance(error, SvgApprovalError):
+                self._show_error(str(error))
         self.current_face_var.set(f'{street.id} \u2014 {street.display_name}\nUsing: {using}')
 
     def _reset_artwork_preview(self, record=None):
@@ -130,7 +129,7 @@ class ArtworkPanelMixin:
             launch_inkscape(workspace, executable)
             self.status_var.set("Save in Inkscape to update the face automatically.")
         except Exception as error:
-            self._show_error(f"Could not open working edit: {error}")
+            self._show_error(f"Could not open SVG: {error}")
         finally:
             self._refresh_artwork()
 

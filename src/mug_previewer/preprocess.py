@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -13,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
+from .canonical_svg import (serialized, canonical_relative, history_paths, preserve_original,
+                            migrate_legacy_records, accept_saved_svg)
 from .datasets.models import Dataset, StreetRecord
 from .diagnostics.front_candidates import ProductionTriageStatus
 from .rendering.face import FACE_SVG_GENERATOR, SOURCE_CANVAS_PX, FaceRenderOptions, render_face_svg
@@ -61,6 +62,7 @@ class FaceSvgResolution:
     production_approved: bool
 
 
+@serialized
 def preprocess_datasets(
     datasets: Iterable[Dataset],
     output: Path | str,
@@ -74,6 +76,7 @@ def preprocess_datasets(
     root = Path(output)
     root.mkdir(parents=True, exist_ok=True)
     index_path = root / INDEX_FILENAME
+    migrate_legacy_records(root)
     records = _load_index(index_path)
     by_key = {_record_key(record): record for record in records if _record_key(record) is not None}
     selected_ids = {str(item) for item in street_ids} if street_ids is not None else None
@@ -139,6 +142,7 @@ def preprocess_datasets(
     return summary
 
 
+@serialized
 def approve_manual_svg(
     dataset: Dataset,
     street: StreetRecord,
@@ -166,11 +170,11 @@ def approve_manual_svg(
         raise SvgApprovalError(f"Cannot read supplied SVG: {error}") from error
     validate_manual_svg(payload, dataset, street)
 
-    generated_relative = _preserve_generated_svg(record, root)
-    approved_relative = _approved_svg_relative(generated_relative)
+    approved_relative = canonical_relative(record)
+    generated_relative = preserve_original(record, root)
     approved_path = root / approved_relative
     approved_path.parent.mkdir(parents=True, exist_ok=True)
-    preview_relative = _preview_relative(record, generated_relative)
+    preview_relative = _preview_relative(record, approved_relative)
     preview_path = root / preview_relative
     # Render before changing production files. A failed rasterisation must not
     # replace an earlier approved SVG during an Edit Again session.
@@ -186,7 +190,6 @@ def approve_manual_svg(
         "production_state": ProductionTriageStatus.MANUAL_APPROVED.value,
         "reason_detail": "Human-edited SVG accepted.",
         "generated_svg_path": generated_relative.as_posix(),
-        "approved_svg_path": approved_relative.as_posix(),
         "svg_path": approved_relative.as_posix(),
         "preview_path": preview_relative.as_posix(),
         "approved_at": timestamp.astimezone(timezone.utc).isoformat(),
@@ -196,11 +199,20 @@ def approve_manual_svg(
         "success": True,
         "error_message": None,
     })
-    previous = {path: path.read_bytes() if path.exists() else None
-                for path in (approved_path, preview_path)}
+    record.pop("approved_svg_path", None)
+    _, good = history_paths(approved_path)
+    saved_in_place = source_path.resolve() == approved_path.resolve()
+    targets = (preview_path, good) if saved_in_place else (approved_path, preview_path, good)
+    previous = {path: path.read_bytes() if path.exists() else None for path in targets}
+    if saved_in_place and source_path.read_bytes() != payload:
+        raise SvgApprovalError("SVG changed while preparing its preview; waiting for the latest save.")
     try:
-        _atomic_asset_write(approved_path, payload)
+        if not saved_in_place:
+            _atomic_asset_write(approved_path, payload)
         _atomic_asset_write(preview_path, preview_payload)
+        _atomic_asset_write(good, payload)
+        if saved_in_place and source_path.read_bytes() != payload:
+            raise SvgApprovalError("SVG changed while preparing its preview; waiting for the latest save.")
         _write_index(index_path, records)
     except Exception:
         for path, old_payload in previous.items():
@@ -225,6 +237,7 @@ def _atomic_asset_write(path: Path, payload: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
+@serialized
 def resolve_authoritative_face_svg(
     preprocessed: Path | str,
     dataset: Dataset,
@@ -232,13 +245,15 @@ def resolve_authoritative_face_svg(
 ) -> FaceSvgResolution:
     """Resolve the indexed face artwork without inferring manual edit transforms."""
     root = Path(preprocessed)
+    migrate_legacy_records(root, key=(dataset.id, street.id))
+    accept_saved_svg(root, dataset, street)
     record = next((item for item in _load_index(root / INDEX_FILENAME) if _record_key(item) == (dataset.id, street.id)), None)
     if record is None or not record.get("success"):
         return FaceSvgResolution(ProductionTriageStatus.UNRENDERABLE_INPUT, None, False)
     state = _record_state(record)
     if state is ProductionTriageStatus.UNRENDERABLE_INPUT:
         return FaceSvgResolution(state, None, False)
-    relative = record.get("approved_svg_path") if state is ProductionTriageStatus.MANUAL_APPROVED else record.get("svg_path")
+    relative = record.get("svg_path")
     path = root / relative if isinstance(relative, str) else None
     if path is not None and not path.is_file():
         path = None
@@ -256,14 +271,18 @@ def _preprocess_one(
 ) -> dict[str, object]:
     record = _base_record(dataset, street, state, reason_codes, fingerprint)
     relative_base = Path(_slug(dataset.id)) / f"{street.id}_{_slug(street.display_name)}"
-    suffix = ".generated" if state is ProductionTriageStatus.MANUAL_REVIEW else ""
-    svg_relative = Path("faces") / relative_base.with_name(relative_base.name + suffix).with_suffix(".svg")
+    svg_relative = Path("faces") / relative_base.with_suffix(".svg")
     preview_relative = Path("previews") / relative_base.with_suffix(".png")
     svg_path = root / svg_relative
     svg_path.parent.mkdir(parents=True, exist_ok=True)
     svg_path.write_text(svg, encoding="utf-8")
     _write_preview(svg, root / preview_relative)
-    extra = {"generated_svg_path": svg_relative.as_posix()} if state is ProductionTriageStatus.MANUAL_REVIEW else {}
+    original, good = history_paths(svg_path)
+    payload = svg_path.read_bytes()
+    if not original.exists():
+        _atomic_asset_write(original, payload)
+    _atomic_asset_write(good, payload)
+    extra = {"generated_svg_path": original.relative_to(root).as_posix()}
     return record | extra | {
         "success": True,
         "svg_path": svg_relative.as_posix(),
@@ -375,26 +394,6 @@ def _validate_svg_metadata(root: ET.Element, dataset: Dataset, street: StreetRec
             raise SvgApprovalError(f"Supplied SVG metadata {key} does not match the selected street.")
 
 
-def _preserve_generated_svg(record: dict[str, object], root: Path) -> Path:
-    existing = record.get("generated_svg_path")
-    if isinstance(existing, str) and (root / existing).is_file():
-        return Path(existing)
-    source = record.get("svg_path")
-    if not isinstance(source, str) or not (root / source).is_file():
-        raise SvgApprovalError("The existing generated review SVG is unavailable for preservation.")
-    source_relative = Path(source)
-    generated = source_relative.with_name(source_relative.stem + ".generated.svg")
-    target = root / generated
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(root / source_relative, target)
-    return generated
-
-
-def _approved_svg_relative(generated: Path) -> Path:
-    stem = generated.stem.removesuffix(".generated")
-    return generated.with_name(stem + ".approved.svg")
-
-
 def _preview_relative(record: dict[str, object], generated: Path) -> Path:
     existing = record.get("preview_path")
     if isinstance(existing, str):
@@ -465,12 +464,12 @@ def _file_digest(path: Path) -> str | None:
 def _is_manually_approved(record: dict[str, object] | None, root: Path) -> bool:
     if record is None or record.get("production_state") != ProductionTriageStatus.MANUAL_APPROVED.value:
         return False
-    approved = record.get("approved_svg_path")
+    approved = record.get("svg_path")
     return isinstance(approved, str) and (root / approved).is_file()
 
 
 def _ensure_approved_preview(record: dict[str, object], root: Path) -> None:
-    preview, approved = record.get("preview_path"), record.get("approved_svg_path")
+    preview, approved = record.get("preview_path"), record.get("svg_path")
     if isinstance(preview, str) and (root / preview).is_file():
         return
     if isinstance(preview, str) and isinstance(approved, str):
