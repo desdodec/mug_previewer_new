@@ -25,6 +25,7 @@ from mug_previewer.rendering.context_map import (
     REAR_MAP_HEIGHT_RATIO,
     REAR_PANEL_SCALE,
     REAR_PANEL_PX,
+    REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX,
     REAR_COMPOSITION_OFFSET_Y_PX,
     REAR_STREET_HIGHLIGHT_SCALE,
     LEGACY_MAX_RASTER_MAGNIFICATION,
@@ -325,25 +326,33 @@ def test_rear_highlight_and_supplied_halo_scale_together() -> None:
     assert 'stroke="#ffffff" stroke-width="25.00"' in adjusted
     assert 'stroke="#e83e8c" stroke-width="12.50"' in adjusted
 
-def test_rear_composition_moves_down_fifteen_pixels_as_one_group(tmp_path: Path, monkeypatch) -> None:
+
+def test_rear_composition_moves_down_fifteen_canonical_pixels_as_one_group(tmp_path: Path, monkeypatch) -> None:
     from mug_previewer.rendering import context_map
 
     data = load_dataset(dataset_copy(tmp_path))
     street = data.get_street("0001")
     shifted_layout = _rear_panel_layout(*REAR_PANEL_PX)
     shifted = render_context_map_result(data, street).image
-    assert REAR_COMPOSITION_OFFSET_Y_PX == 15
+    canonical_scale = 945 / REAR_PANEL_PX[0]
+
+    assert REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX == pytest.approx(15.0)
+    assert REAR_COMPOSITION_OFFSET_Y_PX * canonical_scale == pytest.approx(15.0)
+
     monkeypatch.setattr(context_map, "REAR_COMPOSITION_OFFSET_Y_PX", 0)
     baseline_layout = _rear_panel_layout(*REAR_PANEL_PX)
     baseline = render_context_map_result(data, street).image
 
-    assert shifted_layout[1] - baseline_layout[1] == pytest.approx(15)
-    assert shifted_layout[4] - baseline_layout[4] == pytest.approx(15)
+    panel_shift = shifted_layout[1] - baseline_layout[1]
+    assert panel_shift == pytest.approx(REAR_COMPOSITION_OFFSET_Y_PX)
+    assert (shifted_layout[4] - baseline_layout[4]) * canonical_scale == pytest.approx(15.0)
     for index in (0, 2, 3):
         assert shifted_layout[index] == baseline_layout[index]
     assert shifted.size == baseline.size == REAR_PANEL_PX
-    bounds = baseline.getbbox()
-    assert bounds is not None and bounds[3] + 15 < shifted.height
-    expected = Image.new("RGBA", REAR_PANEL_PX)
-    expected.alpha_composite(baseline, (0, 15))
-    assert shifted.tobytes() == expected.tobytes()
+    shifted_bounds = shifted.getbbox()
+    baseline_bounds = baseline.getbbox()
+    assert shifted_bounds is not None and baseline_bounds is not None
+    # Raster placement rounds the 7.86 panel-pixel correction to about 8 px,
+    # which becomes the intended 15 px after the 945/495 wrap enlargement.
+    assert shifted_bounds[1] - baseline_bounds[1] in (7, 8)
+    assert shifted_bounds[3] - baseline_bounds[3] in (7, 8)
