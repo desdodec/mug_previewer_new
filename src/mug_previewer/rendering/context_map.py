@@ -29,8 +29,12 @@ REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
 # it enlarges the map-and-attribution group without changing map geography.
 REAR_PANEL_BASE_SCALE = 1.00
 REAR_PANEL_SCALE = 1.20
-# Downward optical correction in rear-panel pixels, after geographic framing.
-REAR_COMPOSITION_OFFSET_Y_PX = 15
+# The optical correction was measured on the final 2362 x 1063 production wrap.
+# This module renders a 495 px-wide rear panel which is later enlarged to the
+# 945 px-wide template-v2 rear zone, so convert the desired 15 canonical pixels
+# back into rear-panel pixels here rather than accidentally scaling it twice.
+REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX = 15.0
+REAR_COMPOSITION_OFFSET_Y_PX = REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX * REAR_PANEL_PX[0] / 945
 REAR_MAP_BASE_HEIGHT_RATIO = 0.70
 REAR_MAP_HEIGHT_RATIO = REAR_MAP_BASE_HEIGHT_RATIO * (REAR_PANEL_SCALE / REAR_PANEL_BASE_SCALE)
 # Keep the required credit plainly legible while making it visually secondary
