@@ -1,11 +1,16 @@
+from dataclasses import replace
 from pathlib import Path
 import shutil
 
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.preprocess import PreprocessSummary
 from mug_previewer.ui.preprocess_ui import PreprocessWorker, WorkerFinished
-from mug_previewer.ui.state import PreprocessedCatalogue, PreprocessedRecord
-from mug_previewer.ui.workspace_app import face_generation_state, preprocess_summary_text
+from mug_previewer.ui.state import DatasetOption, PreprocessedCatalogue, PreprocessedRecord
+from mug_previewer.ui.workspace_app import (
+    face_generation_state,
+    prepared_dataset_options,
+    preprocess_summary_text,
+)
 from mug_previewer.diagnostics.front_candidates import ProductionTriageStatus
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
@@ -51,6 +56,20 @@ def test_partially_prepared_dataset_offers_resumable_generation(tmp_path):
     assert state.enabled
 
 
+def test_face_generation_ignores_stale_street_records(tmp_path):
+    dataset = _dataset(tmp_path)
+    catalogue = PreprocessedCatalogue(
+        tmp_path,
+        {
+            (dataset.id, dataset.streets[0].id): _record(dataset.id, dataset.streets[0].id),
+            (dataset.id, "stale-id"): _record(dataset.id, "stale-id"),
+        },
+    )
+    state = face_generation_state(catalogue, dataset)
+    assert state.prepared == 1
+    assert state.total == len(dataset.streets)
+
+
 def test_fully_prepared_dataset_does_not_offer_regeneration(tmp_path):
     dataset = _dataset(tmp_path)
     catalogue = PreprocessedCatalogue(
@@ -61,6 +80,20 @@ def test_fully_prepared_dataset_does_not_offer_regeneration(tmp_path):
     assert state.prepared == len(dataset.streets)
     assert state.button_text == "Faces Generated"
     assert not state.enabled
+
+
+def test_prepared_dataset_options_only_show_sets_present_in_catalogue(tmp_path):
+    prepared = _dataset(tmp_path)
+    other = replace(prepared, id="other-dataset", display_name="Other")
+    options = [DatasetOption("Prepared", prepared), DatasetOption("Other", other)]
+    catalogue = PreprocessedCatalogue(
+        tmp_path,
+        {(prepared.id, prepared.streets[0].id): _record(prepared.id, prepared.streets[0].id)},
+    )
+
+    result = prepared_dataset_options(options, catalogue)
+
+    assert [option.dataset.id for option in result] == [prepared.id]
 
 
 def test_busy_generation_blocks_duplicate_start(tmp_path):
