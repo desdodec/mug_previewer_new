@@ -72,18 +72,22 @@ class BatchExportPanel(ttk.LabelFrame):
         self.report_button = ttk.Button(links, text='View Export Report', command=self.open_report, state='disabled')
         self.report_button.pack(side='left')
         self.refresh_dataset_options()
+        self.bind('<Visibility>', lambda _event: self.refresh_dataset_options())
         self.after(50, self.drain)
 
     def _start_label(self, count=None):
         provider = self.provider.get() if hasattr(self, 'provider') else 'Inkthreadable'
         if count is None:
             return f'Export {provider} PNGs'
-        return f'Export {count} {provider} PNGs'
+        return f'Export {count} Included PNGs'
 
     def refresh_dataset_options(self):
         """Mirror only prepared workspace datasets into the export selector."""
         options = list(getattr(self.app.state, 'datasets', ()) or ())
-        self.dataset_by_label = {item.label: item.dataset for item in options}
+        updated = {item.label: item.dataset for item in options}
+        old_signature = tuple((label, data.id) for label, data in self.dataset_by_label.items())
+        old_label = self.dataset.get()
+        self.dataset_by_label = updated
         if hasattr(self, 'dataset_box'):
             self.dataset_box['values'] = list(self.dataset_by_label)
         current = getattr(self.app.state, 'selected_dataset', None)
@@ -94,7 +98,9 @@ class BatchExportPanel(ttk.LabelFrame):
             self.dataset.set(label)
         elif self.dataset.get() not in self.dataset_by_label:
             self.dataset.set('')
-        self.invalidate()
+        new_signature = tuple((name, data.id) for name, data in self.dataset_by_label.items())
+        if new_signature != old_signature or self.dataset.get() != old_label:
+            self.invalidate()
 
     def _selected_dataset(self):
         """Return the explicit prepared face set, falling back to the main prepared selector."""
