@@ -1,5 +1,4 @@
 """Compact batch controls; workers communicate only through a queue."""
-from dataclasses import replace
 from pathlib import Path
 import queue
 import threading
@@ -133,10 +132,12 @@ class BatchExportPanel(ttk.LabelFrame):
         self.invalidate()
 
     def invalidate(self):
+        self.plan = None
         if self.busy:
+            # Let the worker finish, but reject any plan it returns.
+            self._plan_invalidated = True
             return
         self.generation += 1
-        self.plan = None
         self.start.configure(state='disabled', text=self._start_label())
         data = self._selected_dataset()
         ready_to_plan = data is not None and bool(self.destination.get())
@@ -180,6 +181,7 @@ class BatchExportPanel(ttk.LabelFrame):
             self.summary.set('Select a prepared face set and destination first')
             return
         self.invalidate()
+        self._plan_invalidated = False
         self.set_busy(True)
         self.summary.set(f'Checking {data.display_name} prepared artwork and exclusions...')
         args = (self.app.preprocessed_catalogue.root, data, PROVIDERS[self.provider.get()],
@@ -202,7 +204,8 @@ class BatchExportPanel(ttk.LabelFrame):
             self.invalidate()
             return
         if self.app.state.design_options != getattr(self.plan, "design_options", None):
-            self.plan = replace(self.plan, design_options=self.app.state.design_options)
+            self.invalidate()
+            return
         self.cancel_event.clear()
         self.set_busy(True, exporting=True)
         self.progress.set(f'Exporting 0 / {self.plan.summary.ready}')
@@ -233,6 +236,10 @@ class BatchExportPanel(ttk.LabelFrame):
                 continue
             self.set_busy(False)
             if kind == 'plan':
+                if (getattr(self, '_plan_invalidated', False)
+                        or getattr(value, 'design_options', None) != self.app.state.design_options):
+                    self.invalidate()
+                    continue
                 self.plan = value
                 s = value.summary
                 self.summary.set(f'{value.dataset.display_name}: {s.total} prepared\nIncluded: {s.ready} | Excluded: {s.excluded}\n'

@@ -295,18 +295,21 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.rear_weight_display.set(f"{self.rear_weight_var.get():.2f}\u00d7")
 
     def _design_changed(self, _value: str | None = None) -> None:
+        previous = self.state.design_options
         self.state.set_design_options(
             round(self.front_weight_var.get(), 2), round(self.rear_weight_var.get(), 2),
         )
         self._update_weight_displays()
+        if self.state.design_options != previous and "batch_panel" in self.__dict__:
+            self.batch_panel.invalidate()
         if self.state.current_wrap is not None:
             self.status_var.set("Design settings changed \u2014 render to update preview.")
 
     def _reset_design(self) -> None:
-        self.state.reset_design_options()
-        self.front_weight_var.set(self.state.design_options.front_feature_weight)
-        self.rear_weight_var.set(self.state.design_options.rear_highlight_weight)
-        self._update_weight_displays()
+        defaults = DesignOptions()
+        self.front_weight_var.set(defaults.front_feature_weight)
+        self.rear_weight_var.set(defaults.rear_highlight_weight)
+        self._design_changed()
         if self.state.current_wrap is not None:
             self.status_var.set("Design reset \u2014 render to update preview.")
 
