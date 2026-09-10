@@ -110,7 +110,7 @@ class FaceGrid(ttk.Frame):
                 label.image = photo
             except (AttributeError, OSError, ValueError):
                 label.configure(text='Preview unavailable')
-            ttk.Label(card, text=f'{street.id} \u2014 {street.display_name}', wraplength=width-16).pack()
+            ttk.Label(card, text=f'{street.id} — {street.display_name}', wraplength=width-16).pack()
             if record and record.state and record.state.value == 'MANUAL_REVIEW':
                 ttk.Label(card, text='Needs Attention').pack()
             actions = ttk.Frame(card)
@@ -173,6 +173,11 @@ class FaceGrid(ttk.Frame):
             self.app._show_error(str(error))
 
     def edit(self, street):
+        # Do not let a second editor transaction block Tk behind the background
+        # save validator. The first save normally completes within the next poll.
+        if any(monitor.pending is not None for monitor in self.monitors.values()):
+            self.app.status_var.set('Finishing the previous Inkscape save — try again in a moment.')
+            return
         self.select(street)
         try:
             data = self.app.state.selected_dataset
@@ -210,7 +215,7 @@ class FaceGrid(ttk.Frame):
             return
         while not self.edit_events.empty():
             self.edit_events.get_nowait()
-            self.app.status_var.set('Edit detected \u2014 updating face...')
+            self.app.status_var.set('Edit detected — updating face...')
         if self.pending is not None and self.pending.done():
             changes, errors = self.pending.result()
             self.pending = None
@@ -219,7 +224,7 @@ class FaceGrid(ttk.Frame):
                 self.redraw()
                 self.app.status_var.set('Face updated from Inkscape.')
             if errors:
-                self.app.status_var.set('Save rejected \u2014 last-known-good SVG restored; previous preview kept.')
+                self.app.status_var.set('Save rejected — last-known-good SVG restored; previous preview kept.')
                 self.app._show_error('\n'.join(errors))
         if self.pending is None and self.monitors:
             self.pending = self.executor.submit(self.check_saves, tuple(self.monitors.items()))
