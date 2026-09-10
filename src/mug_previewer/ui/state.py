@@ -171,17 +171,80 @@ def load_preprocessed_catalogue(root: Path | str) -> PreprocessedCatalogue:
 
 
 def load_preprocessed_preview(record: PreprocessedRecord) -> Image.Image:
-    """Open one cached preview without invoking any production renderer."""
+    """Load the cached PNG, rebuilding it lazily when the canonical SVG is newer."""
     if not record.success or record.preview_path is None:
         raise UIDataError("Preview not prepared.")
-    if not record.preview_path.is_file():
-        raise UIDataError("Preview not prepared: cached PNG is missing.")
+
+    preview_path = record.preview_path
+    cached = None
+    cached_error = None
+    if preview_path.is_file():
+        try:
+            with Image.open(preview_path) as source:
+                source.load()
+                cached = source.convert("RGBA").copy()
+        except (OSError, ValueError) as error:
+            cached_error = error
+
+    svg_path = record.svg_path
+    if svg_path is None or not svg_path.is_file():
+        if cached is not None:
+            return cached
+        detail = f" ({cached_error})" if cached_error is not None else ""
+        raise UIDataError(f"Preview not prepared: authoritative SVG is missing{detail}.")
+
+    stale = cached is None
+    if cached is not None:
+        try:
+            stale = svg_path.stat().st_mtime_ns > preview_path.stat().st_mtime_ns
+        except OSError:
+            stale = True
+    if not stale:
+        return cached
+
+    # A save can reach disk just before shutdown, before the background monitor
+    # has time to refresh the PNG. Rebuild only the requested preview, not the
+    # whole dataset, and never publish invalid/incomplete editor bytes.
+    from ..preprocess import _write_preview, validate_manual_svg
     try:
-        with Image.open(record.preview_path) as source:
+        payload = svg_path.read_bytes()
+        validate_manual_svg(payload)
+    except (OSError, ValueError) as error:
+        if cached is not None:
+            return cached
+        raise UIDataError(f"Preview not prepared: authoritative SVG is invalid ({error}).") from error
+
+    import tempfile
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=preview_path.parent, prefix=".preview-", suffix=".png", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+        _write_preview(payload, temporary)
+        # Do not publish a preview for bytes that changed while rasterising.
+        if svg_path.read_bytes() != payload:
+            if cached is not None:
+                return cached
+            raise UIDataError("Preview not prepared: SVG changed while rebuilding its cache.")
+        temporary.replace(preview_path)
+    except UIDataError:
+        raise
+    except (OSError, ValueError) as error:
+        if cached is not None:
+            return cached
+        raise UIDataError(f"Preview not prepared: could not rebuild cached PNG ({error}).") from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+    try:
+        with Image.open(preview_path) as source:
             source.load()
             return source.convert("RGBA").copy()
     except (OSError, ValueError) as error:
-        raise UIDataError(f"Preview not prepared: could not load cached PNG ({error}).") from error
+        raise UIDataError(f"Preview not prepared: rebuilt PNG could not be loaded ({error}).") from error
 
 
 def _preprocessed_asset_path(root: Path, value: object) -> Path | None:
