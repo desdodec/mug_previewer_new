@@ -113,6 +113,12 @@ class MugWorkspaceApp(MugPreviewerApp):
         )
         self.generate_faces_button.grid(row=3, column=0, sticky="ew")
 
+    def _refresh_batch_dataset_options(self) -> None:
+        """Populate batch export only after prepared workspace discovery has completed."""
+        panel = self.__dict__.get("batch_panel")
+        if panel is not None:
+            panel.refresh_dataset_options()
+
     def refresh_datasets(self) -> None:
         """Keep the workspace selector prepared-only; source discovery stays in Create Faces."""
         try:
@@ -161,6 +167,10 @@ class MugWorkspaceApp(MugPreviewerApp):
             self.state.selected_dataset = None
             self.state.selected_street = None
 
+        # BatchExportPanel is constructed before this after-idle discovery runs.
+        # Refresh it now so its prepared-face-set dropdown does not stay empty.
+        self._refresh_batch_dataset_options()
+
         if catalogue is None:
             self.status_var.set(f"{len(self.state.datasets)} datasets found. Select a dataset.")
         elif self.state.datasets:
@@ -183,6 +193,7 @@ class MugWorkspaceApp(MugPreviewerApp):
             )
             if label is not None:
                 self.source_dataset_var.set(label)
+        self._refresh_batch_dataset_options()
         self._refresh_face_generation_state()
 
     def _select_source_dataset(self, _event: object | None = None) -> None:
