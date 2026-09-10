@@ -5,7 +5,7 @@ from tkinter import filedialog, ttk
 
 from ..manual_svg_workspace import ManualSvgWorkspace, find_inkscape_executable, launch_inkscape
 from ..review_index import current_review_state, svg_sha256
-from ..preprocess import resolve_authoritative_face_svg, validate_manual_svg, SvgApprovalError
+from ..preprocess import validate_manual_svg, SvgApprovalError
 from .state import load_preprocessed_catalogue
 
 
@@ -45,18 +45,18 @@ class ArtworkPanelMixin:
         return record.svg_path
 
     def _qa_export_error(self):
+        """Read cached authoritative state only; never run save transactions on Tk's thread."""
         record = self._selected_artwork_record()
         if record is None:
             return "Select prepared artwork before exporting."
         try:
-            resolution = resolve_authoritative_face_svg(self.preprocessed_catalogue.root, self.state.selected_dataset, self.state.selected_street)
-            if not resolution.production_approved:
+            if not self._preprocessed_status(record).export_allowed:
                 return 'Production approval required'
-            if resolution.path is None:
+            if record.svg_path is None or not record.svg_path.is_file():
                 return 'Authoritative SVG missing'
-            validate_manual_svg(resolution.path.read_bytes())
+            validate_manual_svg(record.svg_path.read_bytes())
             review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id,
-                                          record.street_id, resolution.path)
+                                          record.street_id, record.svg_path)
             return review.label if review.export_blocked else None
         except (OSError, ValueError) as error:
             return f"QA ledger unavailable: {error}"
@@ -74,6 +74,7 @@ class ArtworkPanelMixin:
         self.exclude_var.set(bool(review and review.export_blocked))
 
     def _refresh_current_face_label(self):
+        """Update the label from catalogue state without waiting on the edit transaction lock."""
         if 'current_face_var' not in self.__dict__:
             return
         data, street = self.state.selected_dataset, self.state.selected_street
@@ -81,15 +82,10 @@ class ArtworkPanelMixin:
             self.current_face_var.set('Select a face')
             return
         using = 'Face unavailable'
-        try:
-            resolution = resolve_authoritative_face_svg(self.preprocessed_catalogue.root, data, street)
-            record = self._selected_artwork_record()
-            if resolution.path is not None and resolution.path.is_file():
-                using = 'Edited face' if resolution.state.value == 'MANUAL_APPROVED' else 'Generated face'
-        except (OSError, ValueError) as error:
-            if isinstance(error, SvgApprovalError):
-                self._show_error(str(error))
-        self.current_face_var.set(f'{street.id} \u2014 {street.display_name}\nUsing: {using}')
+        record = self._selected_artwork_record()
+        if record is not None and record.svg_path is not None and record.svg_path.is_file():
+            using = 'Edited face' if record.state and record.state.value == 'MANUAL_APPROVED' else 'Generated face'
+        self.current_face_var.set(f'{street.id} — {street.display_name}\nUsing: {using}')
 
     def _reset_artwork_preview(self, record=None):
         self._review_target = None
@@ -117,6 +113,10 @@ class ArtworkPanelMixin:
 
     def _edit_artwork(self):
         try:
+            grid = self.__dict__.get('face_grid')
+            if grid is not None and any(monitor.pending is not None for monitor in grid.monitors.values()):
+                self.status_var.set('Finishing the previous Inkscape save — try again in a moment.')
+                return
             workspace = self._workspace()
             workspace.create_or_get_working_edit()
             executable = find_inkscape_executable(self.__dict__.get("_inkscape_executable"))
