@@ -168,6 +168,13 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.printify_export_button.grid_remove()
             self.render_button.configure(text='Preview Mug')
             self.render_button.grid()
+            rear_design = ttk.Frame(controls)
+            rear_design.grid(row=8, column=0, sticky='ew', pady=(4, 0))
+            rear_design.columnconfigure(0, weight=1)
+            self._add_weight_control(
+                rear_design, 0, 'Rear highlighted-street width',
+                self.rear_weight_var, self.rear_weight_display,
+            )
             self.current_face_var = tk.StringVar(value='Select a face')
             ttk.Label(controls, textvariable=self.current_face_var, wraplength=270,
                       justify='left').grid(row=9, column=0, sticky='ew', pady=8)

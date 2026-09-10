@@ -1,4 +1,5 @@
 """Compact batch controls; workers communicate only through a queue."""
+from dataclasses import replace
 from pathlib import Path
 import queue
 import threading
@@ -200,6 +201,8 @@ class BatchExportPanel(ttk.LabelFrame):
         if data is None or self.plan.dataset.id != data.id:
             self.invalidate()
             return
+        if self.app.state.design_options != getattr(self.plan, "design_options", None):
+            self.plan = replace(self.plan, design_options=self.app.state.design_options)
         self.cancel_event.clear()
         self.set_busy(True, exporting=True)
         self.progress.set(f'Exporting 0 / {self.plan.summary.ready}')
