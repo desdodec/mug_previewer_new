@@ -28,10 +28,32 @@ def _composition(root: ET.Element) -> ET.Element:
     return matches[0]
 
 
+def _validate_plain_wrapper_chain(root: ET.Element, group: ET.Element, *, role: str) -> None:
+    """Allow only inert group wrappers between artwork and the SVG page."""
+    parents = {child: parent for parent in root.iter() for child in parent}
+    ancestor = parents.get(group)
+    if ancestor is None:
+        raise ValueError(f"{role.capitalize()} artwork is detached from the SVG page")
+    while ancestor is not root:
+        # Inkscape may wrap artwork in a plain layer group. A wrapper with a
+        # transform, style, or other presentation attribute would affect page
+        # placement and cannot safely be used as a canonical reference.
+        if ancestor.tag != SVG + "g" or any(
+            key not in ("id", "class") and not key.startswith(EDITOR_NAMESPACES)
+            for key in ancestor.attrib
+        ):
+            raise ValueError(f"Unsupported {role} artwork wrapper; cannot safely restore placement")
+        ancestor = parents.get(ancestor)
+        if ancestor is None:
+            raise ValueError(f"{role.capitalize()} artwork is detached from the SVG page")
+
+
 def corrected_svg(original: str, edited: str) -> str:
     """Restore canvas and outer placement, retaining all inner artwork edits.
 
-    Requires canonical face SVGs with a front-composition group. Only that
+    Requires canonical face SVGs with a front-composition group. Plain
+    Inkscape layer wrappers are allowed around that group, but wrappers that
+    alter presentation or placement are rejected. Only the composition
     group's outer transform is reset. Unsupported layouts raise ValueError.
     """
     reference = ET.fromstring(original)
@@ -40,19 +62,8 @@ def corrected_svg(original: str, edited: str) -> str:
         raise ValueError("Both inputs must be SVG documents")
     source_group = _composition(reference)
     edited_group = _composition(result)
-    if source_group not in list(reference):
-        raise ValueError("Original artwork must be directly inside the SVG page")
-    parents = {child: parent for parent in result.iter() for child in parent}
-    ancestor = parents[edited_group]
-    while ancestor is not result:
-        # Inkscape's plain layer wrapper is harmless. Presentation attributes
-        # or additional transforms would require a more general conversion.
-        if ancestor.tag != SVG + "g" or any(
-            key not in ("id", "class") and not key.startswith(EDITOR_NAMESPACES)
-            for key in ancestor.attrib
-        ):
-            raise ValueError("Unsupported artwork wrapper; cannot safely restore placement")
-        ancestor = parents[ancestor]
+    _validate_plain_wrapper_chain(reference, source_group, role="original")
+    _validate_plain_wrapper_chain(result, edited_group, role="edited")
     for root in (reference, result):
         if "transform" in root.attrib or "style" in root.attrib:
             raise ValueError("Unsupported page transform or style")
