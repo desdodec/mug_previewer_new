@@ -92,6 +92,7 @@ def test_prepared_dataset_options_only_show_sets_present_in_catalogue(tmp_path):
         tmp_path,
         {(prepared.id, prepared.streets[0].id): _record(prepared.id, prepared.streets[0].id)},
     )
+    (tmp_path / "faces" / prepared.id).mkdir(parents=True)
 
     result = prepared_dataset_options(options, catalogue)
 
@@ -122,6 +123,41 @@ def test_prepared_dropdown_follows_actual_preprocessed_dataset_folders(tmp_path)
     assert result[0].dataset.id == visible_id
     assert result[0].dataset.path == tmp_path / "previews" / visible_id
     assert not result[0].dataset.capabilities.context_rendering
+
+
+def test_face_folders_hide_stale_preview_only_datasets(tmp_path):
+    prepared = _dataset(tmp_path)
+    visible_id = "20260911_102131_test_borough"
+    stale_id = "20260905_150413_test_borough"
+    street = prepared.streets[0]
+    records = {
+        (visible_id, street.id): _record(visible_id, street.id),
+        (stale_id, street.id): _record(stale_id, street.id),
+    }
+    catalogue = PreprocessedCatalogue(tmp_path, records)
+    (tmp_path / "faces" / visible_id).mkdir(parents=True)
+    (tmp_path / "previews" / visible_id).mkdir(parents=True)
+    (tmp_path / "previews" / stale_id).mkdir(parents=True)
+    (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [
+        {"dataset_id": visible_id, "dataset_name": prepared.display_name,
+         "street_id": street.id, "street_name": street.display_name},
+        {"dataset_id": stale_id, "dataset_name": prepared.display_name,
+         "street_id": street.id, "street_name": street.display_name},
+    ]}), encoding="utf-8")
+
+    result = prepared_dataset_options([], catalogue)
+
+    assert [item.label for item in result] == [visible_id]
+
+
+def test_no_prepared_folders_means_no_prepared_dropdown_entries(tmp_path):
+    prepared = _dataset(tmp_path)
+    street = prepared.streets[0]
+    catalogue = PreprocessedCatalogue(
+        tmp_path, {(prepared.id, street.id): _record(prepared.id, street.id)}
+    )
+
+    assert prepared_dataset_options([], catalogue) == []
 
 
 def test_prepared_folder_stays_visible_when_source_run_is_missing(tmp_path):
@@ -175,6 +211,7 @@ def test_prepared_dataset_relinks_to_new_source_run_by_street_names(tmp_path):
         for street in original.streets
     }
     catalogue = PreprocessedCatalogue(tmp_path, records)
+    (tmp_path / "faces" / prepared_id).mkdir(parents=True)
     (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [
         {
             "dataset_id": prepared_id,
