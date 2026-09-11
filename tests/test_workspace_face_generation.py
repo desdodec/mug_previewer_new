@@ -11,6 +11,7 @@ from mug_previewer.ui.workspace_app import (
     face_generation_state,
     prepared_dataset_options,
     preprocess_summary_text,
+    source_dataset_mapping,
 )
 from mug_previewer.diagnostics.front_candidates import ProductionTriageStatus
 
@@ -95,14 +96,75 @@ def test_prepared_dataset_options_only_show_sets_present_in_catalogue(tmp_path):
     result = prepared_dataset_options(options, catalogue)
 
     assert [option.dataset.id for option in result] == [prepared.id]
+    assert [option.label for option in result] == [prepared.id]
+
+
+def test_prepared_dropdown_follows_actual_preprocessed_dataset_folders(tmp_path):
+    prepared = _dataset(tmp_path)
+    visible_id = prepared.id
+    hidden_id = "catalogue-only"
+    records = {
+        (visible_id, prepared.streets[0].id): _record(visible_id, prepared.streets[0].id),
+        (hidden_id, prepared.streets[0].id): _record(hidden_id, prepared.streets[0].id),
+    }
+    catalogue = PreprocessedCatalogue(tmp_path, records)
+    (tmp_path / "previews" / visible_id).mkdir(parents=True)
+    (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [
+        {"dataset_id": visible_id, "dataset_name": prepared.display_name,
+         "street_id": prepared.streets[0].id, "street_name": prepared.streets[0].display_name},
+        {"dataset_id": hidden_id, "dataset_name": "Hidden",
+         "street_id": prepared.streets[0].id, "street_name": prepared.streets[0].display_name},
+    ]}), encoding="utf-8")
+
+    result = prepared_dataset_options([], catalogue)
+
+    assert [item.label for item in result] == [visible_id]
+    assert result[0].dataset.id == visible_id
+    assert result[0].dataset.path == tmp_path / "previews" / visible_id
+    assert not result[0].dataset.capabilities.context_rendering
+
+
+def test_prepared_folder_stays_visible_when_source_run_is_missing(tmp_path):
+    prepared = _dataset(tmp_path)
+    prepared_id = "20260905_150413_test_borough_streets_parks_water_boundary_clip"
+    street = prepared.streets[0]
+    catalogue = PreprocessedCatalogue(
+        tmp_path, {(prepared_id, street.id): _record(prepared_id, street.id)}
+    )
+    (tmp_path / "previews" / prepared_id).mkdir(parents=True)
+    (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [{
+        "dataset_id": prepared_id,
+        "dataset_name": prepared.display_name,
+        "street_id": street.id,
+        "street_name": street.display_name,
+        "success": True,
+        "production_state": "AUTO_APPROVED",
+    }]}), encoding="utf-8")
+
+    result = prepared_dataset_options([], catalogue)
+
+    assert [item.label for item in result] == [prepared_id]
+    assert result[0].dataset.get_street(street.id) is not None
+    assert result[0].dataset.get_street(street.id).context_path is None
+
+
+def test_source_dropdown_labels_are_real_paths_below_dataset_root(tmp_path):
+    root = tmp_path / "OS_Mail_Addresses"
+    dataset_path = root / "workflow_outputs_v7" / "20260911_102131_test_borough"
+    dataset_path.parent.mkdir(parents=True)
+    shutil.copytree(FIXTURE, dataset_path)
+    dataset = load_dataset(dataset_path)
+
+    mapping = source_dataset_mapping([DatasetOption("Friendly label", dataset)], root)
+
+    assert list(mapping) == [str(Path("workflow_outputs_v7") / "20260911_102131_test_borough")]
+    assert next(iter(mapping.values())).path == dataset_path
 
 
 def test_prepared_dataset_relinks_to_new_source_run_by_street_names(tmp_path):
     original = _dataset(tmp_path)
     prepared_id = "20260905_150413_test_borough_streets_parks_water_boundary_clip"
     source_id = "20260911_102131_test_borough_streets_parks_water_boundary_clip"
-    # Simulate a later source run whose numeric street ids changed while the
-    # street identities and rear-map assets remain the same.
     source_streets = tuple(
         replace(street, id=f"9{index:03d}")
         for index, street in enumerate(original.streets)
@@ -128,6 +190,7 @@ def test_prepared_dataset_relinks_to_new_source_run_by_street_names(tmp_path):
     result = prepared_dataset_options([DatasetOption("Current source", source)], catalogue)
 
     assert len(result) == 1
+    assert result[0].label == prepared_id
     linked = result[0].dataset
     assert linked.id == prepared_id
     assert linked.display_name == original.display_name
