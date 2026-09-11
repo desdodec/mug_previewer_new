@@ -15,6 +15,7 @@ def make_dataset(path: Path) -> Path:
     shutil.copytree(FIXTURE, path)
     return path
 
+
 def test_loader_preserves_ids_unicode_context_and_metrics(tmp_path: Path) -> None:
     data = load_dataset(make_dataset(tmp_path / "20260824_101707_test_borough_streets_parks_water_boundary_clip"))
     assert data.display_name == "Test Borough"
@@ -23,12 +24,14 @@ def test_loader_preserves_ids_unicode_context_and_metrics(tmp_path: Path) -> Non
     assert data.find_streets("café")[0].id == "0002"
     assert data.capabilities.metric_context_framing
 
+
 def test_missing_glyph_warns_but_dataset_loads(tmp_path: Path) -> None:
     path = make_dataset(tmp_path / "dataset")
     (path / "glyphs" / "0002_Café Road.svg").unlink()
     data = load_dataset(path)
     assert len(data.streets) == 1
     assert "skipped" in data.warnings[0]
+
 
 def test_old_dataset_and_failures(tmp_path: Path) -> None:
     path = make_dataset(tmp_path / "old")
@@ -45,6 +48,7 @@ def test_old_dataset_and_failures(tmp_path: Path) -> None:
     assert not validate_dataset(tmp_path / "missing").valid
     bad = tmp_path / "bad"; bad.mkdir()
     assert not validate_dataset(bad).valid
+
 
 def test_config_precedence(tmp_path: Path) -> None:
     project, local = tmp_path / "project.toml", tmp_path / "local.toml"
@@ -63,3 +67,45 @@ def test_optional_context_and_discovery(tmp_path: Path) -> None:
     assert data.capabilities.glyph_rendering
     assert not data.capabilities.context_rendering
     assert len(discover_datasets(root)) == 1
+
+
+def test_discovery_accepts_stable_parent_above_version_folder(tmp_path: Path) -> None:
+    parent = tmp_path / "OS_Mail_Addresses"
+    parent.mkdir()
+    make_dataset(
+        parent
+        / "workflow_outputs_v7"
+        / "20260911_100000_test_borough_streets_parks_water_boundary_clip"
+    )
+
+    found = discover_datasets(parent)
+
+    assert len(found) == 1
+    assert found[0].dataset.display_name == "Test Borough"
+    assert "workflow_outputs_v7" in str(found[0].dataset.paths.root)
+
+
+def test_discovery_recovers_when_configured_version_folder_was_renamed(tmp_path: Path) -> None:
+    parent = tmp_path / "OS_Mail_Addresses"
+    parent.mkdir()
+    stale = parent / "workflow_outputs_v6"
+    make_dataset(
+        parent
+        / "workflow_outputs_v7"
+        / "20260911_100000_test_borough_streets_parks_water_boundary_clip"
+    )
+
+    found = discover_datasets(stale)
+
+    assert len(found) == 1
+    assert found[0].dataset.display_name == "Test Borough"
+
+
+def test_parent_discovery_is_bounded(tmp_path: Path) -> None:
+    parent = tmp_path / "datasets"
+    parent.mkdir()
+    make_dataset(parent / "container" / "nested" / "dataset")
+
+    # The stable-parent scan is deliberately bounded: parent -> container -> nested.
+    # A dataset a third level below the chosen root should not be picked up silently.
+    assert discover_datasets(parent) == []
