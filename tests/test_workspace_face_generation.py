@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+import json
 import shutil
 
 from mug_previewer.datasets.loader import load_dataset
@@ -94,6 +95,47 @@ def test_prepared_dataset_options_only_show_sets_present_in_catalogue(tmp_path):
     result = prepared_dataset_options(options, catalogue)
 
     assert [option.dataset.id for option in result] == [prepared.id]
+
+
+def test_prepared_dataset_relinks_to_new_source_run_by_street_names(tmp_path):
+    original = _dataset(tmp_path)
+    prepared_id = "20260905_150413_test_borough_streets_parks_water_boundary_clip"
+    source_id = "20260911_102131_test_borough_streets_parks_water_boundary_clip"
+    # Simulate a later source run whose numeric street ids changed while the
+    # street identities and rear-map assets remain the same.
+    source_streets = tuple(
+        replace(street, id=f"9{index:03d}")
+        for index, street in enumerate(original.streets)
+    )
+    source = replace(original, id=source_id, streets=source_streets)
+    records = {
+        (prepared_id, street.id): _record(prepared_id, street.id)
+        for street in original.streets
+    }
+    catalogue = PreprocessedCatalogue(tmp_path, records)
+    (tmp_path / "preprocess_index.json").write_text(json.dumps({"records": [
+        {
+            "dataset_id": prepared_id,
+            "dataset_name": original.display_name,
+            "street_id": street.id,
+            "street_name": street.display_name,
+            "success": True,
+            "production_state": "AUTO_APPROVED",
+        }
+        for street in original.streets
+    ]}), encoding="utf-8")
+
+    result = prepared_dataset_options([DatasetOption("Current source", source)], catalogue)
+
+    assert len(result) == 1
+    linked = result[0].dataset
+    assert linked.id == prepared_id
+    assert linked.display_name == original.display_name
+    assert linked.path == source.path
+    assert [street.id for street in linked.streets] == [street.id for street in original.streets]
+    assert [street.display_name for street in linked.streets] == [street.display_name for street in original.streets]
+    assert [street.context_path for street in linked.streets] == [street.context_path for street in source_streets]
+    assert any("relinked to source map dataset" in warning for warning in linked.warnings)
 
 
 def test_busy_generation_blocks_duplicate_start(tmp_path):
