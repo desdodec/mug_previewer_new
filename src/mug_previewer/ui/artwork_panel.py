@@ -52,6 +52,12 @@ class ArtworkPanelMixin:
         record = self._selected_artwork_record()
         if record is None:
             return "Select prepared artwork before exporting."
+        data = self.state.selected_dataset
+        if data is not None and getattr(data, "format_name", "") == "prepared-only":
+            return (
+                "Prepared face artwork is present, but no source map dataset is linked for this set. "
+                "Choose or restore the corresponding source dataset before exporting a mug."
+            )
         try:
             if not self._preprocessed_status(record).export_allowed:
                 return 'This face cannot be rendered.'
