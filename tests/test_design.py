@@ -42,7 +42,7 @@ def test_design_options_accept_global_weight_boundaries(value: float) -> None:
     assert options.rear_highlight_weight == value
 
 
-@pytest.mark.parametrize("value", [0.74, 1.51, float("inf"), float("nan")])
+@pytest.mark.parametrize("value", [0.24, 1.51, float("inf"), float("nan")])
 def test_design_options_reject_invalid_weight_values(value: float) -> None:
     with pytest.raises(ValueError):
         DesignOptions(front_feature_weight=value)
