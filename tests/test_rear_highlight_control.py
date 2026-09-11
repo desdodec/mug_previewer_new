@@ -49,7 +49,7 @@ def test_stroke_scaling_preserves_every_other_svg_attribute():
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)
-@pytest.mark.parametrize('weight, renderer_scale', [(1.0, 0.50), (0.75, 0.375)])
+@pytest.mark.parametrize('weight, renderer_scale', [(1.0, 0.50), (0.75, 0.375), (0.25, 0.125)])
 def test_prepared_preview_single_and_batch_render_selected_width(prepared, monkeypatch, provider, weight, renderer_scale):
     root, data, records, write = prepared
     from test_batch_export import svg
@@ -129,10 +129,11 @@ def test_prepared_workspace_exposes_rear_control(prepared):
         assert label.master.winfo_manager() == 'grid'
         scale = next(w for w in label.master.winfo_children() if isinstance(w, tk.Scale))
         assert str(scale.cget('variable')) == str(app.rear_weight_var)
+        assert float(scale.cget('from')) == pytest.approx(0.25)
         assert scale.get() == 1.0
-        scale.set(1.25)
+        scale.set(0.25)
         app._design_changed()
-        assert app.state.design_options.rear_highlight_weight == 1.25
+        assert app.state.design_options.rear_highlight_weight == 0.25
     finally:
         root.destroy()
 
