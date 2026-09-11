@@ -9,7 +9,7 @@ from .rendering.artwork import WrapRenderOptions
 from .rendering.context_map import ContextRenderOptions, REAR_STREET_HIGHLIGHT_SCALE
 from .rendering.face import FaceRenderOptions, STREET_STROKE_MULTIPLIER
 
-DESIGN_WEIGHT_MIN = 0.75
+DESIGN_WEIGHT_MIN = 0.25
 REAR_HIGHLIGHT_WEIGHT_MIN = 0.25
 DESIGN_WEIGHT_MAX = 1.50
 DESIGN_WEIGHT_STEP = 0.05
