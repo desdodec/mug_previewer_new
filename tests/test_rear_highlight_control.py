@@ -49,7 +49,7 @@ def test_stroke_scaling_preserves_every_other_svg_attribute():
 
 
 @pytest.mark.parametrize('provider', PROVIDERS)
-@pytest.mark.parametrize('weight, renderer_scale', [(1.0, 0.85), (0.75, 0.6375)])
+@pytest.mark.parametrize('weight, renderer_scale', [(1.0, 0.50), (0.75, 0.375)])
 def test_prepared_preview_single_and_batch_render_selected_width(prepared, monkeypatch, provider, weight, renderer_scale):
     root, data, records, write = prepared
     from test_batch_export import svg

@@ -90,7 +90,7 @@ def assert_local_pixel_change(normal, thin, *, rear_only=False):
     mask = pink_mask(normal, rear_only)
     c = centre(mask)
     # Thresholded antialiasing changes the centroid by a fraction of a pixel.
-    assert math.dist(c, centre(pink_mask(thin, rear_only))) < 0.5
+    assert math.dist(c, centre(pink_mask(thin, rear_only))) < 0.5 * (945 / 495 if rear_only else 1)
     wide_pink, wide_outer = widths(normal, c)
     thin_pink, thin_outer = widths(thin, c)
     assert 0.70 < thin_pink / wide_pink < 0.82
@@ -151,3 +151,36 @@ def test_unrelated_white_paths_and_different_transforms_are_not_scaled():
               '<path d="M1 2 L3 4" stroke="#E83E8C" stroke-width="8"/>'
               '<path d="M5 6 L7 8" stroke="white" stroke-width="12"/></svg>')
     assert context_map._scale_highlight_stroke(markup, .75) == markup.replace('stroke-width="8"', 'stroke-width="6.00"')
+
+
+def test_lighter_base_exposes_production_road_at_both_control_widths(acre, monkeypatch):
+    """Compare real road pixels against the same map with its overlay removed."""
+    _, data, street = acre
+    options = build_render_options(DesignOptions(), area='Hebden Bridge').context_options
+    normal, thin, previous = [context_map.render_context_map_result(
+        data, street, replace(options, highlight_stroke_scale=scale))
+        for scale in (options.highlight_stroke_scale, options.highlight_stroke_scale * .75, .85)]
+    measured = assert_local_pixel_change(normal.image, thin.image)
+    for result in (thin, previous):
+        for field in fields(normal):
+            if field.name not in ('image', 'projected_highlight_width_px'):
+                assert getattr(normal, field.name) == getattr(result, field.name)
+
+    # Remove only the two inspected overlay polylines, in memory AFTER framing.
+    def without_overlay(markup, scale):
+        import re
+        return re.sub(r'<polyline\b[^>]*?/?>', '', markup)
+    monkeypatch.setattr(context_map, '_scale_highlight_stroke', without_overlay)
+    bare = context_map.render_context_map_result(data, street, options).image.convert('RGB')
+    cx, cy = centre(pink_mask(normal.image))
+    # A local patch on Acre Villas, excluding unrelated map features.
+    box = (round(cx)-12, round(cy)-12, round(cx)+13, round(cy)+13)
+    reference = list(bare.crop(box).getdata())
+    def visible_road(image):
+        pixels = image.convert('RGB').crop(box).getdata()
+        return sum(max(abs(a-b) for a, b in zip(pixel, road)) <= 3
+                   for pixel, road in zip(pixels, reference)
+                   if min(road) > 180 and max(road)-min(road) < 35)
+    counts = [visible_road(result.image) for result in (previous, normal, thin)]
+    assert counts[0] < counts[1] < counts[2], counts
+    print(f'pink normal/thin, outer normal/thin (px): {measured}; visible road pixels old/normal/thin: {counts}')

@@ -45,7 +45,8 @@ ATTRIBUTION_MAP_GAP = 17.0
 ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 # Visual-only adjustment to the already-framed highlighted street.  It does
 # not affect the underlying street path, crop, map scale or palette.
-REAR_STREET_HIGHLIGHT_SCALE = 0.85
+# Scale the production pink centreline and white halo together to expose road edges.
+REAR_STREET_HIGHLIGHT_SCALE = 0.50
 
 # Legacy context SVGs predate the workflow-v6 metric contract. Their map is
 # an embedded raster in SVG-space, so these values operate in that coordinate

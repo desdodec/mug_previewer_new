@@ -147,10 +147,10 @@ def test_final_rear_highlight_scales_width_without_changing_geometry_or_colour()
         '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/></svg>'
     )
     adjusted = _scale_highlight_stroke(markup, REAR_STREET_HIGHLIGHT_SCALE)
-    assert REAR_STREET_HIGHLIGHT_SCALE == pytest.approx(0.85)
+    assert REAR_STREET_HIGHLIGHT_SCALE == pytest.approx(0.50)
     assert 'points="10,20 30,40"' in adjusted
     assert 'stroke="#e83e8c"' in adjusted
-    assert 'stroke-width="15.30"' in adjusted
+    assert 'stroke-width="9.00"' in adjusted
     assert '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/>' in adjusted
 
 
