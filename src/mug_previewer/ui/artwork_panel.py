@@ -51,7 +51,7 @@ class ArtworkPanelMixin:
             return "Select prepared artwork before exporting."
         try:
             if not self._preprocessed_status(record).export_allowed:
-                return 'Production approval required'
+                return 'This face cannot be rendered.'
             if record.svg_path is None or not record.svg_path.is_file():
                 return 'Authoritative SVG missing'
             validate_manual_svg(record.svg_path.read_bytes())
@@ -59,7 +59,7 @@ class ArtworkPanelMixin:
                                           record.street_id, record.svg_path)
             return review.label if review.export_blocked else None
         except (OSError, ValueError) as error:
-            return f"QA ledger unavailable: {error}"
+            return f"Cannot export prepared artwork: {error}"
 
     def _refresh_artwork(self, *, reset_review=False):
         self._refresh_current_face_label()

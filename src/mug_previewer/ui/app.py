@@ -209,14 +209,19 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.workflow_card.columnconfigure(0, weight=1)
         self.workflow_tabs.add(self.workflow_card, text='Create Faces')
         self._build_artwork_panel()
-        self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a street')
-        ttk.Label(self.workflow_card, textvariable=self.export_state_var, wraplength=330).grid(row=1, column=0, sticky='ew', pady=8)
-        self.export_button = ttk.Button(self.workflow_card, text='Export Inkthreadable PNG', command=self._start_inkthreadable_export, state='disabled')
-        self.export_button.grid(row=2, column=0, sticky='ew', pady=3)
-        self.printify_export_button = ttk.Button(self.workflow_card, text='Export Printify PNG', command=self._start_printify_export, state='disabled')
-        self.printify_export_button.grid(row=3, column=0, sticky='ew', pady=3)
         self.batch_panel = BatchExportPanel(self.workflow_tabs, self)
         self.workflow_tabs.add(self.batch_panel, text='Export PNG')
+        selected = ttk.LabelFrame(self.batch_panel, text='Selected face', padding=6)
+        selected.grid(row=13, column=0, sticky='ew', pady=8)
+        selected.columnconfigure(0, weight=1)
+        self.selected_export_face_var = tk.StringVar(value='Select a prepared face')
+        ttk.Label(selected, textvariable=self.selected_export_face_var, wraplength=320).grid(row=0, column=0, sticky='w')
+        self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a prepared face')
+        self.export_button = ttk.Button(selected, text='Export Selected Inkthreadable PNG', command=self._start_inkthreadable_export, state='disabled')
+        self.export_button.grid(row=1, column=0, sticky='ew', pady=3)
+        self.printify_export_button = ttk.Button(selected, text='Export Selected Printify PNG', command=self._start_printify_export, state='disabled')
+        self.printify_export_button.grid(row=2, column=0, sticky='ew', pady=3)
+        ttk.Label(selected, textvariable=self.export_state_var, wraplength=320).grid(row=3, column=0, sticky='ew')
         self._mug_front_image = None
 
     def _reload_workflow(self):
@@ -250,12 +255,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             counts = workflow_counts(items)
             self.workflow_counts_var.set(f'Workflow unavailable: {error}' if error else
                                          '\n'.join(f'{key}: {value}' for key, value in counts.items()))
-            selected = self.state.selected_street
             feedback = self.status_var.get()
             self._apply_filter()
-            if selected in self.state.filtered_streets:
-                self.street_list.selection_set(self.state.filtered_streets.index(selected))
-                self._select_street()
             if feedback in ('Face updated from Inkscape.',
                             'Edit detected \u2014 updating face...',
                             'Edit not applied \u2014 previous valid face preserved.'):
@@ -363,6 +364,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             return
         self._invalidate_active_production_status_request()
         self._invalidate_active_render_request()
+        selected = self.state.selected_street
         self.state.street_filter = self.search_var.get()
         self.state.filtered_streets = filter_streets(data.streets, self.state.street_filter)
         if 'workflow_var' in self.__dict__:
@@ -383,6 +385,13 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         if self._is_preprocessed_mode():
             self._clear_previews()
             self._reset_artwork_preview()
+        if selected is not None:
+            self.state.selected_street = next((street for street in data.streets if street.id == selected.id), None)
+            if self.state.selected_street in self.state.filtered_streets:
+                self.street_list.selection_set(self.state.filtered_streets.index(self.state.selected_street))
+                self._select_street()
+            elif self.state.selected_street is not None and self._is_preprocessed_mode():
+                self._show_preprocessed_selection(data, self.state.selected_street)
 
     def _select_street(self, _event: object | None = None) -> None:
         selection = self.street_list.curselection()
@@ -712,13 +721,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         provider_label: str,
         filename_suffix: str,
     ) -> None:
+        if self.__dict__.get("_single_export_busy", False):
+            return
         data, street = self.state.selected_dataset, self.state.selected_street
         if data is None or street is None:
             self._show_error("Select a street before exporting.")
-            return
-        readiness = getattr(self, "current_production_status", "unknown")
-        if readiness != "unknown" and (readiness is None or not readiness.export_allowed):
-            self._show_error("Production export is unavailable until this street is ready for production.")
             return
         if not self._is_preprocessed_mode():
             self._show_error('Production export requires prepared artwork with a current human QA pass. Open preprocessed mode.')
@@ -737,6 +744,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         )
         if not destination:
             return
+        self._single_export_busy = True
         self._set_export_buttons_state("disabled")
         self.status_var.set(f"Exporting {street.id} - {street.display_name} for {provider_label}...")
         threading.Thread(
@@ -772,30 +780,29 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.root.after(0, lambda: self._export_finished(provider_label, saved))
 
     def _export_finished(self, provider_label: str, destination: Path) -> None:
+        self._single_export_busy = False
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
         dimensions = "2362 x 1063" if provider_label == "Inkthreadable" else "2475 x 1155"
         self.status_var.set(f"Export complete: {provider_label} {dimensions} PNG saved to {destination}")
 
     def _export_failed(self, provider_label: str, detail: str) -> None:
+        self._single_export_busy = False
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
         LOGGER.error("%s export error: %s", provider_label, detail)
         self._show_error(f"Could not export {provider_label}: {detail}")
 
     def _set_export_buttons_state(self, state: str) -> None:
-        reason = 'select a street'
+        reason = 'Select a prepared face set and face.'
         if not self._is_preprocessed_mode():
-            state = 'disabled'
+            reason = 'Open a prepared face set to export.'
+        elif self.__dict__.get('_single_export_busy', False):
+            reason = 'Selected-face export is running.'
         else:
-            record = self._selected_artwork_record()
-            if record is None:
-                state = 'disabled'
-            elif not self._preprocessed_status(record).export_allowed:
-                reason = 'production approval required'
-                state = 'disabled'
-            else:
-                reason = self._qa_export_error()
-                if reason:
-                    state = 'disabled'
+            reason = self._qa_export_error()
+        state = 'disabled' if reason else 'normal'
+        if 'selected_export_face_var' in self.__dict__:
+            street = self.state.selected_street
+            self.selected_export_face_var.set(f'{street.id} \u2014 {street.display_name}' if street else 'Select a prepared face')
         self.export_button.configure(state=state)
         self.printify_export_button.configure(state=state)
         if 'export_state_var' in self.__dict__:

@@ -93,7 +93,7 @@ def test_plan_result_updates_counts_and_start_safely(panel, ready):
     panel.events.put(('plan', 0, planned(ready)))
     panel.drain()
     assert panel.start.options['state'] == ('normal' if ready else 'disabled')
-    assert panel.start.options['text'] == f'Export {ready} Included PNGs'
+    assert panel.start.options['text'] == f'Export {ready} Printify PNGs'
     assert 'Excluded: 1' in panel.summary.get()
     assert 'Unrenderable: 0' in panel.summary.get()
 

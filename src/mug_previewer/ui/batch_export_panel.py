@@ -79,7 +79,7 @@ class BatchExportPanel(ttk.LabelFrame):
         provider = self.provider.get() if hasattr(self, 'provider') else 'Inkthreadable'
         if count is None:
             return f'Export {provider} PNGs'
-        return f'Export {count} Included PNGs'
+        return f'Export {count} {provider} PNGs'
 
     def refresh_dataset_options(self):
         """Mirror only prepared workspace datasets into the export selector."""
@@ -131,7 +131,7 @@ class BatchExportPanel(ttk.LabelFrame):
                 self.app.state.selected_dataset = data
         self.invalidate()
 
-    def invalidate(self):
+    def invalidate(self, *, rebuild=True):
         self.plan = None
         if self.busy:
             # Let the worker finish, but reject any plan it returns.
@@ -141,10 +141,14 @@ class BatchExportPanel(ttk.LabelFrame):
         self.start.configure(state='disabled', text=self._start_label())
         data = self._selected_dataset()
         ready_to_plan = data is not None and bool(self.destination.get())
-        self.summary.set('Refresh the export plan for the selected prepared face set'
+        self.summary.set('Preparing export plan...'
                          if ready_to_plan else 'Select a prepared face set and destination first')
         self.refresh.configure(state='normal' if ready_to_plan else 'disabled')
         self.folder_button.configure(state='normal' if self.destination.get() or self.report_path else 'disabled')
+        if ready_to_plan and rebuild:
+            generation = self.generation
+            self.after(150, lambda: self.refresh_plan()
+                       if generation == self.generation and not self.busy else None)
 
     def choose_folder(self):
         if self.busy:
@@ -180,7 +184,7 @@ class BatchExportPanel(ttk.LabelFrame):
             self.invalidate()
             self.summary.set('Select a prepared face set and destination first')
             return
-        self.invalidate()
+        self.invalidate(rebuild=False)
         self._plan_invalidated = False
         self.set_busy(True)
         self.summary.set(f'Checking {data.display_name} prepared artwork and exclusions...')
@@ -208,6 +212,7 @@ class BatchExportPanel(ttk.LabelFrame):
             return
         self.cancel_event.clear()
         self.set_busy(True, exporting=True)
+        self.summary.set('Batch export is running. Wait for it to finish before starting another.')
         self.progress.set(f'Exporting 0 / {self.plan.summary.ready}')
         threading.Thread(target=self.export_worker, args=(self.generation, self.plan), daemon=False).start()
 
@@ -246,12 +251,15 @@ class BatchExportPanel(ttk.LabelFrame):
                                  f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\nExisting outputs: {s.existing}')
                 self.start.configure(text=self._start_label(s.ready),
                                      state='normal' if s.ready else 'disabled')
+                if not s.ready:
+                    self.summary.set(self.summary.get() + '\nNo included faces need exporting; check exclusions, artwork errors and existing outputs.')
             elif kind == 'result':
                 self.report_path = value.report_path
                 self.report_button.configure(state='normal')
                 self.summary.set(result_summary(value))
-                self.progress.set('Report saved. Refresh the plan before another batch.')
+                self.progress.set('Report saved. Updating export plan...')
                 self.plan = None
+                self.after(150, self.invalidate)
             else:
                 self.plan = None
                 self.summary.set(f'Batch cannot start or finish: {value}')
