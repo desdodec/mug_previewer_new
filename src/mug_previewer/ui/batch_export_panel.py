@@ -23,7 +23,7 @@ def result_summary(result):
 
 class BatchExportPanel(ttk.LabelFrame):
     def __init__(self, parent, app):
-        super().__init__(parent, text='Production batch', padding=6)
+        super().__init__(parent, text='Export all included faces', padding=6)
         self.app = app
         self.plan = None
         self.busy = False
@@ -36,11 +36,13 @@ class BatchExportPanel(ttk.LabelFrame):
         self.provider = tk.StringVar(value='Inkthreadable')
         self.destination = tk.StringVar()
         self.policy = tk.StringVar(value='Skip existing')
-        self.summary = tk.StringVar(value='Select a prepared face set and destination')
+        self.summary = tk.StringVar(
+            value='Batch export: choose a folder. Every included face in this prepared set will be exported.'
+        )
         self.progress = tk.StringVar()
         self.columnconfigure(0, weight=1)
 
-        ttk.Label(self, text='Prepared face set').grid(row=0, column=0, sticky='w')
+        ttk.Label(self, text='Prepared face set (batch exports all included faces)').grid(row=0, column=0, sticky='w')
         self.dataset_box = ttk.Combobox(self, textvariable=self.dataset, state='readonly')
         self.dataset_box.grid(row=1, column=0, sticky='ew')
         self.dataset_box.bind('<<ComboboxSelected>>', self.select_export_dataset)
@@ -50,7 +52,7 @@ class BatchExportPanel(ttk.LabelFrame):
                                         values=list(PROVIDERS), state='readonly')
         self.provider_box.grid(row=3, column=0, sticky='ew')
         self.provider_box.bind('<<ComboboxSelected>>', lambda e: self.invalidate())
-        self.choose = ttk.Button(self, text='Choose destination folder', command=self.choose_folder)
+        self.choose = ttk.Button(self, text='1. Choose batch export folder', command=self.choose_folder)
         self.choose.grid(row=4, column=0, sticky='ew', pady=(7, 0))
         ttk.Label(self, textvariable=self.destination, wraplength=320).grid(row=5, column=0, sticky='w')
         self.policy_box = ttk.Combobox(self, textvariable=self.policy,
@@ -58,7 +60,7 @@ class BatchExportPanel(ttk.LabelFrame):
         self.policy_box.grid(row=6, column=0, sticky='ew', pady=(7, 0))
         self.policy_box.bind('<<ComboboxSelected>>', lambda e: self.invalidate())
         ttk.Label(self, textvariable=self.summary, wraplength=320).grid(row=7, column=0, sticky='w', pady=(7, 0))
-        self.refresh = ttk.Button(self, text='Refresh Export Plan', command=self.refresh_plan, state='disabled')
+        self.refresh = ttk.Button(self, text='Recheck batch readiness', command=self.refresh_plan, state='disabled')
         self.refresh.grid(row=8, column=0, sticky='ew')
         self.start = ttk.Button(self, text=self._start_label(), command=self.start_batch, state='disabled')
         self.start.grid(row=9, column=0, sticky='ew', pady=(5, 0))
@@ -78,8 +80,8 @@ class BatchExportPanel(ttk.LabelFrame):
     def _start_label(self, count=None):
         provider = self.provider.get() if hasattr(self, 'provider') else 'Inkthreadable'
         if count is None:
-            return f'Export {provider} PNGs'
-        return f'Export {count} {provider} PNGs'
+            return f'2. Export ALL included {provider} PNGs'
+        return f'2. Export ALL {count} {provider} PNGs'
 
     def refresh_dataset_options(self):
         """Mirror only prepared workspace datasets into the export selector."""
@@ -141,8 +143,11 @@ class BatchExportPanel(ttk.LabelFrame):
         self.start.configure(state='disabled', text=self._start_label())
         data = self._selected_dataset()
         ready_to_plan = data is not None and bool(self.destination.get())
-        self.summary.set('Preparing export plan...'
-                         if ready_to_plan else 'Select a prepared face set and destination first')
+        self.summary.set(
+            'Preparing batch export readiness...'
+            if ready_to_plan
+            else 'Batch export: choose a folder. Every included face in this prepared set will be exported.'
+        )
         self.refresh.configure(state='normal' if ready_to_plan else 'disabled')
         self.folder_button.configure(state='normal' if self.destination.get() or self.report_path else 'disabled')
         if ready_to_plan and rebuild:
@@ -153,7 +158,7 @@ class BatchExportPanel(ttk.LabelFrame):
     def choose_folder(self):
         if self.busy:
             return
-        selected = filedialog.askdirectory(parent=self.app.root, title='Choose batch production destination')
+        selected = filedialog.askdirectory(parent=self.app.root, title='Choose folder for all exported PNGs')
         if selected:
             self.destination.set(selected)
             self.invalidate()
@@ -182,12 +187,12 @@ class BatchExportPanel(ttk.LabelFrame):
         data = self._selected_dataset()
         if data is None or not self.destination.get():
             self.invalidate()
-            self.summary.set('Select a prepared face set and destination first')
+            self.summary.set('Batch export: choose a prepared face set and export folder first.')
             return
         self.invalidate(rebuild=False)
         self._plan_invalidated = False
         self.set_busy(True)
-        self.summary.set(f'Checking {data.display_name} prepared artwork and exclusions...')
+        self.summary.set(f'Checking all included faces in {data.display_name}...')
         args = (self.app.preprocessed_catalogue.root, data, PROVIDERS[self.provider.get()],
                 Path(self.destination.get()))
         options = dict(replace_existing=self.policy.get() == 'Replace existing',
@@ -212,7 +217,10 @@ class BatchExportPanel(ttk.LabelFrame):
             return
         self.cancel_event.clear()
         self.set_busy(True, exporting=True)
-        self.summary.set('Batch export is running. Wait for it to finish before starting another.')
+        self.summary.set(
+            f'Batch export is running: exporting all {self.plan.summary.ready} included faces. '
+            'Wait for it to finish before starting another.'
+        )
         self.progress.set(f'Exporting 0 / {self.plan.summary.ready}')
         threading.Thread(target=self.export_worker, args=(self.generation, self.plan), daemon=False).start()
 
@@ -247,8 +255,14 @@ class BatchExportPanel(ttk.LabelFrame):
                     continue
                 self.plan = value
                 s = value.summary
-                self.summary.set(f'{value.dataset.display_name}: {s.total} prepared\nIncluded: {s.ready} | Excluded: {s.excluded}\n'
-                                 f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\nExisting outputs: {s.existing}')
+                provider = self.provider.get()
+                self.summary.set(
+                    f'{value.dataset.display_name}: {s.total} prepared\n'
+                    f'Ready to export: {s.ready} | Excluded: {s.excluded}\n'
+                    f'Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\n'
+                    f'Existing outputs: {s.existing}\n'
+                    f'Click "2. Export ALL {s.ready} {provider} PNGs" below.'
+                )
                 self.start.configure(text=self._start_label(s.ready),
                                      state='normal' if s.ready else 'disabled')
                 if not s.ready:
