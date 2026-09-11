@@ -55,7 +55,7 @@ def _resolve_front_source(preprocessed: Path | str, dataset: Dataset, street: St
     try:
         source = resolve_prepared_face_source(root, record)
     except (OSError, ValueError) as error:
-        raise AuthoritativeArtworkError(f"Prepared front artwork is unavailable: {error}") from error
+        raise AuthoritativeArtworkError(f"Prepared front artwork asset integrity problem: {error}") from error
     return resolution, source
 
 
