@@ -53,6 +53,30 @@ def face_generation_state(
     return FaceGenerationState(prepared, total, "Faces Generated", False)
 
 
+def source_dataset_mapping(
+    source_options: Sequence[DatasetOption],
+    root: Path | str | None,
+) -> dict[str, Dataset]:
+    """Label source choices by their real folder location below ``--dataset-root``."""
+    root_path = Path(root) if root is not None else None
+    result: dict[str, Dataset] = {}
+    for item in source_options:
+        path = item.dataset.path
+        if root_path is not None:
+            try:
+                label = str(path.relative_to(root_path))
+            except ValueError:
+                label = str(path)
+        else:
+            label = str(path)
+        if label in ("", "."):
+            label = path.name or item.dataset.id
+        if label in result:
+            label = f"{label} ({item.dataset.id})"
+        result[label] = item.dataset
+    return result
+
+
 def preprocess_summary_text(summary: PreprocessSummary) -> str:
     return (
         f"Processed: {summary.processed} | Reused: {summary.reused}\n"
@@ -84,7 +108,7 @@ class MugWorkspaceApp(MugPreviewerApp):
         panel = ttk.LabelFrame(self.workflow_card, text="Face generation", padding=6)
         panel.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         panel.columnconfigure(0, weight=1)
-        ttk.Label(panel, text="Source dataset").grid(row=0, column=0, sticky="w", pady=(0, 3))
+        ttk.Label(panel, text="Source dataset (from --dataset-root)").grid(row=0, column=0, sticky="w", pady=(0, 3))
         self.source_dataset_var = tk.StringVar()
         self.source_dataset_box = ttk.Combobox(
             panel,
@@ -112,7 +136,7 @@ class MugWorkspaceApp(MugPreviewerApp):
             panel.refresh_dataset_options()
 
     def refresh_datasets(self) -> None:
-        """Keep the workspace selector prepared-only; source discovery stays in Create Faces."""
+        """Refresh source and prepared selectors from their configured roots."""
         try:
             source_options = dataset_options(self.state.dataset_root)
         except UIDataError as error:
@@ -126,7 +150,7 @@ class MugWorkspaceApp(MugPreviewerApp):
         if selected_source is not None:
             previous_source_id = selected_source.id
 
-        self.source_dataset_by_label = {item.label: item.dataset for item in source_options}
+        self.source_dataset_by_label = source_dataset_mapping(source_options, self.state.dataset_root)
         if "source_dataset_box" in self.__dict__:
             self.source_dataset_box["values"] = list(self.source_dataset_by_label)
             if previous_source_id is not None:
@@ -159,20 +183,19 @@ class MugWorkspaceApp(MugPreviewerApp):
             self.state.selected_dataset = None
             self.state.selected_street = None
 
-        # BatchExportPanel is constructed before this after-idle discovery runs.
-        # Refresh it now so its prepared-face-set dropdown does not stay empty.
         self._refresh_batch_dataset_options()
 
         if catalogue is None:
-            self.status_var.set(f"{len(self.state.datasets)} datasets found. Select a dataset.")
+            self.status_var.set(f"{len(self.state.datasets)} source datasets found. Select a dataset.")
         elif self.state.datasets:
             self.status_var.set(
-                f"{len(self.state.datasets)} prepared face sets found. Select a prepared face set."
+                f"{len(self.state.datasets)} prepared folders found under {catalogue.root}. "
+                "Select a prepared face set."
             )
         else:
             self.status_var.set(
-                "No prepared face sets could be linked to source map data. "
-                "Check the source parent folder or create a new source run."
+                f"No prepared dataset folders were found under {catalogue.root / 'faces'} "
+                f"or {catalogue.root / 'previews'}."
             )
         self._refresh_face_generation_state()
 
@@ -180,8 +203,12 @@ class MugWorkspaceApp(MugPreviewerApp):
         super()._select_dataset(_event)
         data = self.state.selected_dataset
         if data is not None and "source_dataset_var" in self.__dict__:
+            # A prepared id can differ from the replacement source-run id.  The
+            # linked dataset retains the real source path, which is the truthful
+            # way to identify the source choice in the Create Faces selector.
             label = next(
-                (label for label, source in self.source_dataset_by_label.items() if source.id == data.id),
+                (label for label, source in self.source_dataset_by_label.items()
+                 if source.id == data.id or source.path == data.path),
                 None,
             )
             if label is not None:
@@ -244,8 +271,6 @@ class MugWorkspaceApp(MugPreviewerApp):
         self._set_export_buttons_state("disabled")
         if "batch_panel" in self.__dict__:
             self.batch_panel.invalidate()
-        # PreprocessWorker deliberately uses preprocess_datasets with force=False,
-        # so existing valid records/manual approvals are reused rather than regenerated.
         self._face_preprocess_worker.start((data,), catalogue.root)
         self.root.after(75, self._poll_face_preprocess)
 
