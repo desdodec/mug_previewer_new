@@ -4,8 +4,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 from ..manual_svg_workspace import ManualSvgWorkspace, find_inkscape_executable, launch_inkscape
+from ..prepared_asset import resolve_prepared_face_source
 from ..review_index import current_review_state, svg_sha256
-from ..preprocess import validate_manual_svg, SvgApprovalError
 from .state import load_preprocessed_catalogue
 
 
@@ -44,19 +44,20 @@ class ArtworkPanelMixin:
             return None
         return record.svg_path
 
+    def _prepared_source(self, record):
+        return resolve_prepared_face_source(self.preprocessed_catalogue.root, record)
+
     def _qa_export_error(self):
-        """Read cached authoritative state only; never run save transactions on Tk's thread."""
+        """Read prepared state only; never run save transactions on Tk's thread."""
         record = self._selected_artwork_record()
         if record is None:
             return "Select prepared artwork before exporting."
         try:
             if not self._preprocessed_status(record).export_allowed:
                 return 'This face cannot be rendered.'
-            if record.svg_path is None or not record.svg_path.is_file():
-                return 'Authoritative SVG missing'
-            validate_manual_svg(record.svg_path.read_bytes())
+            source = self._prepared_source(record)
             review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id,
-                                          record.street_id, record.svg_path)
+                                          record.street_id, source.review_path)
             return review.label if review.export_blocked else None
         except (OSError, ValueError) as error:
             return f"Cannot export prepared artwork: {error}"
@@ -67,10 +68,27 @@ class ArtworkPanelMixin:
             return
         record = self._selected_artwork_record()
         workspace = self._workspace()
-        self.artwork_var.set('Save in Inkscape to update this face automatically.' if record else 'Select a face')
+        if record and not workspace.can_edit:
+            try:
+                source = self._prepared_source(record)
+                message = ('Cached face recovery is exportable, but its original SVG is missing.'
+                           if not source.is_svg else 'Save in Inkscape to update this face automatically.')
+            except (OSError, ValueError):
+                message = 'Prepared face artwork is unavailable.'
+        else:
+            message = 'Save in Inkscape to update this face automatically.' if record else 'Select a face'
+        self.artwork_var.set(message)
         self.artwork_buttons['edit'].configure(state='normal' if workspace.can_edit else 'disabled')
-        review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id, record.street_id,
-                                      self._formal_review_svg()) if record else None
+        if record:
+            try:
+                source = self._prepared_source(record)
+                review_path = source.review_path
+            except (OSError, ValueError):
+                review_path = self._formal_review_svg()
+            review = current_review_state(self.preprocessed_catalogue.root, record.dataset_id,
+                                          record.street_id, review_path)
+        else:
+            review = None
         self.exclude_var.set(bool(review and review.export_blocked))
 
     def _refresh_current_face_label(self):
@@ -83,8 +101,15 @@ class ArtworkPanelMixin:
             return
         using = 'Face unavailable'
         record = self._selected_artwork_record()
-        if record is not None and record.svg_path is not None and record.svg_path.is_file():
-            using = 'Edited face' if record.state and record.state.value == 'MANUAL_APPROVED' else 'Generated face'
+        if record is not None:
+            try:
+                source = self._prepared_source(record)
+                if source.is_svg:
+                    using = 'Edited face' if record.state and record.state.value == 'MANUAL_APPROVED' else 'Generated face'
+                else:
+                    using = 'Cached face recovery'
+            except (OSError, ValueError):
+                pass
         self.current_face_var.set(f'{street.id} — {street.display_name}\nUsing: {using}')
 
     def _reset_artwork_preview(self, record=None):

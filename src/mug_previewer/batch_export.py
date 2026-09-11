@@ -11,10 +11,11 @@ import unicodedata
 
 from .datasets.models import Dataset
 from .design import DesignOptions
-from .preprocess import INDEX_FILENAME, resolve_authoritative_face_svg, validate_manual_svg
+from .prepared_asset import resolve_prepared_face_source
+from .preprocess import INDEX_FILENAME, resolve_authoritative_face_svg
 from .preprocessed_export import export_preprocessed_provider_png
 from .providers import get_provider_profile
-from .review_index import current_review_state, svg_sha256
+from .review_index import current_review_state
 
 
 class BatchPlanningError(ValueError):
@@ -116,7 +117,6 @@ def production_filename(dataset_id: str, street_id: str, street_name: str) -> st
 
 
 def _records(root):
-    # Existing preprocessing loading drops corrupt entries; batches fail closed.
     try:
         payload = json.loads((root / INDEX_FILENAME).read_text(encoding='utf-8-sig'))
         if not isinstance(payload, dict) or not isinstance(payload.get('records'), list):
@@ -159,24 +159,20 @@ def _inspect(root, dataset, street_id, record, directory):
         if not record.get('success'):
             raise ValueError('Preprocessing record reports an asset error')
         resolution = resolve_authoritative_face_svg(root, dataset, street)
-        # Resolution can migrate a legacy path or accept a pending canonical save.
         record = _records(root)[(dataset.id, street_id)]
         item = replace(item, production_state=resolution.state.value,
                        record_fingerprint=json.dumps(record, sort_keys=True))
-        review = current_review_state(root, dataset.id, street_id, resolution.path)
-        item = replace(item, authoritative_svg=resolution.path,
+        if resolution.state.value == 'UNRENDERABLE_INPUT':
+            return replace(item, eligibility=Eligibility.UNRENDERABLE, reason='Source/input unusable')
+        source = resolve_prepared_face_source(root, record)
+        review = current_review_state(root, dataset.id, street_id, source.review_path)
+        item = replace(item, authoritative_svg=source.path,
+                       authoritative_svg_sha256=source.digest,
                        review_status=review.record.status if review.record else None,
                        review_state=review.state,
                        reviewed_svg_sha256=review.record.reviewed_svg_sha256 if review.record else None,
                        review_stale=review.stale,
                        review_fingerprint=json.dumps(asdict(review), sort_keys=True))
-        if resolution.state.value == 'UNRENDERABLE_INPUT':
-            return replace(item, eligibility=Eligibility.UNRENDERABLE, reason='Source/input unusable')
-        if resolution.path is None:
-            raise ValueError('Authoritative SVG missing or approval unavailable')
-        resolution.path.resolve().relative_to(root.resolve())
-        validate_manual_svg(resolution.path.read_bytes())
-        item = replace(item, authoritative_svg_sha256=svg_sha256(resolution.path))
         if review.export_blocked:
             return replace(item, eligibility=Eligibility.ASSET_ERROR if review.error else Eligibility.EXCLUDED,
                            reason=review.label)
@@ -191,7 +187,6 @@ def _inspect(root, dataset, street_id, record, directory):
 
 def build_batch_plan(root, dataset, provider_id, destination_root, *,
                      replace_existing=False, design_options=None):
-    """Reload indexes; classify every prepared record in the selected dataset."""
     get_provider_profile(provider_id)
     if destination_root is None or not str(destination_root).strip():
         raise BatchPlanningError('Choose a destination folder first')
@@ -246,7 +241,6 @@ def _atomic_report(path, payload):
 
 
 def execute_batch_export(plan, *, on_progress=None, cancel_event=None):
-    """Export independently, publish atomically, report every planned item."""
     started = datetime.now(timezone.utc).isoformat()
     plan.output_directory.mkdir(parents=True, exist_ok=True)
     results = []
@@ -271,12 +265,10 @@ def execute_batch_export(plan, *, on_progress=None, cancel_event=None):
                     export_preprocessed_provider_png(plan.root, plan.dataset,
                         plan.dataset.get_street(item.street_id), temporary,
                         profile_id=plan.provider_id, design_options=plan.design_options)
-                    # Check again before publication to catch changes during rendering.
                     _recheck(plan, current)
                     if plan.replace_existing:
                         os.replace(temporary, item.destination)
                     else:
-                        # Same-volume hard-link publication cannot overwrite a racing file.
                         try:
                             os.link(temporary, item.destination)
                         except FileExistsError:
