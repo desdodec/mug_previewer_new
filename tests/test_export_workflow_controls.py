@@ -89,7 +89,7 @@ def test_valid_inputs_automatically_plan_and_enable_batch(panel, monkeypatch):
     panel.events.put(('plan', panel.generation, planned()))
     panel.drain()
     assert panel.start.options['state'] == 'normal'
-    assert panel.start.options['text'] == 'Export 3 Printify PNGs'
+    assert panel.start.options['text'] == '2. Export ALL 3 Printify PNGs'
 
 
 def test_width_change_automatically_rebuilds(panel, monkeypatch):
