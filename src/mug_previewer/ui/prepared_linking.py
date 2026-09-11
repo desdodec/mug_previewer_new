@@ -81,25 +81,35 @@ def _prepared_records(catalogue: PreprocessedCatalogue) -> dict[str, list[dict[s
     return dict(groups)
 
 
-def _prepared_folder_ids(catalogue: PreprocessedCatalogue) -> set[str]:
-    """Return actual prepared dataset folder names below faces/previews.
+def _dataset_directories(container: Path) -> set[str]:
+    if not container.is_dir():
+        return set()
+    try:
+        return {
+            child.name
+            for child in container.iterdir()
+            if child.is_dir() and not child.name.startswith(".")
+        }
+    except OSError:
+        return set()
 
-    Cached-preview recovery means a prepared set may legitimately have only a
-    ``previews/<dataset>`` folder, so the two stores are treated as a union.
+
+def _prepared_folder_ids(catalogue: PreprocessedCatalogue) -> set[str]:
+    """Return the dataset folders that should appear in prepared dropdowns.
+
+    ``faces`` is the authoritative prepared-workspace directory.  If it contains
+    any dataset folders, the UI mirrors those folders exactly and ignores stale
+    historical preview-cache directories.
+
+    ``previews`` is used only as a disaster-recovery fallback when ``faces`` has
+    no dataset folders at all.  This preserves the cached-preview recovery path
+    for old workspaces without allowing old preview folders to pollute a fresh
+    prepared-face dropdown.
     """
-    result: set[str] = set()
-    for container_name in ("faces", "previews"):
-        container = catalogue.root / container_name
-        if not container.is_dir():
-            continue
-        try:
-            children = container.iterdir()
-        except OSError:
-            continue
-        for child in children:
-            if child.is_dir() and not child.name.startswith("."):
-                result.add(child.name)
-    return result
+    face_ids = _dataset_directories(catalogue.root / "faces")
+    if face_ids:
+        return face_ids
+    return _dataset_directories(catalogue.root / "previews")
 
 
 def _source_name_index(dataset: Dataset) -> dict[str, list[StreetRecord]]:
@@ -313,13 +323,14 @@ def prepared_dataset_options(
 ) -> list[DatasetOption]:
     """Build prepared dropdowns from actual ``--preprocessed`` folder content.
 
-    Source matching enriches a prepared set with map geometry when possible, but
-    it never filters the prepared dropdown.  Labels are the actual prepared
-    folder/dataset ids so the UI directly reflects what is on disk.
+    ``faces`` folders are authoritative for normal workspaces.  Preview-only
+    folders are considered only when there are no face dataset folders at all.
+    Source matching enriches a visible prepared set with map geometry when
+    possible, but never adds extra prepared entries.
     """
     groups = _prepared_records(catalogue)
     folder_ids = _prepared_folder_ids(catalogue)
-    prepared_ids = sorted((set(groups) & folder_ids) if folder_ids else set(groups))
+    prepared_ids = sorted(set(groups) & folder_ids)
 
     options: list[DatasetOption] = []
     for prepared_id in prepared_ids:
