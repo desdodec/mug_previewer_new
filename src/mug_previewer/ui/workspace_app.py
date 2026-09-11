@@ -11,6 +11,7 @@ from typing import Sequence
 from ..datasets.models import Dataset
 from ..preprocess import PreprocessProgress, PreprocessSummary
 from .app import MugPreviewerApp
+from .prepared_linking import prepared_dataset_options
 from .preprocess_ui import PreprocessWorker, WorkerFinished
 from .state import (
     DatasetOption,
@@ -50,15 +51,6 @@ def face_generation_state(
     if prepared < total:
         return FaceGenerationState(prepared, total, "Generate Missing Faces", True)
     return FaceGenerationState(prepared, total, "Faces Generated", False)
-
-
-def prepared_dataset_options(
-    source_options: Sequence[DatasetOption],
-    catalogue: PreprocessedCatalogue,
-) -> list[DatasetOption]:
-    """Return source datasets that have at least one prepared face record."""
-    prepared_ids = {dataset_id for dataset_id, _street_id in catalogue.records}
-    return [option for option in source_options if option.dataset.id in prepared_ids]
 
 
 def preprocess_summary_text(summary: PreprocessSummary) -> str:
@@ -179,7 +171,8 @@ class MugWorkspaceApp(MugPreviewerApp):
             )
         else:
             self.status_var.set(
-                "No prepared face sets yet. Choose a source dataset in Create Faces."
+                "No prepared face sets could be linked to source map data. "
+                "Check the source parent folder or create a new source run."
             )
         self._refresh_face_generation_state()
 
