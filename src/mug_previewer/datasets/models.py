@@ -102,6 +102,12 @@ class StreetRecord:
     bbox_span_m: float | None = None
     bbox_area_m2: float | None = None
     context_source_bounds: MetricBounds | None = None
+    ceremonial_county: str = ""
+    postcode_prefix: str = ""
+
+    @property
+    def locality_label(self) -> str:
+        return ", ".join(value for value in (self.ceremonial_county, self.postcode_prefix) if value)
 
 
 @dataclass(frozen=True)

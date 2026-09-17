@@ -156,6 +156,10 @@ class WorkflowV6DatasetLoader:
             return LoadResult(None, (f"Required street index is missing: {self.path / 'street_index.csv'}",))
         try:
             summary, stats = _json(paths.summary_path), _json(paths.statistics_path)
+            metadata_path = self.path / "image_metadata.json"
+            image_metadata = _json(metadata_path if metadata_path.is_file() else None).get("images", {})
+            if not isinstance(image_metadata, dict):
+                raise DatasetLoadError(f"Image metadata images must be an object: {metadata_path}")
             with paths.street_index_path.open(encoding="utf-8-sig", newline="") as stream:
                 reader = csv.DictReader(stream)
                 fields = set(reader.fieldnames or ())
@@ -179,6 +183,11 @@ class WorkflowV6DatasetLoader:
                 skipped += 1
                 continue
             street_name = row.get("street_name", "").strip() or row.get("requested_street", "").strip() or street_id
+            metadata = image_metadata.get(glyph.relative_to(self.path).as_posix(), {})
+            metadata = metadata if isinstance(metadata, dict) else {}
+            def metadata_text(key: str) -> str:
+                value = metadata.get(key)
+                return value.strip() if isinstance(value, str) else ""
             streets.append(StreetRecord(
                 id=street_id, group_id=row.get("group_id", "").strip() or None,
                 street_name=street_name, display_name=street_name, glyph_path=glyph,
@@ -188,6 +197,8 @@ class WorkflowV6DatasetLoader:
                 bbox_width_m=_number(row, "bbox_width_m"), bbox_height_m=_number(row, "bbox_height_m"),
                 bbox_span_m=_number(row, "bbox_span_m"), bbox_area_m2=_number(row, "bbox_area_m2"),
                 context_source_bounds=_context_crop_bounds(row, context_geometry),
+                ceremonial_county=metadata_text("ceremonial_county"),
+                postcode_prefix=metadata_text("postcode_prefix").upper(),
             ))
         if not streets:
             return LoadResult(None, ("No usable streets: no street-index rows resolved to glyph SVG files.",))

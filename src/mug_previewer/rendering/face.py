@@ -176,7 +176,7 @@ def _render_face_standard(
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
     title = select_title_font(street_name, font_stack)
-    area = options.area.strip()
+    area = street.locality_label or options.area.strip()
     title_y, area_y = _front_text_y_positions(
         height, options.title_locality_gap_delta, options.typography_block_y_offset,
     )
@@ -531,7 +531,7 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
     title = select_title_font(street_name, font_stack)
-    area = options.area.strip()
+    area = street.locality_label or options.area.strip()
     title_y, area_y = _front_text_y_positions(
         height, options.title_locality_gap_delta, options.typography_block_y_offset,
     )

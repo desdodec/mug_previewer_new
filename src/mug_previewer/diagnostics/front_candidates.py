@@ -747,6 +747,7 @@ def _asset_mask(markup: str, classes: set[str], *, role: str) -> Image.Image:
     return mask
 
 def _typography_mask(street: StreetRecord, area: str) -> Image.Image:
+    area = street.locality_label or area
     width, height = face.SOURCE_CANVAS_PX
     palette, font_stack = native.get_face_palette(native.DEFAULT_PALETTE_KEY), native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     text = street.display_name.strip() or street.street_name.strip() or street.id
