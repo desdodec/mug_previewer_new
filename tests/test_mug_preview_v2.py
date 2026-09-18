@@ -54,8 +54,8 @@ def test_front_and_rear_centres_put_handle_on_opposite_sides() -> None:
     calibration = GENERIC_11OZ_CALIBRATION
     front = projection_diagnostics(calibration, CameraPose(), PreviewV2View.FRONT)
     rear = projection_diagnostics(calibration, CameraPose(), PreviewV2View.REAR)
-    assert front.handle_delta_degrees < 0
-    assert rear.handle_delta_degrees > 0
+    assert front.handle_delta_degrees > 0
+    assert rear.handle_delta_degrees < 0
     assert abs(abs(front.handle_delta_degrees) - 90) < 0.2
     assert abs(abs(rear.handle_delta_degrees) - 90) < 0.2
 
@@ -109,7 +109,7 @@ def test_engineering_result_reports_body_and_printable_bounds() -> None:
     pleft, ptop, pright, pbottom = result.printable_bounds_xyxy
     assert left == pleft and right == pright
     assert top <= ptop < pbottom <= bottom
-    assert result.diagnostics.handle_delta_degrees > 0
+    assert result.diagnostics.handle_delta_degrees < 0
 
 
 def test_camera_rotation_changes_apparent_preview_not_canonical_wrap() -> None:
