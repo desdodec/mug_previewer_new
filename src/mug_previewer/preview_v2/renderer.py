@@ -6,8 +6,7 @@ from math import cos, pi
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter
 
-from ..preview.mockup import CANONICAL_WRAP_PREVIEW_GEOMETRY
-from .models import MugPreviewV2Options, PreviewV2Mode, PreviewV2View
+from .models import MugPreviewV2Options, PreviewV2Error, PreviewV2Mode, PreviewV2View
 from .projection import ProjectionDiagnostics, project_wrap_v2
 
 
@@ -47,6 +46,8 @@ def render_mug_preview_v2_result(
     top = cy - body_height // 2
     bottom = top + body_height
     body_bounds = (left, top, right, bottom)
+    if left < 0 or top < 0 or right > canvas_width or bottom > canvas_height:
+        raise PreviewV2Error("Calibrated mug body does not fit inside the preview scene.")
 
     printable_height = max(1, round(body_height * calibration.printable_height_fraction))
     printable_top = top + (body_height - printable_height) // 2
