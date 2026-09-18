@@ -276,6 +276,23 @@ compatibility path for its legacy 2362x1134 Gelato specification. New callers
 should use the ProviderProfile API above. A future Gelato ProviderProfile can
 migrate that path without changing canonical artwork.
 
+## Mug Previewer V2
+
+The prepared-artwork workspace now includes a provider-neutral **Mug Previewer V2** alongside the legacy photographic mockups.
+
+V2 keeps the canonical 2362x1063 production wrap unchanged, maps it onto a calibrated physical cylinder with an explicit unprinted handle gap, and separates true artwork centring from camera rotation.
+
+Prepared mode adds:
+
+- `V2 Customer Front`
+- `V2 Customer Rear`
+- `V2 Engineering Rear`
+- a preview-only camera yaw control from -30° to +30°
+
+Use the engineering view at **0° yaw** to judge true centring. Changing camera yaw alters only the mockup view and never changes provider artwork or export.
+
+See `docs/mug_previewer_v2.md` for the geometry model and calibration roadmap.
+
 ## Desktop preview UI
 
 The first desktop UI provides a local workflow for selecting a workflow-v6 dataset, filtering streets, and viewing front/rear production mug mockups. It uses standard-library Tkinter, so no new UI dependency or web server is needed.
