@@ -17,12 +17,14 @@ from ..diagnostics.front_candidates import ProductionTriageStatus
 from ..exporting import save_provider_export
 from ..manual import approved_override_for_street, load_manual_overrides
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview, scaled_mug_preview_layout
+from ..preview_v2 import MugPreviewV2Options, PreviewScene, render_mug_preview_v2
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
 from .production import preview_render_override
 
 PREVIEW_SIZE = (512, 768)
 SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(0.5)
+SCREEN_V2_SCENE = PreviewScene(canvas_size=(700, 560), body_height_px=420)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
 PREPROCESS_INDEX_FILENAME = "preprocess_index.json"
@@ -47,6 +49,9 @@ class PreviewPair:
     front: Image.Image
     rear: Image.Image
     framing_mode: str
+    v2_front: Image.Image | None = None
+    v2_rear: Image.Image | None = None
+    v2_engineering: Image.Image | None = None
 
 
 @dataclass(frozen=True)
@@ -376,7 +381,19 @@ def render_preview_pair(
             raise UIDataError(
                 f"{name} preview renderer returned {preview.mode} {preview.size}; expected RGBA {PREVIEW_SIZE}."
             )
-    return PreviewPair(wrap=wrap, front=front, rear=rear, framing_mode=framing_mode)
+    v2_front = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="front", mode="customer"),
+    )
+    v2_rear = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="rear", mode="customer"),
+    )
+    v2_engineering = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="rear", mode="engineering"),
+    )
+    return PreviewPair(
+        wrap=wrap, front=front, rear=rear, framing_mode=framing_mode,
+        v2_front=v2_front, v2_rear=v2_rear, v2_engineering=v2_engineering,
+    )
 
 
 def export_provider_png(
