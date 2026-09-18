@@ -24,9 +24,10 @@ class MugCalibration:
     """Calibrated visual geometry, deliberately separate from production export specs.
 
     wrap_span_degrees says how much of the physical cylinder is covered by
-    the canonical flat print strip. The remaining arc is unprinted ceramic
-    around the handle. This lets V2 model the handle gap rather than wrapping
-    the supplied artwork through 360 degrees.
+    the canonical flat print canvas. The canonical canvas already contains its
+    measured central handle/seam exclusion zone; the remaining arc here is the
+    opposite-side area outside that canvas. V2 therefore models both blank
+    regions explicitly instead of pretending the flat canvas covers 360 degrees.
     """
 
     id: str
@@ -125,7 +126,9 @@ class MugPreviewV2Options:
 
 # The starting calibration is intentionally provider-neutral. The 300-degree
 # span makes the current canonical front/rear centres exactly opposite on the
-# virtual cylinder while leaving a 60-degree unprinted handle gap. Provider- or
+# virtual cylinder while leaving a 60-degree opposite-side arc outside the
+# canonical print canvas. The existing central seam zone remains the handle gap.
+# Provider- or
 # SKU-specific calibrations can replace this without changing the renderer.
 GENERIC_11OZ_CALIBRATION = MugCalibration(
     id="generic-11oz-v2",
