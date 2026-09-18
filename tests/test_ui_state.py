@@ -250,3 +250,44 @@ def test_preview_uses_screen_mockup_layout_and_approved_placement(tmp_path: Path
     options = captured[0]
     assert options.face_options.manual_override is override
     assert [item.layout.canvas_size for item in captured[1:]] == [ui_state.PREVIEW_SIZE, ui_state.PREVIEW_SIZE]
+
+def test_prepared_preview_pair_populates_v2_views_without_regenerating_artwork(monkeypatch) -> None:
+    wrap = Image.new("RGBA", (2362, 1063), (12, 34, 56, 255))
+    dataset = SimpleNamespace()
+    street = SimpleNamespace()
+    legacy_calls = []
+    v2_calls = []
+
+    monkeypatch.setattr(
+        "mug_previewer.preprocessed_export.render_preprocessed_wrap",
+        lambda root, data, item, **kwargs: wrap,
+    )
+
+    def fake_legacy(source, options):
+        assert source is wrap
+        legacy_calls.append(options.orientation)
+        return Image.new("RGBA", ui_state.PREVIEW_SIZE)
+
+    def fake_v2(source, options):
+        assert source is wrap
+        v2_calls.append((str(options.view), str(options.mode)))
+        return Image.new("RGBA", options.scene.canvas_size)
+
+    monkeypatch.setattr(ui_state, "render_mug_preview", fake_legacy)
+    monkeypatch.setattr(ui_state, "render_mug_preview_v2", fake_v2)
+
+    result = ui_state.render_prepared_preview_pair("prepared", dataset, street)
+
+    assert result.wrap is wrap
+    assert legacy_calls == [
+        PreviewOrientation.FRONT_HANDLE_RIGHT,
+        PreviewOrientation.REAR_HANDLE_LEFT,
+    ]
+    assert v2_calls == [
+        ("front", "customer"),
+        ("rear", "customer"),
+        ("rear", "engineering"),
+    ]
+    assert result.v2_front is not None
+    assert result.v2_rear is not None
+    assert result.v2_engineering is not None
