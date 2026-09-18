@@ -1,1 +1,39 @@
-"""Provider-neutral Mug Previewer V2 geometry and rendering."""\n\nfrom .models import (\n    CameraPose,\n    GENERIC_11OZ_CALIBRATION,\n    MugCalibration,\n    MugPreviewV2Options,\n    PreviewScene,\n    PreviewV2Error,\n    PreviewV2Mode,\n    PreviewV2View,\n)\nfrom .projection import (\n    ProjectionDiagnostics,\n    build_circumference_strip,\n    circumference_width_px,\n    project_wrap_v2,\n    projection_diagnostics,\n)\nfrom .renderer import MugPreviewV2Result, render_mug_preview_v2, render_mug_preview_v2_result\n\n__all__ = [\n    "CameraPose",\n    "GENERIC_11OZ_CALIBRATION",\n    "MugCalibration",\n    "MugPreviewV2Options",\n    "PreviewScene",\n    "PreviewV2Error",\n    "PreviewV2Mode",\n    "PreviewV2View",\n    "ProjectionDiagnostics",\n    "build_circumference_strip",\n    "circumference_width_px",\n    "project_wrap_v2",\n    "projection_diagnostics",\n    "MugPreviewV2Result",\n    "render_mug_preview_v2",\n    "render_mug_preview_v2_result",\n]\n
+"""Provider-neutral Mug Previewer V2 geometry and rendering."""
+
+from .models import (
+    CameraPose,
+    GENERIC_11OZ_CALIBRATION,
+    MugCalibration,
+    MugPreviewV2Options,
+    PreviewScene,
+    PreviewV2Error,
+    PreviewV2Mode,
+    PreviewV2View,
+)
+from .projection import (
+    ProjectionDiagnostics,
+    build_circumference_strip,
+    circumference_width_px,
+    project_wrap_v2,
+    projection_diagnostics,
+)
+from .renderer import MugPreviewV2Result, render_mug_preview_v2, render_mug_preview_v2_result
+
+__all__ = [
+    "CameraPose",
+    "GENERIC_11OZ_CALIBRATION",
+    "MugCalibration",
+    "MugPreviewV2Options",
+    "PreviewScene",
+    "PreviewV2Error",
+    "PreviewV2Mode",
+    "PreviewV2View",
+    "ProjectionDiagnostics",
+    "build_circumference_strip",
+    "circumference_width_px",
+    "project_wrap_v2",
+    "projection_diagnostics",
+    "MugPreviewV2Result",
+    "render_mug_preview_v2",
+    "render_mug_preview_v2_result",
+]
