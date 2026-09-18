@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..preprocessed_export import export_preprocessed_provider_png
+from ..preview_v2 import CameraPose, MugPreviewV2Options, PreviewScene, render_mug_preview_v2
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
@@ -175,6 +176,21 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
                 rear_design, 0, 'Rear highlighted-street width',
                 self.rear_weight_var, self.rear_weight_display,
             )
+            self.v2_yaw_var = tk.DoubleVar(value=0.0)
+            self.v2_yaw_display = tk.StringVar(value='0°')
+            ttk.Label(rear_design, text='V2 preview camera yaw').grid(row=2, column=0, sticky='w', pady=(8, 0))
+            ttk.Label(rear_design, textvariable=self.v2_yaw_display).grid(row=2, column=1, sticky='e', pady=(8, 0))
+            self.v2_yaw_scale = tk.Scale(
+                rear_design, from_=-30, to=30, resolution=1, orient=tk.HORIZONTAL,
+                showvalue=False, variable=self.v2_yaw_var, command=self._v2_camera_changed,
+                highlightthickness=0,
+            )
+            self.v2_yaw_scale.grid(row=3, column=0, columnspan=2, sticky='ew')
+            ttk.Label(
+                rear_design,
+                text='0° = geometry check; rotate only to test perspective / mockup asymmetry',
+                wraplength=260, justify='left',
+            ).grid(row=4, column=0, columnspan=2, sticky='w')
             self.current_face_var = tk.StringVar(value='Select a face')
             ttk.Label(controls, textvariable=self.current_face_var, wraplength=270,
                       justify='left').grid(row=9, column=0, sticky='ew', pady=8)
@@ -188,7 +204,15 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.rear_card.grid_remove()
         self.preview_tabs = ttk.Notebook(self)
         self.preview_tabs.grid(row=0, column=1, sticky='nsew', padx=8)
-        for title, attribute in (('Face', 'front'), ('Mug Front', 'mug_front'), ('Mug Rear', 'rear'), ('Full Wrap', 'wrap')):
+        for title, attribute in (
+            ('Face', 'front'),
+            ('Legacy Mug Front', 'mug_front'),
+            ('Legacy Mug Rear', 'rear'),
+            ('V2 Customer Front', 'v2_front'),
+            ('V2 Customer Rear', 'v2_rear'),
+            ('V2 Engineering Rear', 'v2_engineering'),
+            ('Full Wrap', 'wrap'),
+        ):
             card = ttk.LabelFrame(self.preview_tabs, text=title, padding=8)
             card.columnconfigure(0, weight=1)
             card.rowconfigure(0, weight=1)
@@ -223,6 +247,10 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.printify_export_button.grid(row=2, column=0, sticky='ew', pady=3)
         ttk.Label(selected, textvariable=self.export_state_var, wraplength=320).grid(row=3, column=0, sticky='ew')
         self._mug_front_image = None
+        self._v2_front_image = None
+        self._v2_rear_image = None
+        self._v2_engineering_image = None
+        self._v2_yaw_pending = None
 
     def _reload_workflow(self):
         if 'workflow_items' not in self.__dict__ or self.state.selected_dataset is None:
@@ -687,12 +715,53 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         else:
             self.state.current_front_preview = pair.front
         self.state.current_rear_preview = pair.rear
+        self._v2_front_image = pair.v2_front
+        self._v2_rear_image = pair.v2_rear
+        self._v2_engineering_image = pair.v2_engineering
         self.state.framing_mode = pair.framing_mode
         self.state.render_status = "Ready"
         self.framing_var.set(f"Rear framing: {pair.framing_mode}")
         self.status_var.set(f"Rendered {data.display_name} \u2014 {street.id} {street.display_name}")
         self._refresh_preview_images()
         self.render_button.configure(state="normal")
+
+    def _v2_camera_changed(self, _value: str | None = None) -> None:
+        if 'v2_yaw_display' not in self.__dict__:
+            return
+        yaw = round(self.v2_yaw_var.get())
+        self.v2_yaw_display.set(f'{yaw:+d}°' if yaw else '0°')
+        if self.state.current_wrap is None:
+            return
+        if self._v2_yaw_pending is not None:
+            try:
+                self.root.after_cancel(self._v2_yaw_pending)
+            except tk.TclError:
+                pass
+        self._v2_yaw_pending = self.root.after(120, self._refresh_v2_from_wrap)
+
+    def _refresh_v2_from_wrap(self) -> None:
+        self._v2_yaw_pending = None
+        wrap = self.state.current_wrap
+        if wrap is None or 'v2_front_label' not in self.__dict__:
+            return
+        yaw = float(self.v2_yaw_var.get())
+        scene = PreviewScene(canvas_size=(700, 560), body_height_px=420)
+        camera = CameraPose(yaw)
+        self._v2_front_image = render_mug_preview_v2(
+            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='front', mode='customer'),
+        )
+        self._v2_rear_image = render_mug_preview_v2(
+            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='rear', mode='customer'),
+        )
+        self._v2_engineering_image = render_mug_preview_v2(
+            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='rear', mode='engineering'),
+        )
+        self._refresh_preview_images()
+        self.status_var.set(
+            f'V2 preview camera yaw {yaw:+.0f}° — canonical wrap unchanged.'
+            if yaw else
+            'V2 engineering view is square-on (0° yaw); use this view to judge true centring.'
+        )
 
     def _render_failed(self, detail: str) -> None:
         self.state.render_status = "Error"
@@ -832,6 +901,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._rear_photo = self._set_preview(self.rear_label, self.state.current_rear_preview)
         if 'mug_front_label' in self.__dict__:
             self._mug_front_photo = self._set_preview(self.mug_front_label, self._mug_front_image)
+            self._v2_front_photo = self._set_preview(self.v2_front_label, self._v2_front_image)
+            self._v2_rear_photo = self._set_preview(self.v2_rear_label, self._v2_rear_image)
+            self._v2_engineering_photo = self._set_preview(
+                self.v2_engineering_label, self._v2_engineering_image,
+            )
             self._wrap_photo = self._set_preview(self.wrap_label, self.state.current_wrap)
 
     def _set_preview(self, label: ttk.Label, image: Image.Image | None) -> ImageTk.PhotoImage | None:
@@ -851,8 +925,13 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.rear_label.configure(image="", text=text)
         if 'mug_front_label' in self.__dict__:
             self._mug_front_image = None
+            self._v2_front_image = self._v2_rear_image = self._v2_engineering_image = None
             self._mug_front_photo = self._wrap_photo = None
+            self._v2_front_photo = self._v2_rear_photo = self._v2_engineering_photo = None
             self.mug_front_label.configure(image='', text=text)
+            self.v2_front_label.configure(image='', text=text)
+            self.v2_rear_label.configure(image='', text=text)
+            self.v2_engineering_label.configure(image='', text=text)
             self.wrap_label.configure(image='', text=text)
 
     def _show_error(self, detail: str) -> None:
