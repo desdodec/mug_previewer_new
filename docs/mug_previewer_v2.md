@@ -19,10 +19,11 @@ V2 separates those effects.
 
 The existing canonical wrap remains unchanged at `2362 x 1063`.
 
-V2 maps that flat strip onto a calibrated physical cylinder. The starting generic 11 oz calibration uses:
+V2 maps that flat canvas onto a calibrated physical cylinder. The starting generic 11 oz calibration keeps the measured central seam/handle exclusion already present in the canonical artwork and adds only the outside-canvas arc needed to close the 360-degree mug:
 
-- a 300 degree printed arc;
-- a 60 degree unprinted handle gap;
+- a 300 degree canonical print-canvas arc;
+- the existing central 472 px canonical handle/seam exclusion zone;
+- a further 60 degree opposite-side arc outside the canonical print canvas;
 - front and rear canonical centres exactly 180 degrees apart on the virtual mug;
 - independent camera yaw;
 - separate customer and engineering presentation modes.
