@@ -463,4 +463,16 @@ def render_prepared_preview_pair(root, dataset, street, *, design_options=None):
     wrap = render_preprocessed_wrap(root, dataset, street, design_options=design_options, require_production_approved=False)
     front = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
     rear = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.REAR_HANDLE_LEFT))
-    return PreviewPair(wrap, front, rear, 'prepared artwork')
+    v2_front = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="front", mode="customer"),
+    )
+    v2_rear = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="rear", mode="customer"),
+    )
+    v2_engineering = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(scene=SCREEN_V2_SCENE, view="rear", mode="engineering"),
+    )
+    return PreviewPair(
+        wrap, front, rear, 'prepared artwork',
+        v2_front=v2_front, v2_rear=v2_rear, v2_engineering=v2_engineering,
+    )
