@@ -32,7 +32,7 @@ def _banded_wrap() -> Image.Image:
     return image
 
 
-def test_generic_calibration_has_real_unprinted_handle_gap() -> None:
+def test_generic_calibration_has_outside_canvas_arc() -> None:
     g = CANONICAL_WRAP_PREVIEW_GEOMETRY
     calibration = GENERIC_11OZ_CALIBRATION
     full_width = circumference_width_px(calibration)
