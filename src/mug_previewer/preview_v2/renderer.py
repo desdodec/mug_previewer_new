@@ -136,7 +136,7 @@ def _draw_handle(
     body_width = right - left
     body_height = bottom - top
     delta = diagnostics.handle_delta_degrees
-    side = 1 if delta <= 0 else -1
+    side = 1 if delta >= 0 else -1
     visibility = max(0.08, 1.0 - abs(abs(delta) - 90.0) / 100.0)
     handle_width = max(18, round(body_width * calibration.handle_width_fraction * visibility))
     handle_height = max(45, round(body_height * calibration.handle_height_fraction))
