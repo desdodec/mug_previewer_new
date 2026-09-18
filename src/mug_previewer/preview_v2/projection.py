@@ -68,7 +68,7 @@ def projection_diagnostics(
     full_width = circumference_width_px(calibration, geometry)
     source_centre = source_centre_for_view(view, geometry)
     camera_centre = source_centre + full_width * camera.yaw_degrees / 360.0
-    handle_centre = geometry.width_px + (full_width - geometry.width_px) / 2.0
+    handle_centre = geometry.seam_left_px + geometry.seam_width_px / 2.0
     handle_angle = handle_centre / full_width * 360.0
     camera_angle = camera_centre / full_width * 360.0
     delta = _normalise_angle(handle_angle - camera_angle)
