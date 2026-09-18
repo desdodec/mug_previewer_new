@@ -17,7 +17,7 @@ from .models import CameraPose, MugCalibration, PreviewV2Error, PreviewV2View
 class ProjectionDiagnostics:
     canonical_width_px: int
     circumference_width_px: int
-    unprinted_gap_px: int
+    outside_canvas_gap_px: int
     source_centre_x: float
     camera_centre_x: float
     handle_delta_degrees: float
@@ -30,7 +30,7 @@ def circumference_width_px(
     """Return the virtual full-cylinder width implied by the calibrated print arc."""
     width = round(geometry.width_px * 360.0 / calibration.wrap_span_degrees)
     if width <= geometry.width_px:
-        raise PreviewV2Error("V2 calibration must leave a non-zero unprinted handle gap.")
+        raise PreviewV2Error("V2 calibration must leave a non-zero outside-canvas arc.")
     return width
 
 
@@ -75,7 +75,7 @@ def projection_diagnostics(
     return ProjectionDiagnostics(
         canonical_width_px=geometry.width_px,
         circumference_width_px=full_width,
-        unprinted_gap_px=full_width - geometry.width_px,
+        outside_canvas_gap_px=full_width - geometry.width_px,
         source_centre_x=source_centre,
         camera_centre_x=camera_centre,
         handle_delta_degrees=delta,
@@ -92,7 +92,7 @@ def project_wrap_v2(
     mesh_segments: int = 96,
     geometry: CanonicalWrapPreviewGeometry = CANONICAL_WRAP_PREVIEW_GEOMETRY,
 ) -> tuple[Image.Image, ProjectionDiagnostics]:
-    """Project artwork while preserving the physical unprinted handle gap."""
+    """Project artwork while preserving seam geometry and the outside-canvas arc."""
     strip = build_circumference_strip(wrap, calibration, geometry)
     diagnostics = projection_diagnostics(calibration, camera, view, geometry)
     physical_geometry = CanonicalWrapPreviewGeometry(
