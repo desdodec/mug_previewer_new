@@ -9,7 +9,7 @@ from PIL import Image
 from .datasets.models import Dataset, StreetRecord
 from .design import DesignOptions, build_render_options
 from .diagnostics.front_candidates import ProductionTriageStatus
-from .exporting import save_provider_export
+from .exporting import save_provider_artwork
 from .prepared_asset import PreparedFaceSource, load_prepared_face_image, resolve_prepared_face_source
 from .preprocess import FaceSvgResolution, INDEX_FILENAME, _load_index, resolve_authoritative_face_svg
 from .providers import get_provider_profile
@@ -94,15 +94,15 @@ def render_authoritative_face_panel(
     return AuthoritativeFacePanel(panel, resolution, source)
 
 
-def render_preprocessed_wrap(
+def render_preprocessed_artwork_groups(
     preprocessed: Path | str,
     dataset: Dataset,
     street: StreetRecord,
     *,
     design_options: DesignOptions | None = None,
     require_production_approved: bool = True,
-) -> Image.Image:
-    """Compose prepared front artwork with the existing rear renderer."""
+) -> tuple[Image.Image, Image.Image]:
+    """Render supplier-independent front and rear artwork groups exactly once."""
     front = render_authoritative_face_panel(
         preprocessed,
         dataset,
@@ -111,7 +111,26 @@ def render_preprocessed_wrap(
     )
     options = build_render_options(design_options or DesignOptions(), area=dataset.display_name)
     rear = render_context_map_result(dataset, street, options.context_options)
-    image, _, _ = WrapComposer().compose(front.image, rear.image)
+    return front.image, rear.image
+
+
+def render_preprocessed_wrap(
+    preprocessed: Path | str,
+    dataset: Dataset,
+    street: StreetRecord,
+    *,
+    design_options: DesignOptions | None = None,
+    require_production_approved: bool = True,
+) -> Image.Image:
+    """Compose the legacy canonical preview without affecting V3 supplier export."""
+    front, rear = render_preprocessed_artwork_groups(
+        preprocessed,
+        dataset,
+        street,
+        design_options=design_options,
+        require_production_approved=require_production_approved,
+    )
+    image, _, _ = WrapComposer().compose(front, rear)
     return image
 
 
@@ -123,6 +142,7 @@ def export_preprocessed_provider_png(
     *,
     profile_id: str,
     design_options: DesignOptions | None = None,
+    debug_destination: Path | str | None = None,
 ) -> Path:
     """Export one prepared face through the existing provider system."""
     root = Path(preprocessed).resolve()
@@ -154,15 +174,31 @@ def export_preprocessed_provider_png(
 
     before = checkpoint()
     profile = get_provider_profile(profile_id)
-    wrap = render_preprocessed_wrap(root, dataset, street, design_options=design_options)
+    front_artwork, rear_artwork = render_preprocessed_artwork_groups(
+        root, dataset, street, design_options=design_options,
+    )
     destination = Path(destination)
+    debug_path = Path(debug_destination) if debug_destination is not None else None
+    if debug_path is not None and debug_path.resolve() == destination.resolve():
+        raise AuthoritativeArtworkError("Debug output must use a different path from the production PNG.")
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=destination.parent, prefix=".single-export-") as staging:
         temporary = Path(staging) / destination.name
-        save_provider_export(wrap, profile, temporary)
+        temporary_debug = Path(staging) / ("debug_" + destination.name) if debug_path is not None else None
+        save_provider_artwork(
+            front_artwork,
+            rear_artwork,
+            profile,
+            temporary,
+            debug_destination=temporary_debug,
+        )
         if checkpoint() != before:
             raise AuthoritativeArtworkError(
                 "Artwork or QA changed during export; rebuild the batch plan or retry after review."
             )
         os.replace(temporary, destination)
+        if debug_path is not None:
+            assert temporary_debug is not None
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(temporary_debug, debug_path)
     return destination

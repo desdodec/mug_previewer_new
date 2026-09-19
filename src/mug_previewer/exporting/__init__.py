@@ -19,6 +19,15 @@ from .export import (
     save_provider_export,
     save_provider_png,
 )
+from .compositor_v3 import (
+    DEFAULT_PROFILE_IDS,
+    ProviderCompositionError,
+    ProviderCompositionResult,
+    compose_provider_artwork,
+    save_profile_set,
+    save_provider_artwork,
+    supplier_output_filename,
+)
 from .providers import (
     GELATO_WHITE_11OZ_CERAMIC_MUG,
     AlphaHandling,
@@ -29,6 +38,13 @@ from .providers import (
 )
 
 __all__ = [
+    "DEFAULT_PROFILE_IDS",
+    "ProviderCompositionError",
+    "ProviderCompositionResult",
+    "compose_provider_artwork",
+    "save_profile_set",
+    "save_provider_artwork",
+    "supplier_output_filename",
     'ContainGeometry',
     'ExportOptions',
     'calculate_contain_geometry',

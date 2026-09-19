@@ -9,7 +9,7 @@ from ..batch_export import build_batch_plan, execute_batch_export
 from ..manual_svg_workspace import open_local_path
 
 PROVIDERS = {'Inkthreadable': 'inkthreadable_11oz_white',
-             'Printify': 'printify_generic_11oz_ceramic'}
+             'Prodigi': 'prodigi_h_mug_w'}
 
 
 def result_summary(result):

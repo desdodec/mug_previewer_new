@@ -21,6 +21,7 @@ def test_builtin_profiles_are_resource_backed_unique_and_deterministic() -> None
     assert [profile.id for profile in profiles] == [
         "inkthreadable_11oz_white",
         "printify_generic_11oz_ceramic",
+        "prodigi_h_mug_w",
     ]
     assert len({profile.id for profile in profiles}) == len(profiles)
     assert resources.files("mug_previewer.providers").joinpath(
@@ -30,14 +31,18 @@ def test_builtin_profiles_are_resource_backed_unique_and_deterministic() -> None
 
 def test_inkthreadable_profile_matches_supplied_specification() -> None:
     profile = get_provider_profile("inkthreadable_11oz_white")
-    assert (profile.canvas_width_px, profile.canvas_height_px, profile.dpi) == (2362, 1063, 300)
-    assert (profile.physical_width_mm, profile.physical_height_mm) == (200.0, 90.0)
+    assert (profile.canvas_width_px, profile.canvas_height_px, profile.dpi) == (2550, 1125, 300)
+    assert (profile.physical_width_mm, profile.physical_height_mm) == (None, None)
+    assert (profile.front_centre_x, profile.rear_centre_x) == (0.25, 0.75)
+    assert (profile.front_centre_y, profile.rear_centre_y) == (0.50, 0.50)
+    assert (profile.front_scale, profile.rear_scale) == (1.0, 1.0)
+    assert profile.inward_offset_mm == 0.0
     assert profile.colour_mode == "RGB"
     assert profile.colour_profile is None
     assert profile.accepted_formats == ("PNG",)
     assert profile.preferred_format == "PNG"
     assert profile.safe_bounds is None
-    assert profile.printable_bounds == PixelBounds(0, 0, 2362, 1063)
+    assert profile.printable_bounds == PixelBounds(0, 0, 2550, 1125)
 
 
 def test_printify_generic_profile_matches_supplied_specification() -> None:
@@ -77,3 +82,10 @@ def test_registry_rejects_duplicate_profile_ids() -> None:
     profile = get_provider_profile("inkthreadable_11oz_white")
     with pytest.raises(ProviderProfileRegistryError, match="Duplicate provider profile ID"):
         build_provider_registry((profile, profile))
+
+def test_prodigi_h_mug_w_profile_matches_product_specific_template() -> None:
+    profile = get_provider_profile("prodigi_h_mug_w")
+    assert (profile.canvas_width_px, profile.canvas_height_px, profile.dpi) == (2705, 1122, 300)
+    assert (profile.physical_width_mm, profile.physical_height_mm) == (229.0, 95.0)
+    assert (profile.front_centre_x, profile.rear_centre_x) == (0.25, 0.75)
+    assert profile.inward_offset_mm == 0.0

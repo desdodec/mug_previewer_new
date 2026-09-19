@@ -36,7 +36,7 @@ def panel():
     for name in ('provider_box', 'choose', 'policy_box', 'start', 'cancel', 'refresh',
                  'summary', 'progress', 'report_button', 'folder_button'):
         setattr(p, name, Widget())
-    p.provider = Widget('Printify')
+    p.provider = Widget('Prodigi')
     p.destination = Widget('output')
     p.policy = Widget('Skip existing')
     p.after = lambda *a: None
@@ -68,7 +68,7 @@ def test_plan_worker_scope_ignores_visible_filters_and_passes_provider(panel, mo
     assert len(calls) == 1 and panel.busy
     generation, args, options = calls[0]['args']
     assert args[1] is panel.app.state.selected_dataset
-    assert args[2] == 'printify_generic_11oz_ceramic'
+    assert args[2] == 'prodigi_h_mug_w'
     assert args[3] == Path('output')
     assert options['replace_existing'] is False
     assert panel.start.options['state'] == 'disabled'
@@ -93,7 +93,7 @@ def test_plan_result_updates_counts_and_start_safely(panel, ready):
     panel.events.put(('plan', 0, planned(ready)))
     panel.drain()
     assert panel.start.options['state'] == ('normal' if ready else 'disabled')
-    assert panel.start.options['text'] == f'2. Export ALL {ready} Printify PNGs'
+    assert panel.start.options['text'] == f'2. Export ALL {ready} Prodigi PNGs'
     assert 'Excluded: 1' in panel.summary.get()
     assert 'Unrenderable: 0' in panel.summary.get()
     assert 'Ready to export:' in panel.summary.get()

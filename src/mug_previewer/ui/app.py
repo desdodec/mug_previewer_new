@@ -13,6 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..preprocessed_export import export_preprocessed_provider_png
+from ..providers import get_provider_profile
 from ..preview_v2 import (
     CameraPose,
     MugCalibrationProfile,
@@ -140,8 +141,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.export_button.grid(row=9, column=0, sticky='ew', pady=(6, 0))
         self.printify_export_button = ttk.Button(
             controls,
-            text="Export Printify PNG",
-            command=self._start_printify_export,
+            text="Export Prodigi PNG",
+            command=self._start_prodigi_export,
             state="disabled",
         )
         self.printify_export_button.grid(row=10, column=0, sticky="ew", pady=(6, 0))
@@ -279,7 +280,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a prepared face')
         self.export_button = ttk.Button(selected, text='Export Selected Inkthreadable PNG', command=self._start_inkthreadable_export, state='disabled')
         self.export_button.grid(row=1, column=0, sticky='ew', pady=3)
-        self.printify_export_button = ttk.Button(selected, text='Export Selected Printify PNG', command=self._start_printify_export, state='disabled')
+        self.printify_export_button = ttk.Button(selected, text='Export Selected Prodigi PNG', command=self._start_prodigi_export, state='disabled')
         self.printify_export_button.grid(row=2, column=0, sticky='ew', pady=3)
         ttk.Label(selected, textvariable=self.export_state_var, wraplength=320).grid(row=3, column=0, sticky='ew')
         self._mug_front_image = None
@@ -893,7 +894,15 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             filename_suffix="inkthreadable",
         )
 
+    def _start_prodigi_export(self) -> None:
+        self._start_provider_export(
+            profile_id="prodigi_h_mug_w",
+            provider_label="Prodigi",
+            filename_suffix="prodigi",
+        )
+
     def _start_printify_export(self) -> None:
+        """Compatibility entry point retained for older callers/tests."""
         self._start_provider_export(
             profile_id="printify_generic_11oz_ceramic",
             provider_label="Printify",
@@ -963,12 +972,13 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             LOGGER.exception("%s export failed", provider_label)
             self.root.after(0, lambda detail=str(error): self._export_failed(provider_label, detail))
             return
-        self.root.after(0, lambda: self._export_finished(provider_label, saved))
+        self.root.after(0, lambda: self._export_finished(provider_label, profile_id, saved))
 
-    def _export_finished(self, provider_label: str, destination: Path) -> None:
+    def _export_finished(self, provider_label: str, profile_id: str, destination: Path) -> None:
         self._single_export_busy = False
         self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
-        dimensions = "2362 x 1063" if provider_label == "Inkthreadable" else "2475 x 1155"
+        profile = get_provider_profile(profile_id)
+        dimensions = f"{profile.canvas_width_px} x {profile.canvas_height_px}"
         self.status_var.set(f"Export complete: {provider_label} {dimensions} PNG saved to {destination}")
 
     def _export_failed(self, provider_label: str, detail: str) -> None:

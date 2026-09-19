@@ -55,6 +55,14 @@ class ProviderProfile:
     profile_version: str
     verified_date: str | None
     source_description: str
+    front_centre_x: float = 0.25
+    rear_centre_x: float = 0.75
+    front_centre_y: float = 0.50
+    rear_centre_y: float = 0.50
+    front_scale: float = 1.0
+    rear_scale: float = 1.0
+    inward_offset_mm: float = 0.0
+    edge_safe_fraction: float = 0.08
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -89,6 +97,21 @@ class ProviderProfile:
         for name, bounds in (("printable_bounds", self.printable_bounds), ("safe_bounds", self.safe_bounds)):
             if bounds is not None and not bounds.fits_within(self.canvas_width_px, self.canvas_height_px):
                 raise ProviderProfileError(f"Provider profile {name} must remain inside the canvas.")
+        for name, value in (
+            ("front_centre_x", self.front_centre_x),
+            ("rear_centre_x", self.rear_centre_x),
+            ("front_centre_y", self.front_centre_y),
+            ("rear_centre_y", self.rear_centre_y),
+        ):
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ProviderProfileError(f"Provider profile {name} must be a normalised coordinate from 0 to 1.")
+        for name, value in (("front_scale", self.front_scale), ("rear_scale", self.rear_scale)):
+            if not math.isfinite(value) or value <= 0:
+                raise ProviderProfileError(f"Provider profile {name} must be positive and finite.")
+        if not math.isfinite(self.inward_offset_mm) or self.inward_offset_mm < 0:
+            raise ProviderProfileError("Provider profile inward_offset_mm must be non-negative and finite.")
+        if not math.isfinite(self.edge_safe_fraction) or not 0.0 <= self.edge_safe_fraction < 0.25:
+            raise ProviderProfileError("Provider profile edge_safe_fraction must be from 0 up to (but not including) 0.25.")
         if self.verified_date is not None:
             try:
                 date.fromisoformat(self.verified_date)
@@ -119,6 +142,14 @@ def provider_profile_from_mapping(data: Mapping[str, object], *, source: str) ->
             profile_version=_required_string(data, "profile_version", source),
             verified_date=_optional_string(data, "verified_date", source),
             source_description=_required_string(data, "source_description", source),
+            front_centre_x=_optional_finite_float(data, "front_centre_x", source, 0.25),
+            rear_centre_x=_optional_finite_float(data, "rear_centre_x", source, 0.75),
+            front_centre_y=_optional_finite_float(data, "front_centre_y", source, 0.50),
+            rear_centre_y=_optional_finite_float(data, "rear_centre_y", source, 0.50),
+            front_scale=_optional_finite_float(data, "front_scale", source, 1.0),
+            rear_scale=_optional_finite_float(data, "rear_scale", source, 1.0),
+            inward_offset_mm=_optional_finite_float(data, "inward_offset_mm", source, 0.0),
+            edge_safe_fraction=_optional_finite_float(data, "edge_safe_fraction", source, 0.08),
         )
     except ProviderProfileError as error:
         raise ProviderProfileError(f"Provider profile {source}: {error}") from error
@@ -165,6 +196,18 @@ def _optional_positive_float(data: Mapping[str, object], field: str, source: str
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
         raise ProviderProfileError(f"{source} field '{field}' must be a positive number or null.")
+    return float(value)
+
+
+def _optional_finite_float(
+    data: Mapping[str, object],
+    field: str,
+    source: str,
+    default: float,
+) -> float:
+    value = data.get(field, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ProviderProfileError(f"{source} field '{field}' must be a finite number.")
     return float(value)
 
 

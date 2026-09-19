@@ -22,12 +22,11 @@ def canonical_image() -> Image.Image:
     return image
 
 
-def test_inkthreadable_fast_path_preserves_pixels() -> None:
+def test_inkthreadable_legacy_adapter_uses_profile_canvas() -> None:
     source = canonical_image()
     exported = prepare_provider_image(source, get_provider_profile('inkthreadable_11oz_white'))
-    assert exported.size == CANONICAL_SIZE
+    assert exported.size == (2550, 1125)
     assert exported.mode == 'RGBA'
-    assert exported.tobytes() == source.tobytes()
 
 
 def test_printify_geometry_is_uniform_and_floor_centred() -> None:
