@@ -18,6 +18,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 mug-previewer = "mug_previewer.entrypoint:main"
+mug-calibrator = "mug_previewer.calibration.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
