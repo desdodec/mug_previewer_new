@@ -13,7 +13,16 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..preprocessed_export import export_preprocessed_provider_png
-from ..preview_v2 import CameraPose, MugPreviewV2Options, PreviewScene, render_mug_preview_v2
+from ..preview_v2 import (
+    CameraPose,
+    MugCalibrationProfile,
+    MugPreviewV2Options,
+    PreviewScene,
+    get_calibration_profile,
+    list_calibration_profiles,
+    resolve_calibration_profile,
+    render_mug_preview_v2,
+)
 from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
