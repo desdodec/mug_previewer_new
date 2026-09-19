@@ -775,6 +775,54 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.status_var.set(f"Rendered {data.display_name} \u2014 {street.id} {street.display_name}")
         self._refresh_preview_images()
         self.render_button.configure(state="normal")
+        self._set_v2_controls_busy(False)
+
+    @staticmethod
+    def _v2_calibration_detail_text(profile: MugCalibrationProfile) -> str:
+        geometry = profile.calibration
+        details = [
+            profile.status.value.upper(),
+            f'print arc {geometry.wrap_span_degrees:.1f}°',
+        ]
+        if profile.body_height_mm is not None and profile.body_diameter_mm is not None:
+            details.append(
+                f'body {profile.body_height_mm:g} × {profile.body_diameter_mm:g} mm'
+            )
+        if profile.print_width_mm is not None and profile.print_height_mm is not None:
+            details.append(
+                f'print {profile.print_width_mm:g} × {profile.print_height_mm:g} mm'
+            )
+        if profile.status.value == 'provisional':
+            details.append('body geometry not provider-verified')
+        return ' | '.join(details)
+
+    def _selected_v2_calibration_profile(self) -> MugCalibrationProfile:
+        mapping = self.__dict__.get('v2_calibration_by_label', {})
+        variable = self.__dict__.get('v2_calibration_var')
+        if variable is not None:
+            profile = mapping.get(variable.get())
+            if profile is not None:
+                return profile
+        return get_calibration_profile('generic_11oz_v2')
+
+    def _set_v2_controls_busy(self, busy: bool) -> None:
+        box = self.__dict__.get('v2_calibration_box')
+        if box is not None:
+            box.configure(state='disabled' if busy else 'readonly')
+        scale = self.__dict__.get('v2_yaw_scale')
+        if scale is not None:
+            scale.configure(state='disabled' if busy else 'normal')
+
+    def _v2_calibration_changed(self, _event: object | None = None) -> None:
+        profile = self._selected_v2_calibration_profile()
+        if 'v2_calibration_detail' in self.__dict__:
+            self.v2_calibration_detail.set(self._v2_calibration_detail_text(profile))
+        if self.state.current_wrap is not None:
+            self._refresh_v2_from_wrap()
+        else:
+            self.status_var.set(
+                f'V2 calibration selected: {profile.display_label}. Preview Mug to render.'
+            )
 
     def _v2_camera_changed(self, _value: str | None = None) -> None:
         if 'v2_yaw_display' not in self.__dict__:
@@ -796,27 +844,38 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         if wrap is None or 'v2_front_label' not in self.__dict__:
             return
         yaw = float(self.v2_yaw_var.get())
+        profile = self._selected_v2_calibration_profile()
         scene = PreviewScene(canvas_size=(700, 560), body_height_px=420)
         camera = CameraPose(yaw)
         self._v2_front_image = render_mug_preview_v2(
-            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='front', mode='customer'),
+            wrap, MugPreviewV2Options(
+                scene=scene, calibration=profile.calibration, camera=camera,
+                view='front', mode='customer',
+            ),
         )
         self._v2_rear_image = render_mug_preview_v2(
-            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='rear', mode='customer'),
+            wrap, MugPreviewV2Options(
+                scene=scene, calibration=profile.calibration, camera=camera,
+                view='rear', mode='customer',
+            ),
         )
         self._v2_engineering_image = render_mug_preview_v2(
-            wrap, MugPreviewV2Options(scene=scene, camera=camera, view='rear', mode='engineering'),
+            wrap, MugPreviewV2Options(
+                scene=scene, calibration=profile.calibration, camera=camera,
+                view='rear', mode='engineering',
+            ),
         )
         self._refresh_preview_images()
         self.status_var.set(
-            f'V2 preview camera yaw {yaw:+.0f}° — canonical wrap unchanged.'
+            f'V2 {profile.provider_name or "generic"} calibration at camera yaw {yaw:+.0f}° — canonical wrap unchanged.'
             if yaw else
-            'V2 engineering view is square-on (0° yaw); use this view to judge true centring.'
+            f'V2 {profile.provider_name or "generic"} calibration is square-on (0° yaw); use Engineering Rear to judge true centring.'
         )
 
     def _render_failed(self, detail: str) -> None:
         self.state.render_status = "Error"
         self.render_button.configure(state="normal" if self.state.selected_street else "disabled")
+        self._set_v2_controls_busy(False)
         self._show_error(f"Could not render the selected street. {detail}")
 
 
