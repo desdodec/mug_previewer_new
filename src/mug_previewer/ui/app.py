@@ -185,21 +185,48 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
                 rear_design, 0, 'Rear highlighted-street width',
                 self.rear_weight_var, self.rear_weight_display,
             )
+            self.v2_calibration_profiles = list_calibration_profiles()
+            self.v2_calibration_by_label = {
+                profile.display_label: profile for profile in self.v2_calibration_profiles
+            }
+            default_calibration = resolve_calibration_profile(
+                provider_profile_id='inkthreadable_11oz_white',
+            )
+            self.v2_calibration_var = tk.StringVar(value=default_calibration.display_label)
+            self.v2_calibration_detail = tk.StringVar(
+                value=self._v2_calibration_detail_text(default_calibration)
+            )
+            ttk.Label(rear_design, text='V2 mug calibration').grid(
+                row=2, column=0, columnspan=2, sticky='w', pady=(8, 0),
+            )
+            self.v2_calibration_box = ttk.Combobox(
+                rear_design, textvariable=self.v2_calibration_var,
+                values=list(self.v2_calibration_by_label), state='readonly', width=34,
+            )
+            self.v2_calibration_box.grid(row=3, column=0, columnspan=2, sticky='ew')
+            self.v2_calibration_box.bind(
+                '<<ComboboxSelected>>', self._v2_calibration_changed,
+            )
+            ttk.Label(
+                rear_design, textvariable=self.v2_calibration_detail,
+                wraplength=260, justify='left',
+            ).grid(row=4, column=0, columnspan=2, sticky='w', pady=(3, 0))
+
             self.v2_yaw_var = tk.DoubleVar(value=0.0)
             self.v2_yaw_display = tk.StringVar(value='0°')
-            ttk.Label(rear_design, text='V2 preview camera yaw').grid(row=2, column=0, sticky='w', pady=(8, 0))
-            ttk.Label(rear_design, textvariable=self.v2_yaw_display).grid(row=2, column=1, sticky='e', pady=(8, 0))
+            ttk.Label(rear_design, text='V2 preview camera yaw').grid(row=5, column=0, sticky='w', pady=(8, 0))
+            ttk.Label(rear_design, textvariable=self.v2_yaw_display).grid(row=5, column=1, sticky='e', pady=(8, 0))
             self.v2_yaw_scale = tk.Scale(
                 rear_design, from_=-30, to=30, resolution=1, orient=tk.HORIZONTAL,
                 showvalue=False, variable=self.v2_yaw_var, command=self._v2_camera_changed,
                 highlightthickness=0,
             )
-            self.v2_yaw_scale.grid(row=3, column=0, columnspan=2, sticky='ew')
+            self.v2_yaw_scale.grid(row=6, column=0, columnspan=2, sticky='ew')
             ttk.Label(
                 rear_design,
                 text='0° = geometry check; rotate only to test perspective / mockup asymmetry',
                 wraplength=260, justify='left',
-            ).grid(row=4, column=0, columnspan=2, sticky='w')
+            ).grid(row=7, column=0, columnspan=2, sticky='w')
             self.current_face_var = tk.StringVar(value='Select a face')
             ttk.Label(controls, textvariable=self.current_face_var, wraplength=270,
                       justify='left').grid(row=9, column=0, sticky='ew', pady=8)
