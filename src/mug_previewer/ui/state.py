@@ -341,9 +341,14 @@ def _content_bounds(image: Image.Image) -> tuple[int, int, int, int]:
         for channel in range(3)
     )
     mask = Image.new("L", image.size, 0)
+    pixel_data = (
+        image.get_flattened_data()
+        if hasattr(image, "get_flattened_data")
+        else image.getdata()
+    )
     mask.putdata([
         255 if pixel[3] < 245 or max(abs(pixel[channel] - background[channel]) for channel in range(3)) > 12 else 0
-        for pixel in image.getdata()
+        for pixel in pixel_data
     ])
     bounds = mask.getbbox()
     if bounds is None:
