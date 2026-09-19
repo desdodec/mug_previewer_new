@@ -18,6 +18,16 @@ from .projection import (
     projection_diagnostics,
 )
 from .renderer import MugPreviewV2Result, render_mug_preview_v2, render_mug_preview_v2_result
+from .calibration_registry import (
+    CalibrationRegistryError,
+    CalibrationStatus,
+    MugCalibrationProfile,
+    build_calibration_registry,
+    get_calibration_profile,
+    list_calibration_profiles,
+    load_calibration_mapping,
+    resolve_calibration_profile,
+)
 
 __all__ = [
     "CameraPose",
@@ -36,4 +46,12 @@ __all__ = [
     "MugPreviewV2Result",
     "render_mug_preview_v2",
     "render_mug_preview_v2_result",
+    "CalibrationRegistryError",
+    "CalibrationStatus",
+    "MugCalibrationProfile",
+    "build_calibration_registry",
+    "get_calibration_profile",
+    "list_calibration_profiles",
+    "load_calibration_mapping",
+    "resolve_calibration_profile",
 ]
