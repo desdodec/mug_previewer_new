@@ -1,0 +1,22 @@
+{
+  "id": "printify_generic_11oz_ceramic_v2",
+  "provider_name": "Printify",
+  "product_name": "Generic Brand White Ceramic Mug, 11oz",
+  "provider_profile_id": "printify_generic_11oz_ceramic",
+  "sku": null,
+  "status": "estimated",
+  "body_height_mm": 96.52,
+  "body_diameter_mm": 82.042,
+  "print_width_mm": 209.55,
+  "print_height_mm": 97.79,
+  "visible_angle_degrees": 150,
+  "body_corner_fraction": 0.055,
+  "handle_width_fraction": 0.31,
+  "handle_height_fraction": 0.54,
+  "handle_stroke_fraction": 0.075,
+  "default_front_yaw_degrees": 0,
+  "default_rear_yaw_degrees": 0,
+  "source_description": "Printify public size guide gives 3.80 in height and 3.23 in diameter. Print canvas dimensions are derived from Mug Previewer's existing generic 2475 x 1155 at 300 DPI profile. Because Printify fulfilment providers vary, this calibration is estimated rather than universal.",
+  "source_url": "https://printify.com/app/products/1244/generic-brand/white-ceramic-mug-11oz",
+  "verified_date": "2026-09-19"
+}
