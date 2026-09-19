@@ -664,22 +664,37 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             return
         self._render_generation += 1
         generation = self._render_generation
+        calibration = self._selected_v2_calibration_profile().calibration
+        v2_yaw = float(self.v2_yaw_var.get()) if 'v2_yaw_var' in self.__dict__ else 0.0
         self.render_button.configure(state="disabled")
+        self._set_v2_controls_busy(True)
         self.status_var.set(f"Rendering {street.id} \u2014 {street.display_name}\u2026")
         self.state.render_status = "Rendering"
         threading.Thread(
             target=self._render_worker,
-            args=(generation, data, street, self.state.design_options),
+            args=(generation, data, street, self.state.design_options, calibration, v2_yaw),
             daemon=True,
         ).start()
 
-    def _render_worker(self, generation: int, data: Dataset, street: StreetRecord, design_options: DesignOptions) -> None:
+    def _render_worker(
+        self, generation: int, data: Dataset, street: StreetRecord,
+        design_options: DesignOptions, v2_calibration, v2_yaw: float,
+    ) -> None:
         """Render off the UI thread and hand the result to the main-thread poller."""
         try:
             if self._is_preprocessed_mode():
-                pair = render_prepared_preview_pair(self.preprocessed_catalogue.root, data, street, design_options=design_options)
+                pair = render_prepared_preview_pair(
+                    self.preprocessed_catalogue.root, data, street,
+                    design_options=design_options,
+                    v2_calibration=v2_calibration,
+                    v2_camera_yaw=v2_yaw,
+                )
             else:
-                pair = render_preview_pair(data, street, design_options=design_options)
+                pair = render_preview_pair(
+                    data, street, design_options=design_options,
+                    v2_calibration=v2_calibration,
+                    v2_camera_yaw=v2_yaw,
+                )
         except Exception as error:
             LOGGER.exception("Preview rendering failed")
             self._render_results.put((generation, data, street, None, error))
