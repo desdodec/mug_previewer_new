@@ -280,18 +280,21 @@ migrate that path without changing canonical artwork.
 
 The prepared-artwork workspace now includes a provider-neutral **Mug Previewer V2** alongside the legacy photographic mockups.
 
-V2 keeps the canonical 2362x1063 production wrap unchanged, maps it onto a calibrated physical cylinder with an explicit unprinted handle gap, and separates true artwork centring from camera rotation.
+V2 keeps the canonical 2362x1063 production wrap unchanged, maps it onto a calibrated physical cylinder while preserving the canonical handle/seam exclusion zone, and separates true artwork centring from camera rotation.
 
 Prepared mode adds:
 
 - `V2 Customer Front`
 - `V2 Customer Rear`
 - `V2 Engineering Rear`
-- a preview-only camera yaw control from -30° to +30°
+- a **V2 mug calibration** selector;
+- a preview-only camera yaw control from -30° to +30°.
 
-Use the engineering view at **0° yaw** to judge true centring. Changing camera yaw alters only the mockup view and never changes provider artwork or export.
+Packaged calibration JSON files live in `src/mug_previewer/preview_v2/calibrations/`. The current set includes generic 11oz fallback, Inkthreadable 11oz White Mug, generic Printify 11oz Ceramic Mug, and a provisional Prodigi H-MUG-W profile. Calibration quality is shown in the selector so estimated/provisional geometry is never presented as verified.
 
-See `docs/mug_previewer_v2.md` for the geometry model and calibration roadmap.
+Use the engineering view at **0° yaw** to judge true centring. Changing calibration or camera yaw alters only the V2 mockup view and never changes provider artwork or export.
+
+See `docs/mug_previewer_v2.md` for the geometry model, provenance rules, and instructions for adding more provider/SKU profiles.
 
 ## Desktop preview UI
 
