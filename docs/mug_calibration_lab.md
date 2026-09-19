@@ -92,14 +92,13 @@ Adjust per view:
 
 These account for the provider's mockup crop/perspective and should not be confused with production artwork placement.
 
-### 9. Use shared artwork registration last
+### 9. Treat shared artwork registration as an advanced hypothesis
 
-Use **Shared artwork registration** only if both front and rear views still require the same angular shift after their independent camera yaws are fitted.
+Use **Shared artwork registration** only when you have independent evidence constraining camera yaw, for example from handle geometry or a known provider camera pose.
 
-That is the important distinction:
+A printed target alone cannot uniquely separate camera yaw from artwork registration: both move the projected target horizontally. The lab therefore exposes both parameters for controlled experiments but does not claim that a shared residual shift proves registration bias.
 
-- front/rear yaw differences are camera/mockup pose;
-- a common residual angular shift is evidence of artwork registration bias.
+The directly measurable quantity is the provider's **effective projection**. Separating that effective shift into camera rotation and print registration requires additional evidence.
 
 ### 10. Save the session
 
