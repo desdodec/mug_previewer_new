@@ -296,6 +296,40 @@ Use the engineering view at **0° yaw** to judge true centring. Changing calibra
 
 See `docs/mug_previewer_v2.md` for the geometry model, provenance rules, and instructions for adding more provider/SKU profiles.
 
+## Mug Calibration Lab
+
+A separate calibration application is included for measuring provider-generated mug mockups without changing production artwork.
+
+Launch it with:
+
+```powershell
+python -m mug_previewer.calibration
+```
+
+or, after installing the package entry points:
+
+```powershell
+mug-calibrator
+```
+
+The app can:
+
+- generate a 2362x1063 geometric calibration target;
+- load separate front and rear provider mockups;
+- select the cylindrical mug-body bounds by dragging on each image;
+- fit front/rear effective camera yaw;
+- fit visible cylinder arc and print-canvas arc;
+- fit per-view vertical scale/offset;
+- test a shared artwork-registration hypothesis;
+- save/reload a calibration session;
+- export a provisional candidate calibration JSON without modifying built-in profiles.
+
+Calibration target artwork contains angular longitude lines, horizontal height bands, exact front/rear centre bullseyes, asymmetric fiducials, and the canonical handle/seam exclusion.
+
+Camera yaw and artwork registration are not uniquely separable from printed-target position alone. The lab therefore treats the directly fitted result as an **effective provider projection** unless independent handle/camera evidence constrains yaw.
+
+See `docs/mug_calibration_lab.md` for the calibration procedure.
+
 ## Desktop preview UI
 
 The first desktop UI provides a local workflow for selecting a workflow-v6 dataset, filtering streets, and viewing front/rear production mug mockups. It uses standard-library Tkinter, so no new UI dependency or web server is needed.
