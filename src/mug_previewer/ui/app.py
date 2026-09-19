@@ -744,10 +744,17 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             except tk.TclError:
                 pass
             self._resize_pending = None
+        if self.__dict__.get('_v2_yaw_pending') is not None:
+            try:
+                self.root.after_cancel(self._v2_yaw_pending)
+            except tk.TclError:
+                pass
+            self._v2_yaw_pending = None
         self.root.destroy()
 
     def _invalidate_active_render_request(self) -> None:
         self._render_generation += 1
+        self._set_v2_controls_busy(False)
 
     def _is_current_render_request(self, generation: int, data: Dataset, street: StreetRecord) -> bool:
         selected_data, selected_street = self.state.selected_dataset, self.state.selected_street
