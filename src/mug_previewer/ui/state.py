@@ -17,12 +17,21 @@ from ..diagnostics.front_candidates import ProductionTriageStatus
 from ..exporting import save_provider_export
 from ..manual import approved_override_for_street, load_manual_overrides
 from ..preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview, scaled_mug_preview_layout
+from ..preview_v2 import (
+    CameraPose,
+    GENERIC_11OZ_CALIBRATION,
+    MugCalibration,
+    MugPreviewV2Options,
+    PreviewScene,
+    render_mug_preview_v2,
+)
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
 from .production import preview_render_override
 
 PREVIEW_SIZE = (512, 768)
 SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(0.5)
+SCREEN_V2_SCENE = PreviewScene(canvas_size=(700, 560), body_height_px=420)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'
 PREPROCESS_INDEX_FILENAME = "preprocess_index.json"
@@ -47,6 +56,9 @@ class PreviewPair:
     front: Image.Image
     rear: Image.Image
     framing_mode: str
+    v2_front: Image.Image | None = None
+    v2_rear: Image.Image | None = None
+    v2_engineering: Image.Image | None = None
 
 
 @dataclass(frozen=True)
@@ -329,9 +341,14 @@ def _content_bounds(image: Image.Image) -> tuple[int, int, int, int]:
         for channel in range(3)
     )
     mask = Image.new("L", image.size, 0)
+    pixel_data = (
+        image.get_flattened_data()
+        if hasattr(image, "get_flattened_data")
+        else image.getdata()
+    )
     mask.putdata([
         255 if pixel[3] < 245 or max(abs(pixel[channel] - background[channel]) for channel in range(3)) > 12 else 0
-        for pixel in image.getdata()
+        for pixel in pixel_data
     ])
     bounds = mask.getbbox()
     if bounds is None:
@@ -349,6 +366,8 @@ def render_preview_pair(
     street: StreetRecord,
     *,
     design_options: DesignOptions | None = None,
+    v2_calibration: MugCalibration | None = None,
+    v2_camera_yaw: float = 0.0,
     wrap_renderer: WrapRenderer = render_wrap_result,
     preview_renderer: PreviewRenderer = render_mug_preview,
 ) -> PreviewPair:
@@ -376,7 +395,30 @@ def render_preview_pair(
             raise UIDataError(
                 f"{name} preview renderer returned {preview.mode} {preview.size}; expected RGBA {PREVIEW_SIZE}."
             )
-    return PreviewPair(wrap=wrap, front=front, rear=rear, framing_mode=framing_mode)
+    calibration = v2_calibration or GENERIC_11OZ_CALIBRATION
+    camera = CameraPose(v2_camera_yaw)
+    v2_front = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="front", mode="customer",
+        ),
+    )
+    v2_rear = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="rear", mode="customer",
+        ),
+    )
+    v2_engineering = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="rear", mode="engineering",
+        ),
+    )
+    return PreviewPair(
+        wrap=wrap, front=front, rear=rear, framing_mode=framing_mode,
+        v2_front=v2_front, v2_rear=v2_rear, v2_engineering=v2_engineering,
+    )
 
 
 def export_provider_png(
@@ -440,10 +482,37 @@ def export_printify_png(
     )
 
 
-def render_prepared_preview_pair(root, dataset, street, *, design_options=None):
+def render_prepared_preview_pair(
+    root, dataset, street, *, design_options=None,
+    v2_calibration: MugCalibration | None = None,
+    v2_camera_yaw: float = 0.0,
+):
     """Preview the existing authoritative wrap, without generating a face."""
     from ..preprocessed_export import render_preprocessed_wrap
     wrap = render_preprocessed_wrap(root, dataset, street, design_options=design_options, require_production_approved=False)
     front = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.FRONT_HANDLE_RIGHT))
     rear = render_mug_preview(wrap, MugPreviewOptions(layout=SCREEN_MUG_LAYOUT, orientation=PreviewOrientation.REAR_HANDLE_LEFT))
-    return PreviewPair(wrap, front, rear, 'prepared artwork')
+    calibration = v2_calibration or GENERIC_11OZ_CALIBRATION
+    camera = CameraPose(v2_camera_yaw)
+    v2_front = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="front", mode="customer",
+        ),
+    )
+    v2_rear = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="rear", mode="customer",
+        ),
+    )
+    v2_engineering = render_mug_preview_v2(
+        wrap, MugPreviewV2Options(
+            scene=SCREEN_V2_SCENE, calibration=calibration, camera=camera,
+            view="rear", mode="engineering",
+        ),
+    )
+    return PreviewPair(
+        wrap, front, rear, 'prepared artwork',
+        v2_front=v2_front, v2_rear=v2_rear, v2_engineering=v2_engineering,
+    )

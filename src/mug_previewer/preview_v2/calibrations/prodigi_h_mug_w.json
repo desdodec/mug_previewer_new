@@ -1,0 +1,22 @@
+{
+  "id": "prodigi_h_mug_w_v2",
+  "provider_name": "Prodigi",
+  "product_name": "11oz White Ceramic Photo Mug",
+  "provider_profile_id": "prodigi__H-MUG-W",
+  "sku": "H-MUG-W",
+  "status": "provisional",
+  "body_height_mm": 97,
+  "body_diameter_mm": 82,
+  "print_width_mm": 229,
+  "print_height_mm": 95,
+  "visible_angle_degrees": 150,
+  "body_corner_fraction": 0.055,
+  "handle_width_fraction": 0.3,
+  "handle_height_fraction": 0.54,
+  "handle_stroke_fraction": 0.075,
+  "default_front_yaw_degrees": 0,
+  "default_rear_yaw_degrees": 0,
+  "source_description": "Prodigi officially publishes H-MUG-W as an 11oz straight-sided ceramic mug with a 229 x 95 mm print size. Prodigi's public page does not publish physical body diameter/height, so V2 temporarily uses 97 x 82 mm generic 11oz body geometry. Do not treat the body geometry as provider-verified until measured or confirmed.",
+  "source_url": "https://www.prodigi.com/products/home-and-living/drinkware/photo-mugs/",
+  "verified_date": "2026-09-19"
+}

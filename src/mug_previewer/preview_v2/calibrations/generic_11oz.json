@@ -1,0 +1,21 @@
+{
+  "id": "generic_11oz_v2",
+  "provider_name": null,
+  "product_name": "Generic 11 oz straight-sided ceramic mug",
+  "provider_profile_id": null,
+  "sku": null,
+  "status": "generic",
+  "body_width_to_height": 0.82,
+  "printable_height_fraction": 0.947,
+  "wrap_span_degrees": 300,
+  "visible_angle_degrees": 150,
+  "body_corner_fraction": 0.055,
+  "handle_width_fraction": 0.3,
+  "handle_height_fraction": 0.54,
+  "handle_stroke_fraction": 0.075,
+  "default_front_yaw_degrees": 0,
+  "default_rear_yaw_degrees": 0,
+  "source_description": "Internal provider-neutral V2 baseline. This is a fallback geometry, not a provider-verified mug specification.",
+  "source_url": null,
+  "verified_date": null
+}

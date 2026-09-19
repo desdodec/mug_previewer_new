@@ -18,6 +18,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 mug-previewer = "mug_previewer.entrypoint:main"
+mug-calibrator = "mug_previewer.calibration.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -30,4 +31,5 @@ where = ["src"]
 [tool.setuptools.package-data]
 "mug_previewer.providers" = ["profiles/*.json"]
 "mug_previewer.preview" = ["assets/*.png"]
+"mug_previewer.preview_v2" = ["calibrations/*.json"]
 "mug_previewer.ui" = ["manual_review_scope.json"]
