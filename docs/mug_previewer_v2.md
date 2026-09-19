@@ -72,33 +72,65 @@ src/mug_previewer/preview_v2/
     models.py
     projection.py
     renderer.py
+    calibration_registry.py
+    calibrations/
+        generic_11oz.json
+        inkthreadable_11oz_white.json
+        printify_generic_11oz_ceramic.json
+        prodigi_h_mug_w.json
 ```
 
 `models.py` owns calibrated mug geometry and camera/scene options.
 
-`projection.py` expands the canonical wrap into a full 360-degree circumference strip with a transparent unprinted handle gap, then applies cylindrical projection.
+`projection.py` expands the canonical wrap into a full 360-degree circumference strip, preserving the canonical central handle/seam zone and adding the outside-canvas arc needed to close the physical cylinder.
 
 `renderer.py` owns preview-only mug presentation and engineering guides.
 
-## Calibration roadmap
+`calibration_registry.py` loads packaged JSON calibration profiles, derives geometry from physical dimensions when enough evidence exists, and resolves the most specific provider/SKU match. Unknown products fall back explicitly to `generic_11oz_v2`.
 
-The next useful step is empirical provider calibration rather than more arbitrary rendering polish.
-For each provider/SKU we can store a preview calibration containing:
+## Provider / SKU calibration profiles
 
-- body aspect ratio;
-- printed arc / handle gap;
-- printable height fraction;
-- handle dimensions;
-- default customer camera poses;
-- optional photographic background/lighting preset.
+The prepared workspace exposes a **V2 mug calibration** selector. Changing it only rerenders V2 previews; it does not alter the canonical wrap or provider export.
 
-Potential calibration targets:
+Current packaged profiles:
 
-- Inkthreadable 11 oz white mug;
-- Printify fulfilment-provider-specific 11 oz mugs;
-- Prodigi SKU-specific mugs.
+- `generic_11oz_v2` — generic fallback geometry;
+- `inkthreadable_11oz_white_v2` — derived from provider-published 97 × 82 mm body dimensions and 200 × 90 mm print area;
+- `printify_generic_11oz_ceramic_v2` — estimated from Printify's public 11oz size guide plus the existing generic 2475 × 1155 / 300 DPI Mug Previewer profile;
+- `prodigi_h_mug_w_v2` — provisional H-MUG-W profile using Prodigi's published 229 × 95 mm print size and temporary generic 11oz body dimensions until Prodigi body diameter/height are measured or confirmed.
 
-Prodigi is especially suitable because its Product Details API can provide authoritative recommended print-area pixel dimensions while V2 separately owns physical/mockup calibration.
+Calibration status is intentionally visible:
+
+- `provider-dimensions` means the core body and print dimensions came from the provider;
+- `estimated` means at least one important dimension was inferred from an existing template/profile;
+- `provisional` means the profile is useful for testing but still contains explicitly unverified body geometry;
+- `generic` is the provider-neutral fallback.
+
+A future Prodigi runtime provider ID such as `prodigi__H-MUG-W` resolves directly to the matching SKU calibration. An unknown Prodigi SKU does **not** borrow H-MUG-W geometry; it falls back to the generic profile until a specific calibration file exists.
+
+### Adding another SKU
+
+Add a JSON file to `src/mug_previewer/preview_v2/calibrations/`. Prefer physical inputs when known:
+
+```json
+{
+  "id": "provider_product_sku_v2",
+  "provider_name": "Provider",
+  "product_name": "11oz Mug",
+  "provider_profile_id": "provider__SKU",
+  "sku": "SKU",
+  "status": "provider-dimensions",
+  "body_height_mm": 97.0,
+  "body_diameter_mm": 82.0,
+  "print_width_mm": 200.0,
+  "print_height_mm": 90.0,
+  "source_description": "Where these dimensions came from",
+  "source_url": "https://provider.example/product",
+  "verified_date": "YYYY-MM-DD"
+}
+```
+
+When body and print dimensions are present, V2 derives body aspect ratio, printable-height fraction, and cylindrical print arc rather than duplicating hand-entered geometry values.
 
 ## Non-goals
 
