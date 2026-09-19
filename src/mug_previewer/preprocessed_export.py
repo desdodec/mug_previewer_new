@@ -9,7 +9,7 @@ from PIL import Image
 from .datasets.models import Dataset, StreetRecord
 from .design import DesignOptions, build_render_options
 from .diagnostics.front_candidates import ProductionTriageStatus
-from .exporting import save_provider_artwork
+from .exporting import DEFAULT_PROFILE_IDS, save_profile_set, save_provider_artwork
 from .prepared_asset import PreparedFaceSource, load_prepared_face_image, resolve_prepared_face_source
 from .preprocess import FaceSvgResolution, INDEX_FILENAME, _load_index, resolve_authoritative_face_svg
 from .providers import get_provider_profile
@@ -202,3 +202,69 @@ def export_preprocessed_provider_png(
             debug_path.parent.mkdir(parents=True, exist_ok=True)
             os.replace(temporary_debug, debug_path)
     return destination
+
+
+
+def export_preprocessed_provider_set(
+    preprocessed: Path | str,
+    dataset: Dataset,
+    street: StreetRecord,
+    destination_directory: Path | str,
+    *,
+    design_name: str | None = None,
+    profile_ids: tuple[str, ...] = DEFAULT_PROFILE_IDS,
+    design_options: DesignOptions | None = None,
+    debug: bool = False,
+) -> dict[str, tuple[Path, Path | None]]:
+    """Render once and write multiple supplier-specific V3 PNGs atomically."""
+    root = Path(preprocessed).resolve()
+
+    def checkpoint():
+        resolution, source = _resolve_front_source(root, dataset, street)
+        if resolution.state is ProductionTriageStatus.UNRENDERABLE_INPUT:
+            raise AuthoritativeArtworkError("no front artwork available; export forbidden.")
+        if not resolution.production_approved or source is None:
+            raise AuthoritativeArtworkError("Artwork is not production approved.")
+        review = current_review_state(root, dataset.id, street.id, source.review_path)
+        if review.export_blocked:
+            raise AuthoritativeArtworkError(f"Production export blocked: {review.label}")
+        return (
+            resolution.state.value,
+            resolution.production_approved,
+            source.kind,
+            str(source.path),
+            source.digest,
+            review,
+        )
+
+    before = checkpoint()
+    front_artwork, rear_artwork = render_preprocessed_artwork_groups(
+        root, dataset, street, design_options=design_options,
+    )
+    destination = Path(destination_directory)
+    destination.mkdir(parents=True, exist_ok=True)
+    label = design_name or street.display_name or street.id
+
+    published: dict[str, tuple[Path, Path | None]] = {}
+    with tempfile.TemporaryDirectory(dir=destination, prefix=".profile-set-") as staging:
+        staged = save_profile_set(
+            front_artwork,
+            rear_artwork,
+            Path(staging),
+            label,
+            profile_ids=profile_ids,
+            debug=debug,
+        )
+        if checkpoint() != before:
+            raise AuthoritativeArtworkError(
+                "Artwork or QA changed during export; rebuild the batch plan or retry after review."
+            )
+        for profile_id, (production, diagnostic) in staged.items():
+            final_production = destination / production.name
+            os.replace(production, final_production)
+            final_debug = None
+            if diagnostic is not None:
+                final_debug = destination / diagnostic.name
+                os.replace(diagnostic, final_debug)
+            published[profile_id] = (final_production, final_debug)
+    return published

@@ -5,6 +5,7 @@ import pytest
 
 from mug_previewer.exporting import (
     compose_provider_artwork,
+    save_profile_set,
     supplier_output_filename,
 )
 from mug_previewer.providers import get_provider_profile
@@ -78,3 +79,22 @@ def test_supplier_filename_matches_v3_contract():
     prodigi = get_provider_profile("prodigi_h_mug_w")
     assert supplier_output_filename("Aspinall Street", ink) == "aspinall-street_inkthreadable.png"
     assert supplier_output_filename("Aspinall Street", prodigi, debug=True) == "aspinall-street_prodigi_debug.png"
+
+
+
+def test_one_source_pair_can_write_both_supplier_files_and_debugs(tmp_path):
+    outputs = save_profile_set(
+        artwork(),
+        artwork(),
+        tmp_path,
+        "Aspinall Street",
+        debug=True,
+    )
+    assert set(outputs) == {"inkthreadable_11oz_white", "prodigi_h_mug_w"}
+    ink, ink_debug = outputs["inkthreadable_11oz_white"]
+    prodigi, prodigi_debug = outputs["prodigi_h_mug_w"]
+    assert ink.name == "aspinall-street_inkthreadable.png"
+    assert prodigi.name == "aspinall-street_prodigi.png"
+    assert ink_debug is not None and ink_debug.name == "aspinall-street_inkthreadable_debug.png"
+    assert prodigi_debug is not None and prodigi_debug.name == "aspinall-street_prodigi_debug.png"
+    assert all(path.is_file() for path in (ink, ink_debug, prodigi, prodigi_debug))
