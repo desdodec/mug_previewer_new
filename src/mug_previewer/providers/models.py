@@ -62,7 +62,7 @@ class ProviderProfile:
     front_scale: float = 1.0
     rear_scale: float = 1.0
     inward_offset_mm: float = 0.0
-    edge_safe_fraction: float = 0.08
+    edge_safe_fraction: float = 0.05
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -149,7 +149,7 @@ def provider_profile_from_mapping(data: Mapping[str, object], *, source: str) ->
             front_scale=_optional_finite_float(data, "front_scale", source, 1.0),
             rear_scale=_optional_finite_float(data, "rear_scale", source, 1.0),
             inward_offset_mm=_optional_finite_float(data, "inward_offset_mm", source, 0.0),
-            edge_safe_fraction=_optional_finite_float(data, "edge_safe_fraction", source, 0.08),
+            edge_safe_fraction=_optional_finite_float(data, "edge_safe_fraction", source, 0.05),
         )
     except ProviderProfileError as error:
         raise ProviderProfileError(f"Provider profile {source}: {error}") from error

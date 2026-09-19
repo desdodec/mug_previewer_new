@@ -62,8 +62,9 @@ def compose_provider_artwork(
     )
     front_box = _placement_box(front.size, front_center)
     rear_box = _placement_box(rear.size, rear_center)
-    _validate_placement(front_box, width, height, "Front")
-    _validate_placement(rear_box, width, height, "Rear")
+    safe_px = _round_half_up(width * profile.edge_safe_fraction)
+    _validate_placement(front_box, width, height, safe_px, "Front")
+    _validate_placement(rear_box, width, height, safe_px, "Rear")
 
     working = _background(profile)
     working.alpha_composite(front, (front_box.x, front_box.y))
@@ -157,11 +158,15 @@ def _placement_box(size: tuple[int, int], center: tuple[int, int]) -> PixelBox:
     )
 
 
-def _validate_placement(box: PixelBox, width: int, height: int, label: str) -> None:
+def _validate_placement(box: PixelBox, width: int, height: int, safe_px: int, label: str) -> None:
     if box.x < 0 or box.y < 0 or box.right > width or box.bottom > height:
         raise ProviderCompositionError(
             f"{label} artwork does not fit {width}x{height} provider canvas: "
             f"{box.width}x{box.height} at ({box.x}, {box.y})."
+        )
+    if box.x < safe_px or box.right > width - safe_px:
+        raise ProviderCompositionError(
+            f"{label} artwork crosses the provider edge safe zone ({safe_px}px at each wrap end)."
         )
 
 

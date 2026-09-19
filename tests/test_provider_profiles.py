@@ -70,7 +70,7 @@ def test_provider_model_rejects_invalid_canvas_dpi_formats_and_bounds() -> None:
     with pytest.raises(ProviderProfileError, match="preferred_format"):
         replace(profile, preferred_format="JPEG")
     with pytest.raises(ProviderProfileError, match="inside the canvas"):
-        replace(profile, safe_bounds=PixelBounds(2300, 0, 100, 100))
+        replace(profile, safe_bounds=PixelBounds(2500, 0, 100, 100))
 
 
 def test_mapping_loader_rejects_malformed_required_fields() -> None:

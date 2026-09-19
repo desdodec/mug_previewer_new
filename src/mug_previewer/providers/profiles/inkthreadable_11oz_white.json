@@ -25,5 +25,5 @@
   "front_scale": 1.0,
   "rear_scale": 1.0,
   "inward_offset_mm": 0.0,
-  "edge_safe_fraction": 0.08
+  "edge_safe_fraction": 0.05
 }
