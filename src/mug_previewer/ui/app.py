@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..preprocessed_export import export_preprocessed_provider_png
-from ..providers import get_provider_profile
+from ..providers import ProviderProfile, get_provider_profile, list_provider_profiles
 from ..preview_v2 import (
     CameraPose,
     MugCalibrationProfile,
@@ -51,6 +51,8 @@ from .state import (
 from .workspace import WORKFLOW_FILTERS, filter_workflow, load_workflow, workflow_counts
 
 LOGGER = logging.getLogger(__name__)
+
+PRODUCTION_PROFILE_IDS = ("inkthreadable_11oz_white", "prodigi_h_mug_w")
 
 
 class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
@@ -148,9 +150,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.printify_export_button.grid(row=10, column=0, sticky="ew", pady=(6, 0))
         self.render_button.grid(row=7, column=0, sticky="ew")
         self.framing_var = tk.StringVar(value="Rear framing: \u2014")
+        self.framing_label = ttk.Label(controls, textvariable=self.framing_var)
+        self.framing_label.grid(row=8, column=0, sticky="w", pady=(13, 0))
         if self._is_preprocessed_mode():
             self.render_button.grid_remove()
-        ttk.Label(controls, textvariable=self.framing_var).grid(row=8, column=0, sticky="w", pady=(13, 0))
+            self.framing_label.grid_remove()
 
         self.front_card = self._preview_card("Front")
         self.front_card.grid(row=0, column=1, sticky="nsew", padx=(0, 7))
@@ -179,58 +183,112 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self.printify_export_button.grid_remove()
             self.render_button.configure(text='Preview Mug')
             self.render_button.grid()
-            rear_design = ttk.Frame(controls)
-            rear_design.grid(row=8, column=0, sticky='ew', pady=(4, 0))
+            self.production_profiles = tuple(
+                profile for profile in list_provider_profiles()
+                if profile.id in PRODUCTION_PROFILE_IDS
+            )
+            self.production_profile_by_label = {
+                self._production_profile_label(profile): profile
+                for profile in self.production_profiles
+            }
+            default_print_profile = get_provider_profile('inkthreadable_11oz_white')
+            self.production_profile_var = tk.StringVar(
+                value=self._production_profile_label(default_print_profile)
+            )
+            self.production_profile_detail = tk.StringVar(
+                value=self._production_profile_detail_text(default_print_profile)
+            )
+            self.production_debug_var = tk.BooleanVar(value=False)
+
+            print_profile = ttk.LabelFrame(
+                controls, text='Production print profile (V3)', padding=6,
+            )
+            print_profile.grid(row=8, column=0, sticky='ew', pady=(4, 6))
+            print_profile.columnconfigure(0, weight=1)
+            self.production_profile_box = ttk.Combobox(
+                print_profile,
+                textvariable=self.production_profile_var,
+                values=list(self.production_profile_by_label),
+                state='readonly',
+                width=34,
+            )
+            self.production_profile_box.grid(row=0, column=0, sticky='ew')
+            self.production_profile_box.bind(
+                '<<ComboboxSelected>>', self._production_profile_changed,
+            )
+            ttk.Label(
+                print_profile,
+                textvariable=self.production_profile_detail,
+                wraplength=260,
+                justify='left',
+            ).grid(row=1, column=0, sticky='w', pady=(4, 0))
+            ttk.Checkbutton(
+                print_profile,
+                text='Also create separate debug/calibration PNG',
+                variable=self.production_debug_var,
+            ).grid(row=2, column=0, sticky='w', pady=(4, 0))
+
+            rear_design = ttk.LabelFrame(
+                controls, text='Artwork / mug preview', padding=6,
+            )
+            rear_design.grid(row=10, column=0, sticky='ew', pady=(4, 0))
             rear_design.columnconfigure(0, weight=1)
             self._add_weight_control(
                 rear_design, 0, 'Rear highlighted-street width',
                 self.rear_weight_var, self.rear_weight_display,
             )
+
             self.v2_calibration_profiles = list_calibration_profiles()
             self.v2_calibration_by_label = {
                 profile.display_label: profile for profile in self.v2_calibration_profiles
             }
-            default_calibration = resolve_calibration_profile(
-                provider_profile_id='inkthreadable_11oz_white',
+            default_calibration = self._preview_calibration_for_print_profile(
+                default_print_profile
             )
             self.v2_calibration_var = tk.StringVar(value=default_calibration.display_label)
             self.v2_calibration_detail = tk.StringVar(
                 value=self._v2_calibration_detail_text(default_calibration)
             )
-            ttk.Label(rear_design, text='V2 mug calibration').grid(
-                row=2, column=0, columnspan=2, sticky='w', pady=(8, 0),
-            )
-            self.v2_calibration_box = ttk.Combobox(
-                rear_design, textvariable=self.v2_calibration_var,
-                values=list(self.v2_calibration_by_label), state='readonly', width=34,
-            )
-            self.v2_calibration_box.grid(row=3, column=0, columnspan=2, sticky='ew')
-            self.v2_calibration_box.bind(
-                '<<ComboboxSelected>>', self._v2_calibration_changed,
+            ttk.Separator(rear_design, orient='horizontal').grid(
+                row=2, column=0, columnspan=2, sticky='ew', pady=(7, 5),
             )
             ttk.Label(
-                rear_design, textvariable=self.v2_calibration_detail,
-                wraplength=260, justify='left',
-            ).grid(row=4, column=0, columnspan=2, sticky='w', pady=(3, 0))
+                rear_design,
+                text='Mug preview geometry (screen only)',
+                font=('TkDefaultFont', 9, 'bold'),
+            ).grid(row=3, column=0, columnspan=2, sticky='w')
+            ttk.Label(
+                rear_design,
+                textvariable=self.v2_calibration_detail,
+                wraplength=260,
+                justify='left',
+            ).grid(row=4, column=0, columnspan=2, sticky='w', pady=(2, 0))
 
             self.v2_yaw_var = tk.DoubleVar(value=0.0)
             self.v2_yaw_display = tk.StringVar(value='0°')
-            ttk.Label(rear_design, text='V2 preview camera yaw').grid(row=5, column=0, sticky='w', pady=(8, 0))
-            ttk.Label(rear_design, textvariable=self.v2_yaw_display).grid(row=5, column=1, sticky='e', pady=(8, 0))
+            ttk.Label(rear_design, text='Preview camera yaw').grid(
+                row=5, column=0, sticky='w', pady=(6, 0),
+            )
+            ttk.Label(
+                rear_design, textvariable=self.v2_yaw_display,
+            ).grid(row=5, column=1, sticky='e', pady=(6, 0))
             self.v2_yaw_scale = tk.Scale(
                 rear_design, from_=-30, to=30, resolution=1, orient=tk.HORIZONTAL,
-                showvalue=False, variable=self.v2_yaw_var, command=self._v2_camera_changed,
-                highlightthickness=0,
+                showvalue=False, variable=self.v2_yaw_var,
+                command=self._v2_camera_changed, highlightthickness=0,
             )
             self.v2_yaw_scale.grid(row=6, column=0, columnspan=2, sticky='ew')
             ttk.Label(
                 rear_design,
-                text='0° = geometry check; rotate only to test perspective / mockup asymmetry',
+                text='Preview only — does not change production PNG placement.',
                 wraplength=260, justify='left',
             ).grid(row=7, column=0, columnspan=2, sticky='w')
+
             self.current_face_var = tk.StringVar(value='Select a face')
-            ttk.Label(controls, textvariable=self.current_face_var, wraplength=270,
-                      justify='left').grid(row=9, column=0, sticky='ew', pady=8)
+            ttk.Label(
+                controls, textvariable=self.current_face_var, wraplength=270,
+                justify='left',
+            ).grid(row=11, column=0, sticky='ew', pady=8)
             self._build_unified_workspace()
         self.status_var = tk.StringVar(value="Loading datasets\u2026")
         ttk.Label(self, textvariable=self.status_var, anchor="w").grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -245,9 +303,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             ('Face', 'front'),
             ('Legacy Mug Front', 'mug_front'),
             ('Legacy Mug Rear', 'rear'),
-            ('V2 Customer Front', 'v2_front'),
-            ('V2 Customer Rear', 'v2_rear'),
-            ('V2 Engineering Rear', 'v2_engineering'),
+            ('Customer Mug Front', 'v2_front'),
+            ('Customer Mug Rear', 'v2_rear'),
+            ('Engineering Rear (preview only)', 'v2_engineering'),
             ('Full Wrap', 'wrap'),
         ):
             card = ttk.LabelFrame(self.preview_tabs, text=title, padding=8)
@@ -278,11 +336,19 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.selected_export_face_var = tk.StringVar(value='Select a prepared face')
         ttk.Label(selected, textvariable=self.selected_export_face_var, wraplength=320).grid(row=0, column=0, sticky='w')
         self.export_state_var = tk.StringVar(value='Export: BLOCKED - select a prepared face')
-        self.export_button = ttk.Button(selected, text='Export Selected Inkthreadable PNG', command=self._start_inkthreadable_export, state='disabled')
+        self.export_button = ttk.Button(
+            selected,
+            text='Export Selected Inkthreadable PNG',
+            command=self._start_selected_profile_export,
+            state='disabled',
+        )
         self.export_button.grid(row=1, column=0, sticky='ew', pady=3)
-        self.printify_export_button = ttk.Button(selected, text='Export Selected Prodigi PNG', command=self._start_prodigi_export, state='disabled')
-        self.printify_export_button.grid(row=2, column=0, sticky='ew', pady=3)
-        ttk.Label(selected, textvariable=self.export_state_var, wraplength=320).grid(row=3, column=0, sticky='ew')
+        # Compatibility alias for older tests/callers that still refer to the
+        # second provider button. V3 exposes one selected-profile export action.
+        self.printify_export_button = self.export_button
+        ttk.Label(
+            selected, textvariable=self.export_state_var, wraplength=320,
+        ).grid(row=2, column=0, sticky='ew')
         self._mug_front_image = None
         self._v2_front_image = None
         self._v2_rear_image = None
@@ -786,6 +852,76 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._set_v2_controls_busy(False)
 
     @staticmethod
+    def _production_profile_label(profile: ProviderProfile) -> str:
+        variant = f" ({profile.variant_name})" if profile.variant_name else ""
+        return f"{profile.provider_name} — {profile.product_name}{variant}"
+
+    @staticmethod
+    def _production_profile_detail_text(profile: ProviderProfile) -> str:
+        return (
+            f"{profile.canvas_width_px} × {profile.canvas_height_px} px @ {profile.dpi} DPI\n"
+            f"Front {profile.front_centre_x * 100:.2f}%  •  "
+            f"Rear {profile.rear_centre_x * 100:.2f}%  •  "
+            f"Inward {profile.inward_offset_mm:.2f} mm"
+        )
+
+    def _selected_production_profile(self) -> ProviderProfile:
+        mapping = self.__dict__.get('production_profile_by_label', {})
+        variable = self.__dict__.get('production_profile_var')
+        if variable is not None:
+            profile = mapping.get(variable.get())
+            if profile is not None:
+                return profile
+        return get_provider_profile('inkthreadable_11oz_white')
+
+    @staticmethod
+    def _preview_calibration_for_print_profile(
+        profile: ProviderProfile,
+    ) -> MugCalibrationProfile:
+        if profile.provider_name.casefold() == 'prodigi' and profile.variant_name:
+            return resolve_calibration_profile(
+                provider_name=profile.provider_name,
+                sku=profile.variant_name,
+            )
+        return resolve_calibration_profile(provider_profile_id=profile.id)
+
+    def _production_profile_changed(self, _event: object | None = None) -> None:
+        profile = self._selected_production_profile()
+        if 'production_profile_detail' in self.__dict__:
+            self.production_profile_detail.set(
+                self._production_profile_detail_text(profile)
+            )
+        calibration = self._preview_calibration_for_print_profile(profile)
+        if 'v2_calibration_var' in self.__dict__:
+            self.v2_calibration_var.set(calibration.display_label)
+        if 'v2_calibration_detail' in self.__dict__:
+            self.v2_calibration_detail.set(
+                self._v2_calibration_detail_text(calibration)
+            )
+        if 'export_button' in self.__dict__:
+            self.export_button.configure(
+                text=f'Export Selected {profile.provider_name} PNG'
+            )
+        batch_panel = self.__dict__.get('batch_panel')
+        if batch_panel is not None and hasattr(batch_panel, 'set_provider_profile'):
+            batch_panel.set_provider_profile(profile.id)
+        if self.state.current_wrap is not None:
+            self._refresh_v2_from_wrap()
+        else:
+            self.status_var.set(
+                f'Production profile: {profile.provider_name} '
+                f'{profile.canvas_width_px} × {profile.canvas_height_px} @ {profile.dpi} DPI.'
+            )
+
+    def _start_selected_profile_export(self) -> None:
+        profile = self._selected_production_profile()
+        self._start_provider_export(
+            profile_id=profile.id,
+            provider_label=profile.provider_name,
+            filename_suffix=profile.provider_name.casefold(),
+        )
+
+    @staticmethod
     def _v2_calibration_detail_text(profile: MugCalibrationProfile) -> str:
         geometry = profile.calibration
         details = [
@@ -829,7 +965,7 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self._refresh_v2_from_wrap()
         else:
             self.status_var.set(
-                f'V2 calibration selected: {profile.display_label}. Preview Mug to render.'
+                f'Preview geometry: {profile.display_label}. Preview Mug to render.'
             )
 
     def _v2_camera_changed(self, _value: str | None = None) -> None:
@@ -875,9 +1011,9 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         )
         self._refresh_preview_images()
         self.status_var.set(
-            f'V2 {profile.provider_name or "generic"} calibration at camera yaw {yaw:+.0f}° — canonical wrap unchanged.'
+            f'Preview-only {profile.provider_name or "generic"} geometry at camera yaw {yaw:+.0f}° — production PNG unchanged.'
             if yaw else
-            f'V2 {profile.provider_name or "generic"} calibration is square-on (0° yaw); use Engineering Rear to judge true centring.'
+            f'Preview-only {profile.provider_name or "generic"} geometry is square-on (0° yaw); production PNG placement is controlled by the V3 print profile.'
         )
 
     def _render_failed(self, detail: str) -> None:
@@ -942,9 +1078,16 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._single_export_busy = True
         self._set_export_buttons_state("disabled")
         self.status_var.set(f"Exporting {street.id} - {street.display_name} for {provider_label}...")
+        debug_output = bool(
+            self.production_debug_var.get()
+            if 'production_debug_var' in self.__dict__ else False
+        )
         threading.Thread(
             target=self._export_worker,
-            args=(data, street, self.state.design_options, Path(destination), profile_id, provider_label),
+            args=(
+                data, street, self.state.design_options, Path(destination),
+                profile_id, provider_label, debug_output,
+            ),
             daemon=True,
         ).start()
 
@@ -956,12 +1099,18 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         destination: Path,
         profile_id: str,
         provider_label: str,
+        debug_output: bool = False,
     ) -> None:
+        debug_destination = (
+            destination.with_name(destination.stem + '_debug.png')
+            if debug_output else None
+        )
         try:
             if self._is_preprocessed_mode():
                 saved = export_preprocessed_provider_png(
                     self.preprocessed_catalogue.root, data, street, destination,
                     profile_id=profile_id, design_options=design_options,
+                    debug_destination=debug_destination,
                 )
             else:
                 saved = export_provider_png(
@@ -972,14 +1121,33 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             LOGGER.exception("%s export failed", provider_label)
             self.root.after(0, lambda detail=str(error): self._export_failed(provider_label, detail))
             return
-        self.root.after(0, lambda: self._export_finished(provider_label, profile_id, saved))
+        self.root.after(
+            0,
+            lambda: self._export_finished(
+                provider_label, profile_id, saved, debug_destination,
+            ),
+        )
 
-    def _export_finished(self, provider_label: str, profile_id: str, destination: Path) -> None:
+    def _export_finished(
+        self,
+        provider_label: str,
+        profile_id: str,
+        destination: Path,
+        debug_destination: Path | None = None,
+    ) -> None:
         self._single_export_busy = False
-        self._set_export_buttons_state("normal" if self.state.selected_street else "disabled")
+        self._set_export_buttons_state(
+            "normal" if self.state.selected_street else "disabled"
+        )
         profile = get_provider_profile(profile_id)
-        dimensions = f"{profile.canvas_width_px} x {profile.canvas_height_px}"
-        self.status_var.set(f"Export complete: {provider_label} {dimensions} PNG saved to {destination}")
+        dimensions = f"{profile.canvas_width_px} × {profile.canvas_height_px}"
+        debug_note = (
+            f" Debug PNG: {debug_destination}" if debug_destination is not None else ""
+        )
+        self.status_var.set(
+            f"Export complete: {provider_label} {dimensions} PNG saved to "
+            f"{destination}.{debug_note}"
+        )
 
     def _export_failed(self, provider_label: str, detail: str) -> None:
         self._single_export_busy = False
@@ -1000,7 +1168,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             street = self.state.selected_street
             self.selected_export_face_var.set(f'{street.id} \u2014 {street.display_name}' if street else 'Select a prepared face')
         self.export_button.configure(state=state)
-        self.printify_export_button.configure(state=state)
+        if (
+            'printify_export_button' in self.__dict__
+            and self.printify_export_button is not self.export_button
+        ):
+            self.printify_export_button.configure(state=state)
         if 'export_state_var' in self.__dict__:
             self.export_state_var.set('Export: READY' if state == 'normal' else
                                      f"Export: BLOCKED - {reason or 'export temporarily unavailable'}")

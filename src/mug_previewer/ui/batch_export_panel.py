@@ -33,7 +33,15 @@ class BatchExportPanel(ttk.LabelFrame):
         self.report_path = None
         self.dataset = tk.StringVar()
         self.dataset_by_label = {}
-        self.provider = tk.StringVar(value='Inkthreadable')
+        selected_profile = (
+            app._selected_production_profile().id
+            if hasattr(app, '_selected_production_profile') else 'inkthreadable_11oz_white'
+        )
+        selected_provider = next(
+            (label for label, profile_id in PROVIDERS.items() if profile_id == selected_profile),
+            'Inkthreadable',
+        )
+        self.provider = tk.StringVar(value=selected_provider)
         self.destination = tk.StringVar()
         self.policy = tk.StringVar(value='Skip existing')
         self.summary = tk.StringVar(
@@ -51,7 +59,7 @@ class BatchExportPanel(ttk.LabelFrame):
         self.provider_box = ttk.Combobox(self, textvariable=self.provider,
                                         values=list(PROVIDERS), state='readonly')
         self.provider_box.grid(row=3, column=0, sticky='ew')
-        self.provider_box.bind('<<ComboboxSelected>>', lambda e: self.invalidate())
+        self.provider_box.bind('<<ComboboxSelected>>', self._provider_changed)
         self.choose = ttk.Button(self, text='1. Choose batch export folder', command=self.choose_folder)
         self.choose.grid(row=4, column=0, sticky='ew', pady=(7, 0))
         ttk.Label(self, textvariable=self.destination, wraplength=320).grid(row=5, column=0, sticky='w')
@@ -76,6 +84,39 @@ class BatchExportPanel(ttk.LabelFrame):
         self.refresh_dataset_options()
         self.bind('<Visibility>', lambda _event: self.refresh_dataset_options())
         self.after(50, self.drain)
+
+    def _provider_changed(self, _event=None) -> None:
+        """Keep the batch provider and the workspace V3 print profile aligned."""
+        self.invalidate()
+        profile_id = PROVIDERS.get(self.provider.get())
+        app_mapping = getattr(self.app, 'production_profile_by_label', {})
+        app_variable = getattr(self.app, 'production_profile_var', None)
+        if profile_id is None or app_variable is None:
+            return
+        label = next(
+            (
+                name for name, profile in app_mapping.items()
+                if getattr(profile, 'id', None) == profile_id
+            ),
+            None,
+        )
+        if label is None or app_variable.get() == label:
+            return
+        app_variable.set(label)
+        changed = getattr(self.app, '_production_profile_changed', None)
+        if changed is not None:
+            changed()
+
+    def set_provider_profile(self, profile_id: str) -> None:
+        """Synchronise batch export with the workspace V3 print profile."""
+        label = next(
+            (name for name, value in PROVIDERS.items() if value == profile_id),
+            None,
+        )
+        if label is None or self.provider.get() == label:
+            return
+        self.provider.set(label)
+        self.invalidate()
 
     def _start_label(self, count=None):
         provider = self.provider.get() if hasattr(self, 'provider') else 'Inkthreadable'

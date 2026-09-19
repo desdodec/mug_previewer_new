@@ -123,3 +123,22 @@ For prepared/reviewed production artwork,
 `export_preprocessed_provider_set(...)` performs the same multi-supplier
 export after one front/rear render and re-checks the artwork/QA state before
 publishing the staged files.
+
+
+## Desktop UI
+
+Prepared-workspace mode now separates production export configuration from
+screen-only mug preview geometry.
+
+The left-hand **Production print profile (V3)** control selects Inkthreadable
+or Prodigi H-MUG-W and shows the exact output size, 300 DPI metadata,
+quarter-wrap anchors and current inward correction. The optional debug checkbox
+writes a separate `*_debug.png` alongside the production file.
+
+The **Mug preview geometry (screen only)** section is automatically matched to
+the selected supplier profile. Camera yaw and preview projection controls do
+not alter the production PNG.
+
+The Export PNG tab's batch-provider selector is synchronised with the V3
+production profile. Selected-face export uses the same active profile rather
+than presenting separate hard-coded supplier buttons.
