@@ -268,15 +268,24 @@ def test_prepared_preview_pair_populates_v2_views_without_regenerating_artwork(m
         legacy_calls.append(options.orientation)
         return Image.new("RGBA", ui_state.PREVIEW_SIZE)
 
+    calibration = ui_state.GENERIC_11OZ_CALIBRATION
+
     def fake_v2(source, options):
         assert source is wrap
-        v2_calls.append((str(options.view), str(options.mode)))
+        v2_calls.append((
+            str(options.view), str(options.mode),
+            options.calibration.id, options.camera.yaw_degrees,
+        ))
         return Image.new("RGBA", options.scene.canvas_size)
 
     monkeypatch.setattr(ui_state, "render_mug_preview", fake_legacy)
     monkeypatch.setattr(ui_state, "render_mug_preview_v2", fake_v2)
 
-    result = ui_state.render_prepared_preview_pair("prepared", dataset, street)
+    result = ui_state.render_prepared_preview_pair(
+        "prepared", dataset, street,
+        v2_calibration=calibration,
+        v2_camera_yaw=12.0,
+    )
 
     assert result.wrap is wrap
     assert legacy_calls == [
@@ -284,9 +293,9 @@ def test_prepared_preview_pair_populates_v2_views_without_regenerating_artwork(m
         PreviewOrientation.REAR_HANDLE_LEFT,
     ]
     assert v2_calls == [
-        ("front", "customer"),
-        ("rear", "customer"),
-        ("rear", "engineering"),
+        ("front", "customer", calibration.id, 12.0),
+        ("rear", "customer", calibration.id, 12.0),
+        ("rear", "engineering", calibration.id, 12.0),
     ]
     assert result.v2_front is not None
     assert result.v2_rear is not None
