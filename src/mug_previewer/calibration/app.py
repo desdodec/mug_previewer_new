@@ -224,7 +224,8 @@ class MugCalibrationApp(ttk.Frame):
 
         buttons = ttk.Frame(panel)
         buttons.grid(row=4, column=0, sticky="ew")
-        buttons.columnconfigure((0, 1), weight=1)
+        buttons.columnconfigure(0, weight=1)
+        buttons.columnconfigure(1, weight=1)
         ttk.Button(buttons, text="Save Target PNG", command=self._save_target).grid(
             row=0, column=0, sticky="ew", padx=(0, 3)
         )
@@ -264,8 +265,10 @@ class MugCalibrationApp(ttk.Frame):
             panel,
             text=(
                 "Drag a rectangle around the cylindrical mug body in each mockup. "
-                "Do not include the handle. Fit the coloured longitude lines and bullseye first; "
-                "then use the shared artwork offset only if both views require the same angular shift."
+                "Do not include the handle. Fit the coloured longitude lines and bullseye first. "
+                "Camera yaw and artwork registration produce the same horizontal target shift, so "
+                "treat the shared artwork-offset control as an advanced hypothesis unless handle/camera "
+                "evidence independently constrains yaw."
             ),
             wraplength=320,
             justify="left",
@@ -274,7 +277,8 @@ class MugCalibrationApp(ttk.Frame):
 
         io = ttk.Frame(panel)
         io.grid(row=row, column=0, sticky="ew")
-        io.columnconfigure((0, 1), weight=1)
+        io.columnconfigure(0, weight=1)
+        io.columnconfigure(1, weight=1)
         ttk.Button(io, text="Save Session", command=self._save_session).grid(
             row=0, column=0, sticky="ew", padx=(0, 3)
         )
@@ -363,11 +367,9 @@ class MugCalibrationApp(ttk.Frame):
 
     def _profile_changed(self, _event=None) -> None:
         profile = self._selected_profile()
-        self.fit = CalibrationFit(
-            profile_id=profile.id,
-            front=self.fit.front,
-            rear=self.fit.rear,
-        )
+        self.fit = CalibrationFit(profile_id=profile.id)
+        self.front_source = None
+        self.rear_source = None
         self.visible_arc.set(profile.calibration.visible_angle_degrees)
         self.print_arc.set(profile.calibration.wrap_span_degrees)
         self.artwork_offset.set(0.0)
