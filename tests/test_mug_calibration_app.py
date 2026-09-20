@@ -20,6 +20,7 @@ from mug_previewer.calibration import (
     save_provider_calibration_target,
     save_fit_session,
 )
+from mug_previewer.calibration.app import main as calibration_main
 from mug_previewer.preview.mockup import CANONICAL_WRAP_PREVIEW_GEOMETRY
 from mug_previewer.providers import get_provider_profile
 from mug_previewer.preview_v2 import (
@@ -103,6 +104,24 @@ def test_native_supplier_target_rejects_non_png_destination(tmp_path: Path) -> N
     profile = get_provider_profile("prodigi_h_mug_w")
     with pytest.raises(ValueError, match="\.png"):
         save_provider_calibration_target(tmp_path / "target.jpg", profile)
+
+
+
+def test_calibration_cli_generates_native_prodigi_target(tmp_path: Path) -> None:
+    destination = tmp_path / "prodigi_cli_target.png"
+
+    result = calibration_main([
+        "target",
+        "--profile",
+        "prodigi_h_mug_w",
+        "--output",
+        str(destination),
+    ])
+
+    assert result == 0
+    with Image.open(destination) as image:
+        assert image.size == (2705, 1122)
+        assert image.info["dpi"] == pytest.approx((300, 300), abs=0.1)
 
 
 def test_overlay_keeps_mockup_size_and_changes_only_when_bounds_exist() -> None:
