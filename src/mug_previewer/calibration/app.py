@@ -651,6 +651,7 @@ class MugCalibrationApp(ttk.Frame):
             return
         self.fit = fit
         self.profile_var.set(profile.display_label)
+        self._sync_print_profile_from_preview(profile)
         self.target = render_calibration_target(profile)
         self.front_yaw.set(fit.front.camera_yaw_degrees)
         self.rear_yaw.set(fit.rear.camera_yaw_degrees)
