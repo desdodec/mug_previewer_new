@@ -18,28 +18,56 @@ After reinstalling the package / editable environment, the console entry point i
 mug-calibrator
 ```
 
+A native supplier calibration PNG can also be generated without opening the GUI:
+
+```powershell
+mug-calibrator target --profile prodigi_h_mug_w --output prodigi_h_mug_w_calibration.png
+```
+
+The target dimensions, DPI and placement anchors come directly from the selected
+production `ProviderProfile`.
+
 ## Workflow
 
-### 1. Choose the provider / SKU profile
+### 1. Keep print calibration and preview calibration separate
 
-Select the closest existing V2 calibration profile.
+The lab now exposes two related but different profile choices:
 
-The app starts with Inkthreadable 11oz White Mug because the canonical Mug Previewer master originated from that 200 x 90 mm template.
+- **Provider / SKU calibration** selects the V2 mockup-projection model used for
+  camera/yaw fitting.
+- **Native supplier print target** selects the production `ProviderProfile`
+  used to generate an upload file at the supplier's exact pixel dimensions and
+  DPI.
 
-### 2. Save the calibration target
+When matching IDs exist, changing the V2 profile automatically selects the
+corresponding production profile.
 
-Choose **Save Target PNG**.
+### 2. Generate the right target for the question
 
-The generated 2362 x 1063 PNG contains:
+For supplier upload/fitting tests, use **Save Native Supplier Target**. This is
+the preferred calibration artifact.
 
-- angular longitude lines;
-- horizontal percentage bands;
-- exact FRONT and REAR mathematical centre bullseyes;
-- asymmetric corner fiducials;
-- the canonical 472 px handle/seam exclusion zone;
-- explicit flat-canvas F0 / SEAM / R0 references.
+The native target is rendered directly at the supplier canvas, with no
+canonical-master resize in between. For Prodigi H-MUG-W this is **2705 x 1122
+px at 300 DPI**. It contains:
 
-Upload this exact image to the provider without cropping, scaling or editing it.
+- numbered longitude fiducials every 2.5% of wrap width;
+- horizontal metrology bands every 5% of height;
+- exact provider-profile FRONT and REAR centre bullseyes;
+- an independent 50% midpoint / opposite-handle bullseye;
+- top/bottom 1% rulers;
+- asymmetric orientation marks;
+- colour patches and text baselines;
+- visible supplier edge/seam zones;
+- the provider ID, exact pixel dimensions and DPI printed into the image.
+
+Upload that PNG unchanged. If the provider uploader still reports that it must
+fit, crop or resize the image, that behaviour is itself calibration evidence.
+
+Use **Save V2 Overlay Target** only when fitting the V2 virtual-camera model.
+That legacy 2362 x 1063 canonical target is intentionally retained because the
+overlay maths is expressed in the canonical preview coordinate system. It
+should not be used to infer native supplier print-file dimensions.
 
 ### 3. Obtain provider mockups
 
@@ -146,6 +174,11 @@ Calibration Lab never:
 - changes provider export dimensions;
 - changes QA decisions;
 - writes built-in calibration profiles automatically;
-- treats a fitted candidate as verified.
+- treats a fitted candidate as verified;
+- converts an angled mockup into a production offset automatically.
+
+The native target generator reads the production profile; it does not modify it.
+A supplier-specific production offset should only be promoted after repeatable
+evidence, ideally including a physical printed sample.
 
 Promotion of a candidate into the built-in profile directory is a separate reviewed code/data change.
