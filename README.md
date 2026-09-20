@@ -328,6 +328,19 @@ Calibration target artwork contains angular longitude lines, horizontal height b
 
 Camera yaw and artwork registration are not uniquely separable from printed-target position alone. The lab therefore treats the directly fitted result as an **effective provider projection** unless independent handle/camera evidence constrains yaw.
 
+For print-file calibration, V3 can also generate a supplier-native target directly
+from the production print profile. This avoids resampling the canonical V2 target
+before upload:
+
+```powershell
+mug-calibrator target --profile prodigi_h_mug_w --output prodigi_h_mug_w_calibration.png
+```
+
+For Prodigi H-MUG-W this writes an exact **2705 x 1122 px, 300 DPI** PNG with
+normalised 2.5% longitude fiducials and 5% vertical metrology bands. The GUI
+exposes the same function as **Save Native Supplier Target**. The existing
+**Save V2 Overlay Target** remains available for fitting preview-camera geometry.
+
 See `docs/mug_calibration_lab.md` for the calibration procedure.
 
 ## Desktop preview UI
