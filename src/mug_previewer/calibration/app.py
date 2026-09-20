@@ -10,6 +10,7 @@ import argparse
 
 from PIL import Image, ImageTk
 
+from ..providers import ProviderProfile, get_provider_profile, list_provider_profiles
 from ..preview_v2 import (
     MugCalibrationProfile,
     PreviewV2View,
@@ -26,7 +27,11 @@ from .session import (
     save_candidate_profile,
     save_fit_session,
 )
-from .target import render_calibration_target, save_calibration_target
+from .target import (
+    render_calibration_target,
+    save_calibration_target,
+    save_provider_calibration_target,
+)
 
 
 class MockupCanvas(ttk.Frame):
@@ -184,16 +189,26 @@ class MugCalibrationApp(ttk.Frame):
 
         self.profiles = list_calibration_profiles()
         self.profile_by_label = {profile.display_label: profile for profile in self.profiles}
+        self.print_profiles = list_provider_profiles()
+        self.print_profile_by_label = {
+            self._print_profile_label(profile): profile for profile in self.print_profiles
+        }
+        self.print_profile_by_id = {profile.id: profile for profile in self.print_profiles}
         default = get_calibration_profile("inkthreadable_11oz_white_v2")
+        default_print = get_provider_profile("inkthreadable_11oz_white")
         self.fit = CalibrationFit(profile_id=default.id)
         self.front_source: Image.Image | None = None
         self.rear_source: Image.Image | None = None
         self.target = render_calibration_target(default)
-        self._build_controls(default)
+        self._build_controls(default, default_print)
         self._build_viewers()
         self._refresh_all()
 
-    def _build_controls(self, default: MugCalibrationProfile) -> None:
+    def _build_controls(
+        self,
+        default: MugCalibrationProfile,
+        default_print: ProviderProfile,
+    ) -> None:
         panel = ttk.Frame(self)
         panel.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
         panel.columnconfigure(0, weight=1)
@@ -222,21 +237,44 @@ class MugCalibrationApp(ttk.Frame):
             justify="left",
         ).grid(row=3, column=0, sticky="ew", pady=(0, 8))
 
+        ttk.Label(panel, text="Native supplier print target").grid(row=4, column=0, sticky="w")
+        self.print_profile_var = tk.StringVar(value=self._print_profile_label(default_print))
+        self.print_profile_box = ttk.Combobox(
+            panel,
+            textvariable=self.print_profile_var,
+            values=list(self.print_profile_by_label),
+            state="readonly",
+            width=42,
+        )
+        self.print_profile_box.grid(row=5, column=0, sticky="ew", pady=(2, 4))
+        self.print_profile_box.bind("<<ComboboxSelected>>", self._print_profile_changed)
+
+        self.print_profile_detail_var = tk.StringVar()
+        ttk.Label(
+            panel,
+            textvariable=self.print_profile_detail_var,
+            wraplength=320,
+            justify="left",
+        ).grid(row=6, column=0, sticky="ew", pady=(0, 8))
+
         buttons = ttk.Frame(panel)
-        buttons.grid(row=4, column=0, sticky="ew")
+        buttons.grid(row=7, column=0, sticky="ew")
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
-        ttk.Button(buttons, text="Save Target PNG", command=self._save_target).grid(
+        ttk.Button(buttons, text="Save V2 Overlay Target", command=self._save_target).grid(
             row=0, column=0, sticky="ew", padx=(0, 3)
         )
-        ttk.Button(buttons, text="Load Front Mockup", command=lambda: self._load_mockup("front")).grid(
+        ttk.Button(buttons, text="Save Native Supplier Target", command=self._save_native_target).grid(
             row=0, column=1, sticky="ew", padx=(3, 0)
         )
+        ttk.Button(buttons, text="Load Front Mockup", command=lambda: self._load_mockup("front")).grid(
+            row=1, column=0, sticky="ew", padx=(0, 3), pady=(5, 0)
+        )
         ttk.Button(buttons, text="Load Rear Mockup", command=lambda: self._load_mockup("rear")).grid(
-            row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0)
+            row=1, column=1, sticky="ew", padx=(3, 0), pady=(5, 0)
         )
 
-        ttk.Separator(panel).grid(row=5, column=0, sticky="ew", pady=10)
+        ttk.Separator(panel).grid(row=8, column=0, sticky="ew", pady=10)
 
         self.front_yaw = tk.DoubleVar(value=0.0)
         self.rear_yaw = tk.DoubleVar(value=0.0)
@@ -249,7 +287,7 @@ class MugCalibrationApp(ttk.Frame):
         self.rear_offset = tk.DoubleVar(value=0.0)
         self.opacity = tk.DoubleVar(value=0.55)
 
-        row = 6
+        row = 9
         row = self._add_slider(panel, row, "Front camera yaw", self.front_yaw, -45, 45, 0.5, "°")
         row = self._add_slider(panel, row, "Rear camera yaw", self.rear_yaw, -45, 45, 0.5, "°")
         row = self._add_slider(panel, row, "Shared artwork registration", self.artwork_offset, -20, 20, 0.25, "°")
@@ -289,7 +327,12 @@ class MugCalibrationApp(ttk.Frame):
             row=1, column=0, columnspan=2, sticky="ew", pady=(5, 0)
         )
 
-        self.status_var = tk.StringVar(value="Generate the target, upload it to a provider, then load the returned mockups.")
+        self.status_var = tk.StringVar(
+            value=(
+                "For supplier fitting tests, save the native supplier target. "
+                "Use the V2 overlay target only for preview-camera projection fitting."
+            )
+        )
         ttk.Label(
             panel,
             textvariable=self.status_var,
@@ -365,6 +408,44 @@ class MugCalibrationApp(ttk.Frame):
     def _selected_profile(self) -> MugCalibrationProfile:
         return self.profile_by_label[self.profile_var.get()]
 
+    @staticmethod
+    def _print_profile_label(profile: ProviderProfile) -> str:
+        variant = profile.variant_name or profile.product_name
+        return (
+            f"{profile.provider_name} — {variant} — "
+            f"{profile.canvas_width_px}×{profile.canvas_height_px}"
+        )
+
+    def _selected_print_profile(self) -> ProviderProfile:
+        return self.print_profile_by_label[self.print_profile_var.get()]
+
+    def _print_profile_detail(self, profile: ProviderProfile) -> str:
+        physical = (
+            f"{profile.physical_width_mm:g} × {profile.physical_height_mm:g} mm"
+            if profile.physical_width_mm is not None and profile.physical_height_mm is not None
+            else "physical print size not recorded"
+        )
+        return (
+            f"NATIVE PRINT FILE | {profile.canvas_width_px} × {profile.canvas_height_px} px "
+            f"@ {profile.dpi} DPI | {physical} | "
+            f"front {profile.front_centre_x * 100:.2f}% | "
+            f"rear {profile.rear_centre_x * 100:.2f}%"
+        )
+
+    def _print_profile_changed(self, _event=None) -> None:
+        profile = self._selected_print_profile()
+        self.print_profile_detail_var.set(self._print_profile_detail(profile))
+        self.status_var.set(
+            f"Native target will be generated exactly at {profile.canvas_width_px} × "
+            f"{profile.canvas_height_px} px for {profile.provider_name}."
+        )
+
+    def _sync_print_profile_from_preview(self, preview_profile: MugCalibrationProfile) -> None:
+        candidate = preview_profile.id.removesuffix("_v2")
+        profile = self.print_profile_by_id.get(candidate)
+        if profile is not None:
+            self.print_profile_var.set(self._print_profile_label(profile))
+
     def _profile_changed(self, _event=None) -> None:
         profile = self._selected_profile()
         self.fit = CalibrationFit(profile_id=profile.id)
@@ -374,6 +455,7 @@ class MugCalibrationApp(ttk.Frame):
         self.print_arc.set(profile.calibration.wrap_span_degrees)
         self.artwork_offset.set(0.0)
         self.target = render_calibration_target(profile)
+        self._sync_print_profile_from_preview(profile)
         self._refresh_all()
         self.status_var.set(
             f"Selected {profile.display_label}. Save a fresh target before calibrating this profile."
@@ -454,6 +536,10 @@ class MugCalibrationApp(ttk.Frame):
     def _refresh_all(self) -> None:
         profile = self._selected_profile()
         self.profile_detail_var.set(self._profile_detail(profile))
+        if hasattr(self, "print_profile_detail_var"):
+            self.print_profile_detail_var.set(
+                self._print_profile_detail(self._selected_print_profile())
+            )
         self.target_view.set_image(self.target)
         self.front_view.set_bounds(self.fit.front.bounds)
         self.rear_view.set_bounds(self.fit.rear.bounds)
@@ -496,8 +582,8 @@ class MugCalibrationApp(ttk.Frame):
         profile = self._selected_profile()
         path = filedialog.asksaveasfilename(
             parent=self.root,
-            title="Save calibration target",
-            initialfile=f"{profile.id}_calibration_target.png",
+            title="Save V2 overlay calibration target",
+            initialfile=f"{profile.id}_v2_overlay_target.png",
             defaultextension=".png",
             filetypes=[("PNG files", "*.png")],
         )
@@ -505,7 +591,34 @@ class MugCalibrationApp(ttk.Frame):
             return
         save_calibration_target(path, profile)
         self.status_var.set(
-            f"Saved target to {path}. Upload this exact PNG to the provider without cropping or resizing."
+            f"Saved V2 overlay target to {path}. Use this for preview-camera fitting, "
+            "not for testing native supplier file dimensions."
+        )
+
+    def _save_native_target(self) -> None:
+        profile = self._selected_print_profile()
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save native supplier calibration target",
+            initialfile=f"{profile.id}_{profile.canvas_width_px}x{profile.canvas_height_px}_native_calibration.png",
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png")],
+        )
+        if not path:
+            return
+        try:
+            save_provider_calibration_target(path, profile)
+        except (OSError, ValueError) as error:
+            messagebox.showerror(
+                "Calibration Lab",
+                f"Could not save native supplier target: {error}",
+                parent=self.root,
+            )
+            return
+        self.status_var.set(
+            f"Saved native {profile.provider_name} target: {path}. "
+            f"It is exactly {profile.canvas_width_px} × {profile.canvas_height_px} px "
+            f"at {profile.dpi} DPI. Upload it unchanged."
         )
 
     def _save_session(self) -> None:
