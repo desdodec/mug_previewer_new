@@ -52,6 +52,23 @@ artwork.
 The Prodigi profile is SKU-specific. Do not reuse these dimensions for another
 Prodigi mug unless that product has the same print area.
 
+For H-MUG-W, the production geometry is deliberately conservative: the front
+and rear visual centres remain exactly half a wrap apart, both stay vertically
+centred, and no horizontal correction is inferred from Prodigi's angled 3D
+mockups. The mockup is a preview of a curved object rather than a measurement
+surface.
+
+The previous 2048 x 849 artwork aspect ratio was already essentially the same
+as the 229 x 95 mm print area. V3 therefore preserves the established group
+layout but renders the supplier file directly at the 300-DPI working canvas
+instead of moving either artwork group.
+
+Keep comfortable visual breathing room from the wrap ends/handle region.
+Sublimation registration should not be treated as millimetre-perfect. If a
+physical sample later shows a repeatable registration error, record that as a
+supplier-profile calibration (for example `inward_offset_mm`) rather than
+changing the shared front or rear artwork.
+
 ## Visual bounds
 
 Placement uses the alpha bounds of the complete group rather than its source
