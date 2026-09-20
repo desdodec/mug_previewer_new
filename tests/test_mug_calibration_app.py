@@ -102,7 +102,7 @@ def test_native_supplier_target_save_preserves_dimensions_and_dpi(tmp_path: Path
 
 def test_native_supplier_target_rejects_non_png_destination(tmp_path: Path) -> None:
     profile = get_provider_profile("prodigi_h_mug_w")
-    with pytest.raises(ValueError, match="\.png"):
+    with pytest.raises(ValueError, match=r"\.png"):
         save_provider_calibration_target(tmp_path / "target.jpg", profile)
 
 
