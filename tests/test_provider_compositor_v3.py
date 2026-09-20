@@ -74,12 +74,34 @@ def test_prodigi_h_mug_w_profile_uses_product_specific_canvas():
     assert profile.rear_centre_x == 0.75
 
 
+def test_prodigi_geometry_matches_measured_two_sided_layout_guidance():
+    profile = get_provider_profile("prodigi_h_mug_w")
+    result = compose_provider_artwork(artwork(), artwork(), profile)
+
+    assert profile.dpi == 300
+    assert (profile.physical_width_mm, profile.physical_height_mm) == (229.0, 95.0)
+    assert profile.front_centre_x == 0.25
+    assert profile.rear_centre_x == 0.75
+    assert profile.front_centre_y == 0.50
+    assert profile.rear_centre_y == 0.50
+    assert profile.front_scale == 1.0
+    assert profile.rear_scale == 1.0
+    assert profile.inward_offset_mm == 0.0
+
+    # The two visual centres stay half a wrap apart and share the same
+    # vertical centre. Any future physical calibration must be profile-driven,
+    # never inferred from the angled Prodigi 3D mockup.
+    expected_half_wrap = profile.canvas_width_px * 0.5
+    actual_separation = result.rear_center_xy[0] - result.front_center_xy[0]
+    assert actual_separation == pytest.approx(expected_half_wrap, abs=0.5)
+    assert result.front_center_xy[1] == result.rear_center_xy[1]
+
+
 def test_supplier_filename_matches_v3_contract():
     ink = get_provider_profile("inkthreadable_11oz_white")
     prodigi = get_provider_profile("prodigi_h_mug_w")
     assert supplier_output_filename("Aspinall Street", ink) == "aspinall-street_inkthreadable.png"
     assert supplier_output_filename("Aspinall Street", prodigi, debug=True) == "aspinall-street_prodigi_debug.png"
-
 
 
 def test_one_source_pair_can_write_both_supplier_files_and_debugs(tmp_path):
