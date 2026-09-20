@@ -711,9 +711,32 @@ def launch() -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="mug-calibrator",
-        description="Fit Mug Previewer V2 geometry to provider-generated mockups.",
+        description=(
+            "Generate native supplier calibration targets or fit Mug Previewer V2 "
+            "geometry to provider-generated mockups."
+        ),
     )
-    parser.parse_args(argv)
+    commands = parser.add_subparsers(dest="command")
+    target = commands.add_parser(
+        "target",
+        help="Generate an exact native supplier calibration PNG without opening the GUI.",
+    )
+    target.add_argument(
+        "--profile",
+        required=True,
+        choices=[profile.id for profile in list_provider_profiles()],
+        help="Provider print-profile ID.",
+    )
+    target.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args(argv)
+    if args.command == "target":
+        profile = get_provider_profile(args.profile)
+        save_provider_calibration_target(args.output, profile)
+        print(
+            f"Saved {profile.id} calibration target: {args.output} "
+            f"({profile.canvas_width_px}x{profile.canvas_height_px} @ {profile.dpi} DPI)"
+        )
+        return 0
     return launch()
 
 
