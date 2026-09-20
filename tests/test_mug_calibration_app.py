@@ -13,12 +13,15 @@ from mug_previewer.calibration import (
     candidate_profile_mapping,
     load_fit_session,
     render_calibration_target,
+    render_provider_calibration_target,
     render_target_overlay,
     save_candidate_profile,
     save_calibration_target,
+    save_provider_calibration_target,
     save_fit_session,
 )
 from mug_previewer.preview.mockup import CANONICAL_WRAP_PREVIEW_GEOMETRY
+from mug_previewer.providers import get_provider_profile
 from mug_previewer.preview_v2 import (
     get_calibration_profile,
     load_calibration_mapping,
@@ -54,6 +57,52 @@ def test_save_calibration_target_writes_exact_canonical_png(tmp_path: Path) -> N
     with Image.open(saved) as image:
         assert image.size == (2362, 1063)
         assert image.format == "PNG"
+
+
+def test_native_prodigi_target_uses_exact_supplier_canvas_and_profile_anchors() -> None:
+    profile = get_provider_profile("prodigi_h_mug_w")
+    image = render_provider_calibration_target(profile)
+
+    assert image.size == (2705, 1122)
+    assert image.mode == "RGB"
+    assert image.info["dpi"] == (300, 300)
+
+    front = (
+        round((image.width - 1) * profile.front_centre_x),
+        round((image.height - 1) * profile.front_centre_y),
+    )
+    midpoint = (
+        round((image.width - 1) * 0.5),
+        round((image.height - 1) * 0.5),
+    )
+    rear = (
+        round((image.width - 1) * profile.rear_centre_x),
+        round((image.height - 1) * profile.rear_centre_y),
+    )
+
+    assert image.getpixel(front) != (255, 255, 255)
+    assert image.getpixel(midpoint) != (255, 255, 255)
+    assert image.getpixel(rear) != (255, 255, 255)
+
+
+def test_native_supplier_target_save_preserves_dimensions_and_dpi(tmp_path: Path) -> None:
+    profile = get_provider_profile("prodigi_h_mug_w")
+    destination = tmp_path / "prodigi_native.png"
+
+    saved = save_provider_calibration_target(destination, profile)
+
+    assert saved == destination
+    with Image.open(saved) as image:
+        assert image.size == (2705, 1122)
+        assert image.mode == "RGB"
+        assert image.format == "PNG"
+        assert image.info["dpi"] == pytest.approx((300, 300), abs=0.1)
+
+
+def test_native_supplier_target_rejects_non_png_destination(tmp_path: Path) -> None:
+    profile = get_provider_profile("prodigi_h_mug_w")
+    with pytest.raises(ValueError, match="\.png"):
+        save_provider_calibration_target(tmp_path / "target.jpg", profile)
 
 
 def test_overlay_keeps_mockup_size_and_changes_only_when_bounds_exist() -> None:
