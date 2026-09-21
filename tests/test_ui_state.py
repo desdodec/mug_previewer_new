@@ -227,6 +227,13 @@ def test_dataset_options_requires_explicit_configuration() -> None:
         dataset_options(None)
 
 
+def test_legacy_screen_preview_uses_native_owned_mug_resolution() -> None:
+    """Do not reintroduce the half-resolution legacy preview bottleneck."""
+    assert ui_state.SCREEN_MUG_LAYOUT.canvas_size == (1024, 1536)
+    assert ui_state.SCREEN_MUG_LAYOUT.body_bounds_xyxy == (198, 482, 683, 1105)
+    assert ui_state.PREVIEW_SIZE == ui_state.SCREEN_MUG_LAYOUT.canvas_size
+
+
 def test_preview_uses_screen_mockup_layout_and_approved_placement(tmp_path: Path, monkeypatch) -> None:
     data = _dataset(tmp_path)
     street = data.streets[0]
