@@ -28,6 +28,7 @@ from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, D
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
 from .batch_export_panel import BatchExportPanel
+from .mockup_batch_panel import MockupBatchPanel
 from .manual_review import ManualReviewController, ManualReviewWindow
 from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
@@ -330,6 +331,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._build_artwork_panel()
         self.batch_panel = BatchExportPanel(self.workflow_tabs, self)
         self.workflow_tabs.add(self.batch_panel, text='Export PNG')
+        self.mockup_batch_panel = MockupBatchPanel(self.workflow_tabs, self)
+        self.workflow_tabs.add(self.mockup_batch_panel, text='Export Mockups')
         selected = ttk.LabelFrame(self.batch_panel, text='Selected face', padding=6)
         selected.grid(row=13, column=0, sticky='ew', pady=8)
         selected.columnconfigure(0, weight=1)
@@ -432,8 +435,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             round(self.front_weight_var.get(), 2), round(self.rear_weight_var.get(), 2),
         )
         self._update_weight_displays()
-        if self.state.design_options != previous and "batch_panel" in self.__dict__:
-            self.batch_panel.invalidate()
+        if self.state.design_options != previous:
+            if "batch_panel" in self.__dict__:
+                self.batch_panel.invalidate()
+            if "mockup_batch_panel" in self.__dict__:
+                self.mockup_batch_panel.invalidate()
         if self.state.current_wrap is not None:
             self.status_var.set("Design settings changed \u2014 render to update preview.")
 
@@ -474,6 +480,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.state.selected_dataset = data
         if "batch_panel" in self.__dict__:
             self.batch_panel.invalidate()
+        if "mockup_batch_panel" in self.__dict__:
+            self.mockup_batch_panel.invalidate()
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
         self.state.framing_mode = None
@@ -795,6 +803,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self._shutting_down = True
             if "batch_panel" in self.__dict__:
                 self.batch_panel.cancel_event.set()
+            if "mockup_batch_panel" in self.__dict__:
+                self.mockup_batch_panel.cancel_event.set()
 
     def _shutdown(self) -> None:
         """Invalidate worker completions before the Tk interpreter is destroyed."""
@@ -803,6 +813,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._shutting_down = True
         if "batch_panel" in self.__dict__:
             self.batch_panel.cancel_event.set()
+        if "mockup_batch_panel" in self.__dict__:
+            self.mockup_batch_panel.cancel_event.set()
         self._invalidate_active_production_status_request()
         self._invalidate_active_render_request()
         if self._resize_pending is not None:
