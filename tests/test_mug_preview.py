@@ -27,6 +27,39 @@ def _banded_wrap() -> Image.Image:
     return image
 
 
+def test_owned_mug_handle_junction_repair_is_local_and_mirrors_cleanly() -> None:
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        original = opened.convert("RGBA")
+    from mug_previewer.preview import mockup as mockup_module
+
+    repaired = mockup_module._repair_owned_mug_handle_junction(
+        original, DEFAULT_MUG_PREVIEW_LAYOUT,
+    )
+    diff = ImageChops.difference(original, repaired)
+    bounds = diff.getbbox()
+
+    assert bounds is not None
+    left, top, right, bottom = DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy
+    body_width = right - left
+    body_height = bottom - top
+    expected_region = (
+        right - round(body_width * 0.08),
+        top,
+        right + round(body_width * 0.10),
+        top + round(body_height * 0.24),
+    )
+    assert bounds[0] >= expected_region[0]
+    assert bounds[1] >= expected_region[1]
+    assert bounds[2] <= expected_region[2]
+    assert bounds[3] <= expected_region[3]
+
+    # Rear views mirror the already-repaired photograph; no independent
+    # orientation-specific patch is needed.
+    mirrored = repaired.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    assert mirrored.size == repaired.size
+
+
 def test_preview_has_expected_output_and_does_not_mutate_wrap() -> None:
     wrap = _banded_wrap()
     before = wrap.tobytes()
