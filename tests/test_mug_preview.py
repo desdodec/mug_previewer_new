@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from mug_previewer.preview.diagnostic import create_cylindrical_stripe_wrap, create_mockup_diagnostic_wrap
 from mug_previewer.preview.mockup import (
@@ -141,6 +141,29 @@ def _body_difference_stats(
         if coverage
     ]
     return sum(deltas) / len(deltas), max(deltas), sum(delta > 0 for delta in deltas) * 100 / len(deltas)
+
+
+def test_opaque_white_wrap_preserves_blank_mug_and_handle_junction_shading() -> None:
+    """White print background must be neutral instead of flattening mug lighting."""
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    white = Image.new(
+        "RGBA",
+        (geometry.width_px, geometry.height_px),
+        (255, 255, 255, 255),
+    )
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        base = opened.convert("RGBA")
+
+    for orientation in ("front-handle-right", "rear-handle-left"):
+        expected = (
+            base
+            if orientation == "front-handle-right"
+            else base.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        )
+        actual = render_mug_preview(white, MugPreviewOptions(orientation=orientation))
+
+        assert ImageChops.difference(expected, actual).getbbox() is None
 
 
 def test_transparent_wrap_is_identical_to_blank_mug_over_the_full_body() -> None:
