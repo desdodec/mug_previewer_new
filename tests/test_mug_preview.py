@@ -33,8 +33,10 @@ def test_owned_mug_handle_junction_repair_is_local_and_mirrors_cleanly() -> None
         original = opened.convert("RGBA")
     from mug_previewer.preview import mockup as mockup_module
 
+    with Image.open(assets / "white_mug_mask.png") as opened:
+        body_mask = opened.convert("L")
     repaired = mockup_module._repair_owned_mug_handle_junction(
-        original, DEFAULT_MUG_PREVIEW_LAYOUT,
+        original, body_mask, DEFAULT_MUG_PREVIEW_LAYOUT,
     )
     diff = ImageChops.difference(original, repaired)
     bounds = diff.getbbox()
@@ -58,6 +60,35 @@ def test_owned_mug_handle_junction_repair_is_local_and_mirrors_cleanly() -> None
     # orientation-specific patch is needed.
     mirrored = repaired.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     assert mirrored.size == repaired.size
+
+
+def test_handle_junction_clone_heal_reduces_vertical_source_seam() -> None:
+    from mug_previewer.preview import mockup as mockup_module
+
+    layout = DEFAULT_MUG_PREVIEW_LAYOUT
+    left, top, right, bottom = layout.body_bounds_xyxy
+    image = Image.new("RGBA", layout.canvas_size, (245, 245, 245, 255))
+    mask = Image.new("L", layout.canvas_size, 0)
+    ImageDraw.Draw(mask).rectangle((left, top, right - 1, bottom - 1), fill=255)
+
+    # Inject a narrow bright retouch seam at the same handle-side body edge
+    # where the owned studio photograph shows the defect.
+    seam_x0 = right - round((right - left) * 0.035)
+    seam_x1 = right - round((right - left) * 0.010)
+    seam_y0 = top + round((bottom - top) * 0.055)
+    seam_y1 = top + round((bottom - top) * 0.145)
+    ImageDraw.Draw(image).rectangle(
+        (seam_x0, seam_y0, seam_x1, seam_y1),
+        fill=(255, 255, 255, 255),
+    )
+
+    healed = mockup_module._repair_owned_mug_handle_junction(image, mask, layout)
+
+    y = (seam_y0 + seam_y1) // 2
+    before_jump = abs(image.getpixel((seam_x0, y))[0] - image.getpixel((seam_x0 - 3, y))[0])
+    after_jump = abs(healed.getpixel((seam_x0, y))[0] - healed.getpixel((seam_x0 - 3, y))[0])
+
+    assert after_jump < before_jump
 
 
 def test_preview_has_expected_output_and_does_not_mutate_wrap() -> None:
