@@ -142,16 +142,45 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     )
     local_mask = body_mask.crop((left, top, right, bottom))
     projected.putalpha(ImageChops.multiply(projected.getchannel("A"), local_mask))
-    artwork = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    artwork.alpha_composite(projected, (left, top))
-    result = Image.alpha_composite(base, artwork)
-    # The supplied studio asset already carries the mug's rim, body, handle,
-    # and cast-shadow lighting. Do not overlay lighting over the projected
-    # rectangle: even a feathered layer makes a blank wrap change ceramic.
+    result = _composite_print_onto_ceramic(base, projected, (left, top))
+    # Treat the wrap as printed ink on the photographed ceramic rather than as
+    # a replacement rectangle. Pure white therefore leaves the mug photograph
+    # unchanged, preserving the strong highlight/shadow transitions where the
+    # handle joins the body. Coloured and dark artwork still follows the mug's
+    # underlying luminance, which is both more realistic and avoids pale seams.
     if options.show_debug_guides:
         _draw_debug_guides(result, layout, handle_on_left=orientation.mirror_mug)
     return result
 
+
+
+def _composite_print_onto_ceramic(
+    base: Image.Image,
+    projected: Image.Image,
+    origin: tuple[int, int],
+) -> Image.Image:
+    """Apply projected artwork as ink while preserving photographed ceramic light.
+
+    Canonical/provider wraps can contain an opaque white background. Alpha
+    compositing that rectangle over the mug photograph erases the photographed
+    shading and creates visible vertical patches at the handle/body junction.
+    Multiplication models print on a white substrate: white is neutral, while
+    coloured/dark pixels tint the existing ceramic light and shadow.
+    """
+    left, top = origin
+    right, bottom = left + projected.width, top + projected.height
+    ceramic = base.crop((left, top, right, bottom)).convert("RGBA")
+    ceramic_rgb = ceramic.convert("RGB")
+    print_rgb = projected.convert("RGB")
+    multiplied_rgb = ImageChops.multiply(ceramic_rgb, print_rgb)
+    multiplied = Image.merge(
+        "RGBA",
+        (*multiplied_rgb.split(), ceramic.getchannel("A")),
+    )
+    blended = Image.composite(multiplied, ceramic, projected.getchannel("A"))
+    result = base.copy()
+    result.paste(blended, (left, top))
+    return result
 
 def project_canonical_wrap(
     wrap: Image.Image,
