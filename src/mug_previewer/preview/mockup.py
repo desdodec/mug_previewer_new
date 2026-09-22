@@ -7,7 +7,7 @@ from enum import StrEnum
 from math import asin, ceil, floor, pi, radians, sin
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 
 class MugPreviewError(ValueError):
@@ -266,8 +266,50 @@ def _load_owned_mug_assets(layout: MugPreviewLayout) -> tuple[Image.Image, Image
     if base.size != layout.canvas_size:
         base = base.resize(layout.canvas_size, Image.Resampling.LANCZOS)
         mask = mask.resize(layout.canvas_size, Image.Resampling.NEAREST)
+    base = _repair_owned_mug_handle_junction(base, layout)
     return base, mask
 
+
+
+def _repair_owned_mug_handle_junction(
+    base: Image.Image,
+    layout: MugPreviewLayout,
+) -> Image.Image:
+    """Soften a small source-photo seam at the upper handle/body attachment.
+
+    The owned studio mug photograph has a faint rectangular retouch boundary at
+    the upper handle join. Higher-resolution previews make that source defect
+    visible even when no artwork is composited there. Apply a tightly localised
+    feathered smoothing pass to the photograph itself before either orientation
+    is rendered. Rear previews inherit the same repair through mirroring.
+    """
+    left, top, right, bottom = layout.body_bounds_xyxy
+    body_width = right - left
+    body_height = bottom - top
+
+    # Normalised to the owned mug geometry so this remains correct for scaled
+    # screen layouts as well as the native 1024x1536 batch mockup.
+    x0 = max(0, right - round(body_width * 0.045))
+    x1 = min(base.width, right + round(body_width * 0.060))
+    y0 = max(0, top + round(body_height * 0.010))
+    y1 = min(base.height, top + round(body_height * 0.205))
+    if x1 <= x0 or y1 <= y0:
+        return base
+
+    radius = max(1.0, body_width * 0.014)
+    feather = max(2.0, body_width * 0.018)
+    softened = base.filter(ImageFilter.GaussianBlur(radius=radius))
+
+    repair_mask = Image.new("L", base.size, 0)
+    draw = ImageDraw.Draw(repair_mask)
+    inset = max(1, round(body_width * 0.006))
+    draw.rounded_rectangle(
+        (x0 + inset, y0 + inset, x1 - inset, y1 - inset),
+        radius=max(2, round(body_width * 0.020)),
+        fill=210,
+    )
+    repair_mask = repair_mask.filter(ImageFilter.GaussianBlur(radius=feather))
+    return Image.composite(softened, base, repair_mask)
 
 def _validate_wrap(wrap: Image.Image, geometry: CanonicalWrapPreviewGeometry = CANONICAL_WRAP_PREVIEW_GEOMETRY) -> None:
     if wrap.size != (geometry.width_px, geometry.height_px):
