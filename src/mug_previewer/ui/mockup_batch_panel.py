@@ -44,7 +44,7 @@ class MockupBatchPanel(ttk.LabelFrame):
         self.dataset_by_label = {}
         self.style = tk.StringVar(value=next(iter(MOCKUP_STYLES)))
         self.destination = tk.StringVar()
-        self.policy = tk.StringVar(value="Skip existing")
+        self.policy = tk.StringVar(value="Skip matching existing")
         self.summary = tk.StringVar(
             value="Choose a folder to batch-render front and rear studio mug photos from included prepared faces."
         )
@@ -74,7 +74,7 @@ class MockupBatchPanel(ttk.LabelFrame):
         self.policy_box = ttk.Combobox(
             self,
             textvariable=self.policy,
-            values=["Skip existing", "Replace existing"],
+            values=["Skip matching existing", "Replace existing"],
             state="readonly",
         )
         self.policy_box.grid(row=6, column=0, sticky="ew", pady=(7, 0))
@@ -114,7 +114,8 @@ class MockupBatchPanel(ttk.LabelFrame):
             self,
             text=(
                 "Outputs are preview photos only. Production/provider PNGs are untouched. "
-                "Each included face gets a native-resolution front and rear PNG."
+                "Changing either design slider automatically makes older mockups stale; "
+                "Skip matching existing will regenerate stale files with the current settings."
             ),
             wraplength=320,
         ).grid(row=13, column=0, sticky="w", pady=(8, 0))
@@ -321,7 +322,7 @@ class MockupBatchPanel(ttk.LabelFrame):
                     f"{value.dataset.display_name}: {s.total} prepared\n"
                     f"Ready for mockups: {s.ready} | Excluded: {s.excluded}\n"
                     f"Unrenderable: {s.unrenderable} | Asset errors: {s.asset_errors}\n"
-                    f"Existing complete pairs: {s.existing_pairs}\n"
+                    f"Existing pairs already matching current sliders: {s.existing_pairs}\n"
                     f"Output: front/ and rear/ native-resolution PNGs."
                 )
                 self.start.configure(
