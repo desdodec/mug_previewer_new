@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import tempfile
 
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 from .batch_export import (
     BatchExportItem,
@@ -28,6 +28,7 @@ from .preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_pr
 
 READINESS_PROFILE_ID = "inkthreadable_11oz_white"
 STUDIO_MOCKUP_STYLE_ID = "studio_white_mug"
+MOCKUP_RENDERER_VERSION = "4"
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,8 @@ class MockupBatchItem:
     rear_destination: Path | None = None
     front_exists: bool = False
     rear_exists: bool = False
+    front_matches_current: bool = False
+    rear_matches_current: bool = False
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,42 @@ def _mockup_stem(item: BatchExportItem) -> str:
     return Path(production_filename(item.dataset_id, item.street_id, item.street_name)).stem
 
 
+def _resolved_design_options(options: DesignOptions | None) -> DesignOptions:
+    return options or DesignOptions()
+
+
+def _mockup_metadata(
+    design_options: DesignOptions | None,
+    style_id: str,
+    source_digest: str | None,
+) -> dict[str, str]:
+    design = _resolved_design_options(design_options)
+    return {
+        "mug_previewer_mockup_style": style_id,
+        "mug_previewer_mockup_renderer_version": MOCKUP_RENDERER_VERSION,
+        "mug_previewer_front_feature_weight": f"{design.front_feature_weight:.2f}",
+        "mug_previewer_rear_highlight_weight": f"{design.rear_highlight_weight:.2f}",
+        "mug_previewer_source_svg_sha256": source_digest or "",
+    }
+
+
+def _mockup_output_matches(
+    path: Path,
+    design_options: DesignOptions | None,
+    style_id: str,
+    source_digest: str | None,
+) -> bool:
+    """True only when an existing PNG was rendered with the current mockup settings."""
+    if not path.is_file():
+        return False
+    expected = _mockup_metadata(design_options, style_id, source_digest)
+    try:
+        with Image.open(path) as image:
+            return all(str(image.info.get(key, "")) == value for key, value in expected.items())
+    except (OSError, ValueError):
+        return False
+
+
 def build_mockup_batch_plan(
     root,
     dataset,
@@ -143,13 +182,21 @@ def build_mockup_batch_plan(
                 if key in seen:
                     raise ValueError(f"Mockup filename collision: {destination.name}")
                 seen.add(key)
+            front_exists = front.exists()
+            rear_exists = rear.exists()
             items.append(
                 MockupBatchItem(
                     source,
                     front,
                     rear,
-                    front.exists(),
-                    rear.exists(),
+                    front_exists,
+                    rear_exists,
+                    _mockup_output_matches(
+                        front, design_options, style_id, source.authoritative_svg_sha256
+                    ) if front_exists else False,
+                    _mockup_output_matches(
+                        rear, design_options, style_id, source.authoritative_svg_sha256
+                    ) if rear_exists else False,
                 )
             )
         else:
@@ -162,7 +209,7 @@ def build_mockup_batch_plan(
         excluded=sum(i.source.eligibility is Eligibility.EXCLUDED for i in items),
         unrenderable=sum(i.source.eligibility is Eligibility.UNRENDERABLE for i in items),
         asset_errors=sum(i.source.eligibility is Eligibility.ASSET_ERROR for i in items),
-        existing_pairs=sum(i.front_exists and i.rear_exists for i in items),
+        existing_pairs=sum(i.front_matches_current and i.rear_matches_current for i in items),
         existing_images=sum(i.front_exists for i in items) + sum(i.rear_exists for i in items),
     )
     return MockupBatchPlan(
@@ -178,8 +225,18 @@ def build_mockup_batch_plan(
     )
 
 
-def _save_png(image: Image.Image, destination: Path) -> None:
-    image.convert("RGBA").save(destination, format="PNG", optimize=True)
+def _save_png(
+    image: Image.Image,
+    destination: Path,
+    *,
+    design_options: DesignOptions | None,
+    style_id: str,
+    source_digest: str | None,
+) -> None:
+    metadata = PngImagePlugin.PngInfo()
+    for key, value in _mockup_metadata(design_options, style_id, source_digest).items():
+        metadata.add_text(key, value)
+    image.convert("RGBA").save(destination, format="PNG", optimize=True, pnginfo=metadata)
 
 
 def _publish(temporary: Path, destination: Path, *, replace_existing: bool) -> bool:
@@ -219,8 +276,30 @@ def execute_mockup_batch(plan: MockupBatchPlan, *, on_progress=None, cancel_even
             current = _recheck(plan.source_plan, source)
             front_exists = item.front_destination.exists()
             rear_exists = item.rear_destination.exists()
-            if front_exists and rear_exists and not plan.replace_existing:
-                result = MockupBatchItemResult(item, "SKIPPED_EXISTING", "Both mockup views already exist")
+            front_current = (
+                _mockup_output_matches(
+                    item.front_destination,
+                    plan.design_options,
+                    plan.style_id,
+                    source.authoritative_svg_sha256,
+                )
+                if front_exists else False
+            )
+            rear_current = (
+                _mockup_output_matches(
+                    item.rear_destination,
+                    plan.design_options,
+                    plan.style_id,
+                    source.authoritative_svg_sha256,
+                )
+                if rear_exists else False
+            )
+            if front_current and rear_current and not plan.replace_existing:
+                result = MockupBatchItemResult(
+                    item,
+                    "SKIPPED_EXISTING",
+                    "Both mockup views already match the current design settings",
+                )
             else:
                 street = plan.dataset.get_street(source.street_id)
                 if street is None:
@@ -245,27 +324,43 @@ def execute_mockup_batch(plan: MockupBatchPlan, *, on_progress=None, cancel_even
                     staging_path = Path(staging)
                     front_tmp = staging_path / "front.png"
                     rear_tmp = staging_path / "rear.png"
-                    _save_png(front, front_tmp)
-                    _save_png(rear, rear_tmp)
+                    _save_png(
+                        front,
+                        front_tmp,
+                        design_options=plan.design_options,
+                        style_id=plan.style_id,
+                        source_digest=source.authoritative_svg_sha256,
+                    )
+                    _save_png(
+                        rear,
+                        rear_tmp,
+                        design_options=plan.design_options,
+                        style_id=plan.style_id,
+                        source_digest=source.authoritative_svg_sha256,
+                    )
                     _recheck(plan.source_plan, current)
 
                     published_front = True
                     published_rear = True
-                    if plan.replace_existing or not front_exists:
+                    if plan.replace_existing or not front_current:
                         published_front = _publish(
                             front_tmp,
                             item.front_destination,
-                            replace_existing=plan.replace_existing,
+                            replace_existing=plan.replace_existing or front_exists,
                         )
-                    if plan.replace_existing or not rear_exists:
+                    if plan.replace_existing or not rear_current:
                         published_rear = _publish(
                             rear_tmp,
                             item.rear_destination,
-                            replace_existing=plan.replace_existing,
+                            replace_existing=plan.replace_existing or rear_exists,
                         )
 
                 if not plan.replace_existing and not published_front and not published_rear:
-                    result = MockupBatchItemResult(item, "SKIPPED_EXISTING", "Both destinations appeared during export")
+                    result = MockupBatchItemResult(
+                        item,
+                        "SKIPPED_EXISTING",
+                        "Both destinations appeared during export with matching settings",
+                    )
                 else:
                     result = MockupBatchItemResult(item, "EXPORTED")
         except Exception as error:
@@ -292,6 +387,7 @@ def execute_mockup_batch(plan: MockupBatchPlan, *, on_progress=None, cancel_even
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "cancelled": cancelled,
         "replace_existing": plan.replace_existing,
+        "design_options": asdict(_resolved_design_options(plan.design_options)),
         "summary": summary,
         "progress_errors": progress_errors,
         "items": [
