@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from mug_previewer.preview.diagnostic import create_cylindrical_stripe_wrap, create_mockup_diagnostic_wrap
 from mug_previewer.preview.mockup import (
@@ -25,6 +25,70 @@ def _banded_wrap() -> Image.Image:
     draw.rectangle((945, 0, 1416, geometry.height_px - 1), fill=(40, 170, 70, 255))
     draw.rectangle((1417, 0, 2361, geometry.height_px - 1), fill=(45, 80, 210, 255))
     return image
+
+
+def test_owned_mug_handle_junction_repair_is_local_and_mirrors_cleanly() -> None:
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        original = opened.convert("RGBA")
+    from mug_previewer.preview import mockup as mockup_module
+
+    with Image.open(assets / "white_mug_mask.png") as opened:
+        body_mask = opened.convert("L")
+    repaired = mockup_module._repair_owned_mug_handle_junction(
+        original, body_mask, DEFAULT_MUG_PREVIEW_LAYOUT,
+    )
+    diff = ImageChops.difference(original, repaired)
+    bounds = diff.getbbox()
+
+    assert bounds is not None
+    left, top, right, bottom = DEFAULT_MUG_PREVIEW_LAYOUT.body_bounds_xyxy
+    body_width = right - left
+    body_height = bottom - top
+    expected_region = (
+        right - round(body_width * 0.08),
+        top,
+        right + round(body_width * 0.10),
+        top + round(body_height * 0.24),
+    )
+    assert bounds[0] >= expected_region[0]
+    assert bounds[1] >= expected_region[1]
+    assert bounds[2] <= expected_region[2]
+    assert bounds[3] <= expected_region[3]
+
+    # Rear views mirror the already-repaired photograph; no independent
+    # orientation-specific patch is needed.
+    mirrored = repaired.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    assert mirrored.size == repaired.size
+
+
+def test_handle_junction_clone_heal_reduces_vertical_source_seam() -> None:
+    from mug_previewer.preview import mockup as mockup_module
+
+    layout = DEFAULT_MUG_PREVIEW_LAYOUT
+    left, top, right, bottom = layout.body_bounds_xyxy
+    image = Image.new("RGBA", layout.canvas_size, (245, 245, 245, 255))
+    mask = Image.new("L", layout.canvas_size, 0)
+    ImageDraw.Draw(mask).rectangle((left, top, right - 1, bottom - 1), fill=255)
+
+    # Inject a narrow bright retouch seam at the same handle-side body edge
+    # where the owned studio photograph shows the defect.
+    seam_x0 = right - round((right - left) * 0.035)
+    seam_x1 = right - round((right - left) * 0.010)
+    seam_y0 = top + round((bottom - top) * 0.055)
+    seam_y1 = top + round((bottom - top) * 0.145)
+    ImageDraw.Draw(image).rectangle(
+        (seam_x0, seam_y0, seam_x1, seam_y1),
+        fill=(255, 255, 255, 255),
+    )
+
+    healed = mockup_module._repair_owned_mug_handle_junction(image, mask, layout)
+
+    y = (seam_y0 + seam_y1) // 2
+    before_jump = abs(image.getpixel((seam_x0, y))[0] - image.getpixel((seam_x0 - 3, y))[0])
+    after_jump = abs(healed.getpixel((seam_x0, y))[0] - healed.getpixel((seam_x0 - 3, y))[0])
+
+    assert after_jump < before_jump
 
 
 def test_preview_has_expected_output_and_does_not_mutate_wrap() -> None:
@@ -141,6 +205,29 @@ def _body_difference_stats(
         if coverage
     ]
     return sum(deltas) / len(deltas), max(deltas), sum(delta > 0 for delta in deltas) * 100 / len(deltas)
+
+
+def test_opaque_white_wrap_preserves_blank_mug_and_handle_junction_shading() -> None:
+    """White print background must be neutral instead of flattening mug lighting."""
+    geometry = CANONICAL_WRAP_PREVIEW_GEOMETRY
+    white = Image.new(
+        "RGBA",
+        (geometry.width_px, geometry.height_px),
+        (255, 255, 255, 255),
+    )
+    assets = Path(__file__).parents[1] / "src" / "mug_previewer" / "preview" / "assets"
+    with Image.open(assets / "white_mug.png") as opened:
+        base = opened.convert("RGBA")
+
+    for orientation in ("front-handle-right", "rear-handle-left"):
+        expected = (
+            base
+            if orientation == "front-handle-right"
+            else base.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        )
+        actual = render_mug_preview(white, MugPreviewOptions(orientation=orientation))
+
+        assert ImageChops.difference(expected, actual).getbbox() is None
 
 
 def test_transparent_wrap_is_identical_to_blank_mug_over_the_full_body() -> None:
