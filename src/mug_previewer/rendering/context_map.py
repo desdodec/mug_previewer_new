@@ -17,7 +17,6 @@ import cairosvg
 from PIL import Image
 
 from ..datasets.models import Dataset, MetricBounds, StreetRecord
-from .face import street_feature_colour
 from .native import face_policy as native
 
 LOGGER = logging.getLogger(__name__)
@@ -229,18 +228,11 @@ def render_context_map_result(
             source_view_box,
             options.minimum_highlight_margin_fraction,
         )
-        highlight_colour = options.highlight_stroke_colour
-        if highlight_colour is None:
-            try:
-                highlight_colour = street_feature_colour(street)
-            except Exception as error:
-                LOGGER.debug(
-                    "Could not derive front feature colour for rear street %s: %s",
-                    street.id,
-                    error,
-                )
-        if highlight_colour is not None:
-            markup = _colour_highlight_street(markup, highlight_colour)
+        if options.highlight_stroke_colour is not None:
+            markup = _colour_highlight_street(
+                markup,
+                options.highlight_stroke_colour,
+            )
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
         image = _rasterise_rear_panel(markup, panel_width, panel_height)
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
