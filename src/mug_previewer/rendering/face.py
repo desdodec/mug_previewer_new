@@ -216,6 +216,7 @@ def _render_transformed_street(standard: Image.Image, masks: object, candidate: 
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     feature = ImageColor.getrgb(palette.feature) + (255,)
     adapted = standard.copy()
+    adapted.info.update(standard.info)
     adapted.paste((255, 255, 255, 255), mask=masks.street_mouth)
     for protected in (masks.left_eye, masks.right_eye, masks.static_nose, masks.typography):
         adapted.paste(feature, mask=protected)
@@ -273,7 +274,11 @@ def _render_face_standard(
 </svg>'''
     png = cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=width, output_height=height)
     with Image.open(io.BytesIO(png)) as rendered:
-        return rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1])).copy()
+        panel = rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1])).copy()
+    feature_colour = extract_street_feature_colour(_decode_native_face_asset(face_markup))
+    if feature_colour is not None:
+        panel.info["street_feature_colour"] = feature_colour
+    return panel
 
 
 def _front_group_transform(
