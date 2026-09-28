@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import math
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
