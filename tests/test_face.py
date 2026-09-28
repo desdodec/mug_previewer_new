@@ -64,13 +64,13 @@ def test_final_front_composition_scale_offset_and_text_gap_remain_shared_and_saf
     data = load_dataset(dataset_copy(tmp_path))
     assert FRONT_GROUP_SCALE == pytest.approx(1.18)
     assert FRONT_GROUP_Y_OFFSET == pytest.approx(60.0)
-    assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(4.0)
-    assert FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX == pytest.approx(-12.0)
+    assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(6.0)
+    assert FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX == pytest.approx(-14.0)
     title_y, locality_y = _front_text_y_positions(
         462, FRONT_TITLE_LOCALITY_GAP_DELTA_PX, FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX,
     )
-    assert title_y == pytest.approx(462 * TITLE_Y_RATIO - 12.0)
-    assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 4.0)
+    assert title_y == pytest.approx(462 * TITLE_Y_RATIO - 14.0)
+    assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 6.0)
     transform = _front_group_transform(247.5, FRONT_PANEL_PX[1], FRONT_GROUP_SCALE, FRONT_GROUP_Y_OFFSET)
     assert "translate(247.50 231.00) scale(1.1800) translate(-247.50 -231.00)" in transform
 
