@@ -143,9 +143,12 @@ def render_wrap_result(
     face_options = options.face_options or FaceRenderOptions(area=dataset.display_name)
     front_panel = render_face(street, face_options)
     context_options = options.context_options or ContextRenderOptions()
+    feature_colour = front_panel.info.get("street_feature_colour")
+    if not isinstance(feature_colour, str):
+        feature_colour = street_feature_colour(street)
     context_options = replace(
         context_options,
-        highlight_stroke_colour=street_feature_colour(street),
+        highlight_stroke_colour=feature_colour,
     )
     context = render_context_map_result(dataset, street, context_options)
     rear_panel = context.image
