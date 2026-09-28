@@ -119,7 +119,7 @@ def render_preprocessed_artwork_groups(
             )
         except (OSError, UnicodeError):
             feature_colour = None
-    if feature_colour is None:
+    if feature_colour is None and not front.source.is_svg:
         try:
             feature_colour = street_feature_colour(street)
         except Exception:
