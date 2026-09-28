@@ -320,7 +320,7 @@ def generate_candidates(grid: CandidateGrid = CandidateGrid()) -> tuple[Candidat
 def overlap_pixels(street_mask: Image.Image, protected_mask: Image.Image) -> int:
     """Return thresholded alpha-mask intersections, avoiding bbox false positives."""
     _require_same_size(street_mask, protected_mask)
-    return sum(left > 0 and right > 0 for left, right in zip(_binary(street_mask).getdata(), _binary(protected_mask).getdata()))
+    return sum(left > 0 and right > 0 for left, right in zip(_binary(street_mask).get_flattened_data(), _binary(protected_mask).get_flattened_data()))
 
 
 def analyse_front_candidates(
@@ -678,7 +678,7 @@ def write_anatomy_debug_output(
         mask.save(output_dir / filename, format="PNG")
     combined = Image.new("L", masks.street_mouth.size, 0)
     for mask in (masks.static_nose, masks.left_eye, masks.right_eye, masks.typography):
-        combined = Image.frombytes("L", combined.size, bytes(max(left, right) for left, right in zip(combined.getdata(), _binary(mask).getdata())))
+        combined = Image.frombytes("L", combined.size, bytes(max(left, right) for left, right in zip(combined.get_flattened_data(), _binary(mask).get_flattened_data())))
     combined.save(output_dir / "protected_combined.png", format="PNG")
     _write_alignment_image(masks, score_candidate(masks, Candidate(0, 1.0, 0, 0)), output_dir / "anatomy_overlay.png")
     return audit_masks(masks)
@@ -791,7 +791,7 @@ def _binary(mask: Image.Image) -> Image.Image:
 
 
 def _pixel_count(mask: Image.Image) -> int:
-    return sum(value > 0 for value in _binary(mask).getdata())
+    return sum(value > 0 for value in _binary(mask).get_flattened_data())
 
 
 def audit_masks(masks: FaceAnatomyMasks) -> tuple[MaskAudit, ...]:
@@ -915,7 +915,7 @@ def nearest_foreground_distance(
     field, width = _distance_field(protected_binary), street_binary.width
     distance, street_x, street_y = min(
         (field[index], index % width, index // width)
-        for index, value in enumerate(street_binary.getdata()) if value
+        for index, value in enumerate(street_binary.get_flattened_data()) if value
     )
     radius, pixels = math.ceil(distance), protected_binary.load()
     nearest = min(
