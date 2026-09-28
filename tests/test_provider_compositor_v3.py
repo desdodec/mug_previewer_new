@@ -106,7 +106,7 @@ def test_prodigi_debug_guides_use_profile_face_centres():
 
     front_x = result.front_center_xy[0]
     rear_x = result.rear_center_xy[0]
-    middle_x = round(profile.canvas_width_px * 0.50)
+    middle_x = (profile.canvas_width_px + 1) // 2
 
     # Guides are diagnostics only; production remains transparent here.
     assert result.image.getpixel((front_x, 10))[3] == 0
