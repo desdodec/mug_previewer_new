@@ -1,5 +1,5 @@
 """Production composition from indexed prepared artwork, without live face generation."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import os
 import tempfile
@@ -16,6 +16,7 @@ from .providers import get_provider_profile
 from .review_index import current_review_state
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
+from .rendering.face import extract_street_feature_colour, street_feature_colour
 
 
 class AuthoritativeArtworkError(ValueError):
@@ -110,7 +111,26 @@ def render_preprocessed_artwork_groups(
         require_production_approved=require_production_approved,
     )
     options = build_render_options(design_options or DesignOptions(), area=dataset.display_name)
-    rear = render_context_map_result(dataset, street, options.context_options)
+    feature_colour = None
+    if front.source.is_svg:
+        try:
+            feature_colour = extract_street_feature_colour(
+                front.source.path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError):
+            feature_colour = None
+    if feature_colour is None:
+        try:
+            feature_colour = street_feature_colour(street)
+        except Exception:
+            feature_colour = None
+    context_options = options.context_options
+    if context_options is not None and feature_colour is not None:
+        context_options = replace(
+            context_options,
+            highlight_stroke_colour=feature_colour,
+        )
+    rear = render_context_map_result(dataset, street, context_options)
     return front.image, rear.image
 
 
