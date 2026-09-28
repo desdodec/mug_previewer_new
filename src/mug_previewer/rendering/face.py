@@ -43,9 +43,9 @@ SUPPORTING_STROKE_WIDTH = 1.68
 FRONT_GROUP_SCALE = 1.18
 FRONT_GROUP_Y_OFFSET = 60.0
 # Task 02N: shared locality-baseline adjustment within the text block.
-FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 4.0
+FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 6.0
 # Task 02Q: move only the title/locality block in source-panel coordinates.
-FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -12.0
+FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -14.0
 # Final-layout visual clearance for a normal lower street feature only.
 NOSE_STREET_TARGET_CLEARANCE_PX = 8
 NOSE_STREET_MAX_AUTOMATIC_SHIFT_PX = 20
