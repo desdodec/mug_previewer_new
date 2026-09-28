@@ -28,7 +28,7 @@ from .preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_pr
 
 READINESS_PROFILE_ID = "inkthreadable_11oz_white"
 STUDIO_MOCKUP_STYLE_ID = "studio_white_mug"
-MOCKUP_RENDERER_VERSION = "4"
+MOCKUP_RENDERER_VERSION = "5"
 
 
 @dataclass(frozen=True)
