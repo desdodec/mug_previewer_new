@@ -222,6 +222,7 @@ def _render_transformed_street(standard: Image.Image, masks: object, candidate: 
         adapted.paste(feature, mask=protected)
     street_mask, _clipped = transform_street_mask(masks.street_mouth, candidate)
     adapted.paste(feature, mask=street_mask)
+    adapted.info["street_feature_colour"] = _normalise_feature_colour(palette.feature)
     return adapted
 
 def _render_face_standard(
