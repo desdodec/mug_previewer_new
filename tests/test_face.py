@@ -125,6 +125,7 @@ def test_render_face_uses_the_production_adapted_transform(tmp_path: Path, monke
     data = load_dataset(dataset_copy(tmp_path))
     image = render_face(data.get_street("0001"), FaceRenderOptions(area=data.display_name))
     assert image.size == FRONT_PANEL_PX
+    assert image.info["street_feature_colour"] == native.get_face_palette(native.DEFAULT_PALETTE_KEY).feature.upper()
 
 
 
