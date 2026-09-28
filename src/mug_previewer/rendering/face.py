@@ -144,6 +144,20 @@ def extract_street_feature_colour(markup: str | bytes) -> str | None:
             return _normalise_feature_colour(value)
         except FaceRenderError:
             continue
+
+    # Some SVG editors move presentation attributes into a stylesheet. Keep
+    # prepared artwork authoritative by accepting a .street CSS stroke too.
+    for element in root.iter():
+        if _svg_local_name(element.tag) != "style" or not (element.text or "").strip():
+            continue
+        for rule in re.finditer(r"([^{}]*\.street[^{}]*)\{([^{}]*)\}", element.text or "", re.DOTALL):
+            match = re.search(r"(?:^|;)\s*stroke\s*:\s*([^;]+)", rule.group(2))
+            if match is None:
+                continue
+            try:
+                return _normalise_feature_colour(match.group(1).strip())
+            except FaceRenderError:
+                continue
     return None
 
 
