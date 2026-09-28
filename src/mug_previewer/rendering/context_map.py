@@ -17,6 +17,7 @@ import cairosvg
 from PIL import Image
 
 from ..datasets.models import Dataset, MetricBounds, StreetRecord
+from .face import street_feature_colour
 from .native import face_policy as native
 
 LOGGER = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class ContextRenderOptions:
     panel_size: tuple[int, int] = REAR_PANEL_PX
     policy: ContextScalePolicy = DEFAULT_CONTEXT_SCALE_POLICY
     highlight_stroke_scale: float = REAR_STREET_HIGHLIGHT_SCALE
+    highlight_stroke_colour: str | None = None
     minimum_highlight_margin_fraction: float = REAR_STREET_MIN_MARGIN_FRACTION
 
 
@@ -227,6 +229,18 @@ def render_context_map_result(
             source_view_box,
             options.minimum_highlight_margin_fraction,
         )
+        highlight_colour = options.highlight_stroke_colour
+        if highlight_colour is None:
+            try:
+                highlight_colour = street_feature_colour(street)
+            except Exception as error:
+                LOGGER.debug(
+                    "Could not derive front feature colour for rear street %s: %s",
+                    street.id,
+                    error,
+                )
+        if highlight_colour is not None:
+            markup = _colour_highlight_street(markup, highlight_colour)
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
         image = _rasterise_rear_panel(markup, panel_width, panel_height)
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
@@ -284,6 +298,50 @@ def _refine_context_markup(markup: str, street: StreetRecord) -> str:
 
     refined = re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
     return re.sub(r'(<image\b[^>]*\bopacity=")[0-9.]+', r'\g<1>0.58', refined, count=1)
+
+
+def _colour_highlight_street(markup: str, colour: str) -> str:
+    """Set only the coloured highlighted road to the linked front feature colour."""
+    if not isinstance(colour, str) or re.fullmatch(r"#[0-9A-Fa-f]{6}", colour.strip()) is None:
+        raise ContextRenderError("Rear highlighted-street colour must be a #RRGGBB value.")
+    target = colour.strip().upper()
+    legacy = re.search(r'"highlight_color"\s*:\s*"(#[0-9A-Fa-f]{6})"', markup)
+    legacy_colour = legacy.group(1).casefold() if legacy else None
+
+    root = ET.fromstring(markup)
+    shapes = [
+        element for element in root.iter()
+        if element.tag.rsplit("}", 1)[-1] in {"polyline", "path"}
+    ]
+    selected = iter(
+        (
+            "highlighted-street" in element.get("class", "").split()
+            and "highlighted-street-halo" not in element.get("class", "").split()
+        )
+        or (
+            legacy_colour is not None
+            and element.get("stroke", "").casefold() == legacy_colour
+        )
+        for element in shapes
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        if not next(selected):
+            return tag
+        classes = re.search(r'\bclass="([^"]*)"', tag)
+        if classes is None:
+            insert_at = -2 if tag.endswith("/>") else -1
+            tag = tag[:insert_at] + ' class="highlighted-street"' + tag[insert_at:]
+        elif "highlighted-street" not in classes.group(1).split():
+            revised = " ".join([*classes.group(1).split(), "highlighted-street"])
+            tag = tag[:classes.start(1)] + revised + tag[classes.end(1):]
+        if re.search(r'\bstroke="[^"]*"', tag):
+            return re.sub(r'\bstroke="[^"]*"', f'stroke="{target}"', tag, count=1)
+        insert_at = -2 if tag.endswith("/>") else -1
+        return tag[:insert_at] + f' stroke="{target}"' + tag[insert_at:]
+
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
 
 
 def _scale_highlight_stroke(markup: str, scale: float) -> str:
