@@ -193,7 +193,12 @@ def _debug(
     if safe:
         draw.rectangle((0, 0, safe - 1, height - 1), fill=(255, 80, 80, 45), outline=(255, 80, 80, 210), width=2)
         draw.rectangle((width - safe, 0, width - 1, height - 1), fill=(255, 80, 80, 45), outline=(255, 80, 80, 210), width=2)
-    for fraction in (0.25, 0.50, 0.75):
+    guide_fractions = sorted({
+        profile.front_centre_x,
+        0.50,
+        profile.rear_centre_x,
+    })
+    for fraction in guide_fractions:
         x = _round_half_up(width * fraction)
         draw.line((x, 0, x, height - 1), fill=(50, 120, 255, 210), width=2)
     y = _round_half_up(height * 0.5)
