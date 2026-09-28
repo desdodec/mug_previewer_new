@@ -31,6 +31,7 @@ from mug_previewer.rendering.context_map import (
     REAR_STREET_MIN_MARGIN_FRACTION,
     LEGACY_MAX_RASTER_MAGNIFICATION,
     _legacy_crop_markup,
+    _colour_highlight_street,
     _ensure_highlight_margin,
     _highlight_bounds,
     _svg_view_box,
@@ -142,6 +143,26 @@ def test_attribution_renders_below_the_map_without_clipping(tmp_path: Path) -> N
     assert attribution_pixels
     assert min(y for _, y in attribution_pixels) > map_bottom
     assert max(y for _, y in attribution_pixels) < image.height - 1
+
+
+def test_rear_highlight_colour_changes_only_the_coloured_street_and_marks_legacy_road() -> None:
+    markup = (
+        '<svg viewBox="0 0 100 100"><metadata>{"highlight_color":"#E83E8C"}</metadata>'
+        '<polyline points="10,20 30,40" fill="none" stroke="#ffffff" stroke-width="12"/>'
+        '<polyline points="10,20 30,40" fill="none" stroke="#E83E8C" stroke-width="8"/>'
+        '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/></svg>'
+    )
+    adjusted = _colour_highlight_street(markup, "#137F83")
+
+    assert 'stroke="#ffffff" stroke-width="12"' in adjusted
+    assert 'stroke="#137F83"' in adjusted
+    assert 'class="highlighted-street"' in adjusted
+    assert '<path d="M1 1 L2 2" stroke="#112233" stroke-width="4"/>' in adjusted
+
+    scaled = _scale_highlight_stroke(adjusted, 0.5)
+    assert 'stroke="#137F83"' in scaled
+    assert 'stroke-width="4.00"' in scaled
+    assert 'stroke-width="6.00"' in scaled
 
 
 def test_final_rear_highlight_scales_width_without_changing_geometry_or_colour() -> None:
