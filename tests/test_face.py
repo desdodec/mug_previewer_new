@@ -26,8 +26,11 @@ from mug_previewer.rendering.face import (
     _front_group_transform,
     _render_face_standard,
     _front_text_y_positions,
+    extract_street_feature_colour,
     render_face,
+    render_face_svg,
     select_title_font,
+    street_feature_colour,
 )
 from mug_previewer.rendering.native import face_policy as native
 
@@ -38,6 +41,16 @@ def dataset_copy(tmp_path: Path) -> Path:
     path = tmp_path / "workflow_v6_valid"
     shutil.copytree(FIXTURE, path)
     return path
+
+
+def test_canonical_svg_exposes_the_same_street_feature_colour_used_by_front_face(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    expected = street_feature_colour(street)
+    markup = render_face_svg(data, street, FaceRenderOptions(area=data.display_name))
+
+    assert expected.startswith("#") and len(expected) == 7
+    assert extract_street_feature_colour(markup) == expected
 
 
 def test_render_face_returns_v28_front_panel(tmp_path: Path) -> None:
