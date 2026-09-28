@@ -9,7 +9,8 @@ from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.diagnostics.front_candidates import ProductionTriageStatus as Status
 from mug_previewer.preprocessed_export import (
     AuthoritativeArtworkError, render_authoritative_face_panel,
-    render_preprocessed_wrap, export_preprocessed_provider_png,
+    render_preprocessed_artwork_groups, render_preprocessed_wrap,
+    export_preprocessed_provider_png,
 )
 from mug_previewer.rendering.svg_raster import rasterize_face_svg
 from mug_previewer.review_index import save_review_record
@@ -61,6 +62,32 @@ def test_shared_raster_exact_front_crop(tmp_path, kind):
     panel = rasterize_face_svg(source)
     assert panel.mode == 'RGBA' and panel.size == (495, 462)
     assert panel.getextrema() == ((255,255),(0,0),(0,0),(255,255))
+
+
+def test_prepared_front_street_colour_is_forwarded_to_rear_renderer(prepared, monkeypatch):
+    root, data, street, record = prepared
+    record(Status.AUTO_APPROVED)
+    (root / 'generated.svg').write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="990" height="462" viewBox="0 0 990 462">'
+        '<rect width="495" height="462" fill="white"/>'
+        '<polyline class="street" points="100,200 300,240" fill="none" '
+        'stroke="#137F83" style="stroke-width:4"/>'
+        '</svg>'
+    )
+    captured = {}
+
+    def rear_renderer(dataset, selected, options):
+        captured['colour'] = options.highlight_stroke_colour
+        return type('Rear', (), {'image': Image.new('RGBA', (495, 462), (0, 0, 0, 0))})()
+
+    monkeypatch.setattr(
+        'mug_previewer.preprocessed_export.render_context_map_result',
+        rear_renderer,
+    )
+    front, rear = render_preprocessed_artwork_groups(root, data, street)
+
+    assert front.size == rear.size == (495, 462)
+    assert captured['colour'] == '#137F83'
 
 
 @pytest.mark.parametrize('profile,size', PROFILES)
