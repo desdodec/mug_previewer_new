@@ -98,7 +98,9 @@ def _normalise_feature_colour(value: str) -> str:
 
 def _face_specs_for_glyph(glyph: Path):
     """Build the native face spec used by both front artwork and colour linking."""
-    palette, specs = _face_specs_for_glyph(glyph)
+    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
+    specs = native.build_specs([glyph], palette=palette)
+    native.apply_gallery_context_to_single_spec(specs, [glyph], palette, None)
     return palette, specs
 
 
@@ -339,9 +341,7 @@ def _render_native_face(
 ) -> str:
     if not math.isfinite(street_feature_stroke_multiplier) or street_feature_stroke_multiplier <= 0:
         raise FaceRenderError("Front street feature stroke multiplier must be positive and finite.")
-    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
-    specs = native.build_specs([glyph], palette=palette)
-    native.apply_gallery_context_to_single_spec(specs, [glyph], palette, None)
+    palette, specs = _face_specs_for_glyph(glyph)
     with tempfile.TemporaryDirectory(prefix="mug_v28_face_") as temporary:
         native_path = Path(temporary) / "face.svg"
         native.render_grid(
