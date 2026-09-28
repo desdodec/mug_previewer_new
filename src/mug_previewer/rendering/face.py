@@ -84,6 +84,66 @@ class NoseStreetClearanceCorrection(NamedTuple):
     outcome: str
 
 
+def _normalise_feature_colour(value: str) -> str:
+    """Return one opaque SVG colour as canonical #RRGGBB."""
+    try:
+        rgb = ImageColor.getrgb(str(value).strip())
+    except (TypeError, ValueError) as error:
+        raise FaceRenderError(f"Invalid facial street feature colour: {value!r}.") from error
+    if len(rgb) < 3:
+        raise FaceRenderError(f"Invalid facial street feature colour: {value!r}.")
+    return "#{:02X}{:02X}{:02X}".format(*rgb[:3])
+
+
+def _face_specs_for_glyph(glyph: Path):
+    """Build the native face spec used by both front artwork and colour linking."""
+    palette, specs = _face_specs_for_glyph(glyph)
+    return palette, specs
+
+
+def street_feature_colour(street: StreetRecord) -> str:
+    """Return the exact colour used for this street's facial SVG feature."""
+    glyph = street.glyph_path
+    if not glyph.is_file():
+        raise FaceRenderError(
+            f'Cannot derive feature colour for street {street.id}: glyph file does not exist: {glyph}'
+        )
+    try:
+        _palette, specs = _face_specs_for_glyph(glyph)
+        return _normalise_feature_colour(specs[0].group_color)
+    except FaceRenderError:
+        raise
+    except Exception as error:
+        raise FaceRenderError(
+            f'Could not derive facial street feature colour for {street.id} "{street.display_name}".'
+        ) from error
+
+
+def extract_street_feature_colour(markup: str | bytes) -> str | None:
+    """Extract the editable front SVG's coloured street feature, if present."""
+    try:
+        root = ET.fromstring(markup)
+    except (ET.ParseError, TypeError, ValueError):
+        return None
+    for element in root.iter():
+        if _svg_local_name(element.tag) not in {"polyline", "path"}:
+            continue
+        if "street" not in element.get("class", "").split():
+            continue
+        value = element.get("stroke")
+        if value is None:
+            style = element.get("style", "")
+            match = re.search(r"(?:^|;)\s*stroke\s*:\s*([^;]+)", style)
+            value = match.group(1).strip() if match is not None else None
+        if not value or value.casefold() == "none":
+            continue
+        try:
+            return _normalise_feature_colour(value)
+        except FaceRenderError:
+            continue
+    return None
+
+
 def render_face(
     street: StreetRecord,
     options: FaceRenderOptions | None = None,
