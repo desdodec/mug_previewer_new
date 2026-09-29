@@ -72,7 +72,7 @@ def test_face_generation_ignores_stale_street_records(tmp_path):
     assert state.total == len(dataset.streets)
 
 
-def test_fully_prepared_dataset_does_not_offer_regeneration(tmp_path):
+def test_fully_prepared_dataset_keeps_generate_faces_available(tmp_path):
     dataset = _dataset(tmp_path)
     catalogue = PreprocessedCatalogue(
         tmp_path,
@@ -80,8 +80,8 @@ def test_fully_prepared_dataset_does_not_offer_regeneration(tmp_path):
     )
     state = face_generation_state(catalogue, dataset)
     assert state.prepared == len(dataset.streets)
-    assert state.button_text == "Faces Generated"
-    assert not state.enabled
+    assert state.button_text == "Generate Faces"
+    assert state.enabled
 
 
 def test_prepared_dataset_options_only_show_sets_present_in_catalogue(tmp_path):
