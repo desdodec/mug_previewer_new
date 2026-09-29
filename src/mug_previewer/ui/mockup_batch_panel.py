@@ -62,24 +62,24 @@ class MockupBatchPanel(ttk.LabelFrame):
         ).grid(sticky="w", pady=(3, 0))
         self.refresh_production_settings()
 
-        ttk.Label(self, text="Prepared face set").grid(row=14, column=0, sticky="w")
+        ttk.Label(self, text="Prepared face set").grid(row=1, column=0, sticky="w")
         self.dataset_box = ttk.Combobox(self, textvariable=self.dataset, state="readonly")
-        self.dataset_box.grid(row=14, column=0, sticky="ew")
+        self.dataset_box.grid(row=2, column=0, sticky="ew")
         self.dataset_box.bind("<<ComboboxSelected>>", self.select_export_dataset)
 
-        ttk.Label(self, text="Mockup style").grid(row=14, column=0, sticky="w", pady=(7, 0))
+        ttk.Label(self, text="Mockup style").grid(row=3, column=0, sticky="w", pady=(7, 0))
         self.style_box = ttk.Combobox(
             self, textvariable=self.style, values=list(MOCKUP_STYLES), state="readonly"
         )
-        self.style_box.grid(row=14, column=0, sticky="ew")
+        self.style_box.grid(row=4, column=0, sticky="ew")
         self.style_box.bind("<<ComboboxSelected>>", lambda _e: self.invalidate())
 
         self.choose = ttk.Button(
             self, text="1. Choose mockup export folder", command=self.choose_folder
         )
-        self.choose.grid(row=14, column=0, sticky="ew", pady=(7, 0))
+        self.choose.grid(row=5, column=0, sticky="ew", pady=(7, 0))
         ttk.Label(self, textvariable=self.destination, wraplength=320).grid(
-            row=14, column=0, sticky="w"
+            row=6, column=0, sticky="w"
         )
 
         self.policy_box = ttk.Combobox(
@@ -88,30 +88,30 @@ class MockupBatchPanel(ttk.LabelFrame):
             values=["Skip matching existing", "Replace existing"],
             state="readonly",
         )
-        self.policy_box.grid(row=14, column=0, sticky="ew", pady=(7, 0))
+        self.policy_box.grid(row=7, column=0, sticky="ew", pady=(7, 0))
         self.policy_box.bind("<<ComboboxSelected>>", lambda _e: self.invalidate())
 
         ttk.Label(self, textvariable=self.summary, wraplength=320).grid(
-            row=14, column=0, sticky="w", pady=(7, 0)
+            row=8, column=0, sticky="w", pady=(7, 0)
         )
         self.refresh = ttk.Button(
             self, text="Recheck mockup readiness", command=self.refresh_plan, state="disabled"
         )
-        self.refresh.grid(row=14, column=0, sticky="ew")
+        self.refresh.grid(row=9, column=0, sticky="ew")
         self.start = ttk.Button(
             self, text="2. Export ALL included mockup pairs", command=self.start_batch, state="disabled"
         )
-        self.start.grid(row=14, column=0, sticky="ew", pady=(5, 0))
+        self.start.grid(row=10, column=0, sticky="ew", pady=(5, 0))
         self.cancel = ttk.Button(
             self, text="Cancel Mockup Export", command=self.cancel_event.set, state="disabled"
         )
-        self.cancel.grid(row=14, column=0, sticky="ew")
+        self.cancel.grid(row=11, column=0, sticky="ew")
         ttk.Label(self, textvariable=self.progress, wraplength=320).grid(
-            row=14, column=0, sticky="w"
+            row=12, column=0, sticky="w"
         )
 
         links = ttk.Frame(self)
-        links.grid(row=14, column=0, sticky="ew")
+        links.grid(row=13, column=0, sticky="ew")
         self.folder_button = ttk.Button(
             links, text="Open Mockup Folder", command=self.open_folder, state="disabled"
         )
