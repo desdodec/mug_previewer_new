@@ -50,7 +50,7 @@ def face_generation_state(
         return FaceGenerationState(prepared, total, "Generate Faces", total > 0)
     if prepared < total:
         return FaceGenerationState(prepared, total, "Generate Missing Faces", True)
-    return FaceGenerationState(prepared, total, "Faces Generated", False)
+    return FaceGenerationState(prepared, total, "Generate Faces", total > 0)
 
 
 def source_dataset_mapping(
