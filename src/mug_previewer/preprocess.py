@@ -17,12 +17,13 @@ from .canonical_svg import (serialized, canonical_relative, history_paths, prese
 from .datasets.models import Dataset, StreetRecord
 from .diagnostics.front_candidates import ProductionTriageStatus
 from .rendering.face import FACE_SVG_GENERATOR, SOURCE_CANVAS_PX, FaceRenderOptions, render_face_svg
+from .rendering.native import face_policy as native
 from .rendering.svg_raster import rasterize_face_svg
 from .ui.production import production_triage_state
 
 PREPROCESS_GENERATOR = "mug-previewer/preprocess"
 PREPROCESS_GENERATOR_VERSION = "2"
-FACE_GENERATOR_VERSION = "V28.1"
+FACE_GENERATOR_VERSION = "V28.2"
 SVG_IMPORT_GENERATOR = "mug-previewer/manual-svg-import"
 SVG_IMPORT_VERSION = "1"
 INDEX_FILENAME = "preprocess_index.json"
@@ -446,9 +447,25 @@ def _fingerprint(dataset: Dataset, street: StreetRecord, state: ProductionTriage
         "production_state": state.value, "reason_codes": reason_codes,
         "generator": PREPROCESS_GENERATOR, "generator_version": PREPROCESS_GENERATOR_VERSION,
         "face_generator": FACE_SVG_GENERATOR, "face_generator_version": FACE_GENERATOR_VERSION,
+        "face_palette": _face_palette_fingerprint(),
     }
     encoded = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _face_palette_fingerprint() -> dict[str, object]:
+    """Return renderer colours that must invalidate cached auto-generated faces."""
+    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
+    return {
+        "key": palette.key,
+        "background": palette.background,
+        "card": palette.card,
+        "border": palette.border,
+        "feature": palette.feature,
+        "meta": palette.meta,
+        "streets": list(palette.streets),
+        "blush": palette.blush,
+    }
 
 
 def _file_digest(path: Path) -> str | None:
