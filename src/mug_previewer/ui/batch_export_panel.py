@@ -60,6 +60,7 @@ class BatchExportPanel(ttk.LabelFrame):
         app._add_weight_control(
             artwork, 2, 'Rear highlighted-street thickness',
             app.rear_weight_var, app.rear_weight_display,
+            maximum=2.50,
         )
         ttk.Label(
             artwork,
