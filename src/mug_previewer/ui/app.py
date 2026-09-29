@@ -235,7 +235,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             rear_design.grid(row=10, column=0, sticky='ew', pady=(4, 0))
             rear_design.columnconfigure(0, weight=1)
             self._add_weight_control(
-                rear_design, 0, 'Rear highlighted-street width',
+                rear_design, 0, 'Front highlighted-street width',
+                self.front_weight_var, self.front_weight_display,
+            )
+            self._add_weight_control(
+                rear_design, 2, 'Rear highlighted-street width',
                 self.rear_weight_var, self.rear_weight_display,
             )
 
@@ -251,39 +255,39 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
                 value=self._v2_calibration_detail_text(default_calibration)
             )
             ttk.Separator(rear_design, orient='horizontal').grid(
-                row=2, column=0, columnspan=2, sticky='ew', pady=(7, 5),
+                row=4, column=0, columnspan=2, sticky='ew', pady=(7, 5),
             )
             ttk.Label(
                 rear_design,
                 text='Mug preview geometry (screen only)',
                 font=('TkDefaultFont', 9, 'bold'),
-            ).grid(row=3, column=0, columnspan=2, sticky='w')
+            ).grid(row=5, column=0, columnspan=2, sticky='w')
             ttk.Label(
                 rear_design,
                 textvariable=self.v2_calibration_detail,
                 wraplength=260,
                 justify='left',
-            ).grid(row=4, column=0, columnspan=2, sticky='w', pady=(2, 0))
+            ).grid(row=6, column=0, columnspan=2, sticky='w', pady=(2, 0))
 
             self.v2_yaw_var = tk.DoubleVar(value=0.0)
             self.v2_yaw_display = tk.StringVar(value='0°')
             ttk.Label(rear_design, text='Preview camera yaw').grid(
-                row=5, column=0, sticky='w', pady=(6, 0),
+                row=7, column=0, sticky='w', pady=(6, 0),
             )
             ttk.Label(
                 rear_design, textvariable=self.v2_yaw_display,
-            ).grid(row=5, column=1, sticky='e', pady=(6, 0))
+            ).grid(row=7, column=1, sticky='e', pady=(6, 0))
             self.v2_yaw_scale = tk.Scale(
                 rear_design, from_=-30, to=30, resolution=1, orient=tk.HORIZONTAL,
                 showvalue=False, variable=self.v2_yaw_var,
                 command=self._v2_camera_changed, highlightthickness=0,
             )
-            self.v2_yaw_scale.grid(row=6, column=0, columnspan=2, sticky='ew')
+            self.v2_yaw_scale.grid(row=8, column=0, columnspan=2, sticky='ew')
             ttk.Label(
                 rear_design,
                 text='Preview only — does not change production PNG placement.',
                 wraplength=260, justify='left',
-            ).grid(row=7, column=0, columnspan=2, sticky='w')
+            ).grid(row=9, column=0, columnspan=2, sticky='w')
 
             self.current_face_var = tk.StringVar(value='Select a face')
             ttk.Label(
