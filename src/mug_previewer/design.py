@@ -12,6 +12,7 @@ from .rendering.face import FaceRenderOptions, STREET_STROKE_MULTIPLIER
 DESIGN_WEIGHT_MIN = 0.25
 REAR_HIGHLIGHT_WEIGHT_MIN = 0.25
 DESIGN_WEIGHT_MAX = 1.50
+REAR_HIGHLIGHT_WEIGHT_MAX = 2.50
 DESIGN_WEIGHT_STEP = 0.05
 
 
@@ -27,13 +28,13 @@ class DesignOptions:
 
     def __post_init__(self) -> None:
         limits = (
-            ("Front street feature weight", self.front_feature_weight, DESIGN_WEIGHT_MIN),
-            ("Rear map highlight weight", self.rear_highlight_weight, REAR_HIGHLIGHT_WEIGHT_MIN),
+            ("Front street feature weight", self.front_feature_weight, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_MAX),
+            ("Rear map highlight weight", self.rear_highlight_weight, REAR_HIGHLIGHT_WEIGHT_MIN, REAR_HIGHLIGHT_WEIGHT_MAX),
         )
-        for name, value, minimum in limits:
-            if not math.isfinite(value) or not minimum <= value <= DESIGN_WEIGHT_MAX:
+        for name, value, minimum, maximum in limits:
+            if not math.isfinite(value) or not minimum <= value <= maximum:
                 raise ValueError(
-                    f"{name} must be between {minimum:.2f} and {DESIGN_WEIGHT_MAX:.2f}."
+                    f"{name} must be between {minimum:.2f} and {maximum:.2f}."
                 )
 
 
