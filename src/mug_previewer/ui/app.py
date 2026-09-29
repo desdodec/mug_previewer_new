@@ -24,7 +24,7 @@ from ..preview_v2 import (
     resolve_calibration_profile,
     render_mug_preview_v2,
 )
-from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
+from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, REAR_HIGHLIGHT_WEIGHT_MAX, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
 from .batch_export_panel import BatchExportPanel
@@ -403,13 +403,14 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         label: str,
         variable: tk.DoubleVar,
         display: tk.StringVar,
+        maximum: float = DESIGN_WEIGHT_MAX,
     ) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
         ttk.Label(parent, textvariable=display).grid(row=row, column=1, sticky="e")
         scale = tk.Scale(
             parent,
             from_=DESIGN_WEIGHT_MIN,
-            to=DESIGN_WEIGHT_MAX,
+            to=maximum,
             resolution=DESIGN_WEIGHT_STEP,
             orient=tk.HORIZONTAL,
             showvalue=False,
