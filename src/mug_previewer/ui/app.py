@@ -133,7 +133,10 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.front_weight_display = tk.StringVar()
         self.rear_weight_display = tk.StringVar()
         self._add_weight_control(design, 0, "Street feature weight", self.front_weight_var, self.front_weight_display)
-        self._add_weight_control(design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display)
+        self._add_weight_control(
+            design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display,
+            maximum=REAR_HIGHLIGHT_WEIGHT_MAX,
+        )
         ttk.Button(design, text="Reset design", command=self._reset_design).grid(row=4, column=0, sticky="w", pady=(4, 0))
         self.export_button = ttk.Button(
             controls,
