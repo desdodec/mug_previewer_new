@@ -2,6 +2,7 @@
 from dataclasses import dataclass, replace
 from pathlib import Path
 import os
+import re
 import tempfile
 
 from PIL import Image
@@ -17,6 +18,7 @@ from .review_index import current_review_state
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
 from .rendering.face import extract_street_feature_colour, street_feature_colour
+from .rendering.svg_raster import rasterize_face_svg
 
 
 class AuthoritativeArtworkError(ValueError):
@@ -60,12 +62,39 @@ def _resolve_front_source(preprocessed: Path | str, dataset: Dataset, street: St
     return resolution, source
 
 
+def _scale_prepared_street_stroke(markup: str, scale: float) -> str:
+    """Scale only the coloured .street feature in a prepared face SVG."""
+    if scale == 1.0:
+        return markup
+
+    def adjust(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        classes = re.search(r'\\bclass="([^"]*)"', tag)
+        if classes is None or "street" not in classes.group(1).split():
+            return tag
+        width = re.search(r'\\bstroke-width="([0-9.]+)"', tag)
+        if width is not None:
+            value = float(width.group(1)) * scale
+            return tag[:width.start(1)] + f"{value:.3f}" + tag[width.end(1):]
+        style = re.search(r'\\bstyle="([^"]*)"', tag)
+        if style is not None:
+            width = re.search(r'(?P<prefix>(?:^|;)\\s*stroke-width\\s*:\\s*)(?P<value>[0-9.]+)', style.group(1))
+            if width is not None:
+                value = float(width.group("value")) * scale
+                revised = style.group(1)[:width.start("value")] + f"{value:.3f}" + style.group(1)[width.end("value"):]
+                return tag[:style.start(1)] + revised + tag[style.end(1):]
+        return tag
+
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\\b[^>]*>', adjust, markup)
+
+
 def render_authoritative_face_panel(
     preprocessed: Path | str,
     dataset: Dataset,
     street: StreetRecord,
     *,
     require_production_approved: bool = False,
+    street_stroke_scale: float = 1.0,
 ) -> AuthoritativeFacePanel:
     """Resolve and rasterise the prepared face without regenerating it.
 
@@ -87,7 +116,11 @@ def render_authoritative_face_panel(
     if source is None:
         raise AuthoritativeArtworkError(f"{label}: prepared front artwork is missing; asset integrity problem.")
     try:
-        panel = load_prepared_face_image(source)
+        if source.is_svg and street_stroke_scale != 1.0:
+            markup = source.path.read_text(encoding="utf-8")
+            panel = rasterize_face_svg(_scale_prepared_street_stroke(markup, street_stroke_scale))
+        else:
+            panel = load_prepared_face_image(source)
     except Exception as error:
         raise AuthoritativeArtworkError(
             f"{label}: cannot rasterise prepared face source {source.path}: {error}"
@@ -104,13 +137,15 @@ def render_preprocessed_artwork_groups(
     require_production_approved: bool = True,
 ) -> tuple[Image.Image, Image.Image]:
     """Render supplier-independent front and rear artwork groups exactly once."""
+    design = design_options or DesignOptions()
     front = render_authoritative_face_panel(
         preprocessed,
         dataset,
         street,
         require_production_approved=require_production_approved,
+        street_stroke_scale=design.front_feature_weight,
     )
-    options = build_render_options(design_options or DesignOptions(), area=dataset.display_name)
+    options = build_render_options(design, area=dataset.display_name)
     feature_colour = None
     if front.source.is_svg:
         try:
