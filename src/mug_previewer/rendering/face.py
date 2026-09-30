@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import math
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -42,9 +43,9 @@ SUPPORTING_STROKE_WIDTH = 1.68
 FRONT_GROUP_SCALE = 1.18
 FRONT_GROUP_Y_OFFSET = 60.0
 # Task 02N: shared locality-baseline adjustment within the text block.
-FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 4.0
+FRONT_TITLE_LOCALITY_GAP_DELTA_PX = 6.0
 # Task 02Q: move only the title/locality block in source-panel coordinates.
-FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -12.0
+FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX = -14.0
 # Final-layout visual clearance for a normal lower street feature only.
 NOSE_STREET_TARGET_CLEARANCE_PX = 8
 NOSE_STREET_MAX_AUTOMATIC_SHIFT_PX = 20
@@ -82,6 +83,82 @@ class NoseStreetClearanceCorrection(NamedTuple):
     required_shift_px: int
     applied_shift_px: int
     outcome: str
+
+
+def _normalise_feature_colour(value: str) -> str:
+    """Return one opaque SVG colour as canonical #RRGGBB."""
+    try:
+        rgb = ImageColor.getrgb(str(value).strip())
+    except (TypeError, ValueError) as error:
+        raise FaceRenderError(f"Invalid facial street feature colour: {value!r}.") from error
+    if len(rgb) < 3:
+        raise FaceRenderError(f"Invalid facial street feature colour: {value!r}.")
+    return "#{:02X}{:02X}{:02X}".format(*rgb[:3])
+
+
+def _face_specs_for_glyph(glyph: Path):
+    """Build the native face spec used by both front artwork and colour linking."""
+    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
+    specs = native.build_specs([glyph], palette=palette)
+    native.apply_gallery_context_to_single_spec(specs, [glyph], palette, None)
+    return palette, specs
+
+
+def street_feature_colour(street: StreetRecord) -> str:
+    """Return the exact colour used for this street's facial SVG feature."""
+    glyph = street.glyph_path
+    if not glyph.is_file():
+        raise FaceRenderError(
+            f'Cannot derive feature colour for street {street.id}: glyph file does not exist: {glyph}'
+        )
+    try:
+        _palette, specs = _face_specs_for_glyph(glyph)
+        return _normalise_feature_colour(specs[0].group_color)
+    except FaceRenderError:
+        raise
+    except Exception as error:
+        raise FaceRenderError(
+            f'Could not derive facial street feature colour for {street.id} "{street.display_name}".'
+        ) from error
+
+
+def extract_street_feature_colour(markup: str | bytes) -> str | None:
+    """Extract the editable front SVG's coloured street feature, if present."""
+    try:
+        root = ET.fromstring(markup)
+    except (ET.ParseError, TypeError, ValueError):
+        return None
+    for element in root.iter():
+        if _svg_local_name(element.tag) not in {"polyline", "path"}:
+            continue
+        if "street" not in element.get("class", "").split():
+            continue
+        value = element.get("stroke")
+        if value is None:
+            style = element.get("style", "")
+            match = re.search(r"(?:^|;)\s*stroke\s*:\s*([^;]+)", style)
+            value = match.group(1).strip() if match is not None else None
+        if not value or value.casefold() == "none":
+            continue
+        try:
+            return _normalise_feature_colour(value)
+        except FaceRenderError:
+            continue
+
+    # Some SVG editors move presentation attributes into a stylesheet. Keep
+    # prepared artwork authoritative by accepting a .street CSS stroke too.
+    for element in root.iter():
+        if _svg_local_name(element.tag) != "style" or not (element.text or "").strip():
+            continue
+        for rule in re.finditer(r"([^{}]*\.street[^{}]*)\{([^{}]*)\}", element.text or "", re.DOTALL):
+            match = re.search(r"(?:^|;)\s*stroke\s*:\s*([^;]+)", rule.group(2))
+            if match is None:
+                continue
+            try:
+                return _normalise_feature_colour(match.group(1).strip())
+            except FaceRenderError:
+                continue
+    return None
 
 
 def render_face(
@@ -139,11 +216,13 @@ def _render_transformed_street(standard: Image.Image, masks: object, candidate: 
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     feature = ImageColor.getrgb(palette.feature) + (255,)
     adapted = standard.copy()
+    adapted.info.update(standard.info)
     adapted.paste((255, 255, 255, 255), mask=masks.street_mouth)
     for protected in (masks.left_eye, masks.right_eye, masks.static_nose, masks.typography):
         adapted.paste(feature, mask=protected)
     street_mask, _clipped = transform_street_mask(masks.street_mouth, candidate)
     adapted.paste(feature, mask=street_mask)
+    adapted.info["street_feature_colour"] = _normalise_feature_colour(palette.feature)
     return adapted
 
 def _render_face_standard(
@@ -196,7 +275,11 @@ def _render_face_standard(
 </svg>'''
     png = cairosvg.svg2png(bytestring=svg.encode("utf-8"), output_width=width, output_height=height)
     with Image.open(io.BytesIO(png)) as rendered:
-        return rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1])).copy()
+        panel = rendered.convert("RGBA").crop((0, 0, FRONT_PANEL_PX[0], FRONT_PANEL_PX[1])).copy()
+    feature_colour = extract_street_feature_colour(_decode_native_face_asset(face_markup))
+    if feature_colour is not None:
+        panel.info["street_feature_colour"] = feature_colour
+    return panel
 
 
 def _front_group_transform(
@@ -278,9 +361,7 @@ def _render_native_face(
 ) -> str:
     if not math.isfinite(street_feature_stroke_multiplier) or street_feature_stroke_multiplier <= 0:
         raise FaceRenderError("Front street feature stroke multiplier must be positive and finite.")
-    palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
-    specs = native.build_specs([glyph], palette=palette)
-    native.apply_gallery_context_to_single_spec(specs, [glyph], palette, None)
+    palette, specs = _face_specs_for_glyph(glyph)
     with tempfile.TemporaryDirectory(prefix="mug_v28_face_") as temporary:
         native_path = Path(temporary) / "face.svg"
         native.render_grid(

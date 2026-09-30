@@ -29,8 +29,12 @@ from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import WrapRenderOptions, WrapRenderResult, render_wrap, render_wrap_result
 from .production import preview_render_override
 
-PREVIEW_SIZE = (512, 768)
-SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(0.5)
+# Keep the legacy mug mockups at the owned source asset resolution.  The UI
+# will downscale these for display; pre-rendering them at half size caused the
+# artwork to be enlarged again in large preview panes, making text and linework
+# visibly pixelated.
+SCREEN_MUG_LAYOUT = scaled_mug_preview_layout(1.0)
+PREVIEW_SIZE = SCREEN_MUG_LAYOUT.canvas_size
 SCREEN_V2_SCENE = PreviewScene(canvas_size=(700, 560), body_height_px=420)
 INKTHREADABLE_PROFILE_ID = 'inkthreadable_11oz_white'
 PRINTIFY_PROFILE_ID = 'printify_generic_11oz_ceramic'

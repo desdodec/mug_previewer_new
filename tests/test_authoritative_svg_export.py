@@ -9,13 +9,18 @@ from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.diagnostics.front_candidates import ProductionTriageStatus as Status
 from mug_previewer.preprocessed_export import (
     AuthoritativeArtworkError, render_authoritative_face_panel,
-    render_preprocessed_wrap, export_preprocessed_provider_png,
+    render_preprocessed_artwork_groups, render_preprocessed_wrap,
+    export_preprocessed_provider_png,
 )
 from mug_previewer.rendering.svg_raster import rasterize_face_svg
+from mug_previewer.providers import get_provider_profile
 from mug_previewer.review_index import save_review_record
 
-PROFILES = [('inkthreadable_11oz_white', (2362, 1063)),
-            ('printify_generic_11oz_ceramic', (2475, 1155))]
+PROFILES = (
+    'inkthreadable_11oz_white',
+    'printify_generic_11oz_ceramic',
+    'prodigi_h_mug_w',
+)
 
 
 def svg(colour):
@@ -63,9 +68,35 @@ def test_shared_raster_exact_front_crop(tmp_path, kind):
     assert panel.getextrema() == ((255,255),(0,0),(0,0),(255,255))
 
 
-@pytest.mark.parametrize('profile,size', PROFILES)
+def test_prepared_front_street_colour_is_forwarded_to_rear_renderer(prepared, monkeypatch):
+    root, data, street, record = prepared
+    record(Status.AUTO_APPROVED)
+    (root / 'generated.svg').write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="990" height="462" viewBox="0 0 990 462">'
+        '<rect width="495" height="462" fill="white"/>'
+        '<polyline class="street" points="100,200 300,240" fill="none" '
+        'stroke="#137F83" style="stroke-width:4"/>'
+        '</svg>'
+    )
+    captured = {}
+
+    def rear_renderer(dataset, selected, options):
+        captured['colour'] = options.highlight_stroke_colour
+        return type('Rear', (), {'image': Image.new('RGBA', (495, 462), (0, 0, 0, 0))})()
+
+    monkeypatch.setattr(
+        'mug_previewer.preprocessed_export.render_context_map_result',
+        rear_renderer,
+    )
+    front, rear = render_preprocessed_artwork_groups(root, data, street)
+
+    assert front.size == rear.size == (495, 462)
+    assert captured['colour'] == '#137F83'
+
+
+@pytest.mark.parametrize('profile_id', PROFILES)
 @pytest.mark.parametrize('manual', [False, True])
-def test_approved_artwork_reaches_actual_provider_png(prepared, profile, size, manual):
+def test_approved_artwork_reaches_actual_provider_png(prepared, profile_id, manual):
     root, data, street, record = prepared
     if manual:
         before = render_authoritative_face_panel(root, data, street)
@@ -86,14 +117,22 @@ def test_approved_artwork_reaches_actual_provider_png(prepared, profile, size, m
     assert wrap.size == (2362, 1063) and wrap.info['dpi'] == (300, 300)
     assert wrap.getpixel((472, 531)) == colour
     save_review_record(root, data.id, street.id, 'pass', panel.resolution.path)
+    profile = get_provider_profile(profile_id)
+    expected_size = (profile.canvas_width_px, profile.canvas_height_px)
     destination = root / 'export.png'
-    assert export_preprocessed_provider_png(root, data, street, destination, profile_id=profile) == destination
+    assert export_preprocessed_provider_png(
+        root, data, street, destination, profile_id=profile_id,
+    ) == destination
     with Image.open(destination) as exported:
-        assert exported.size == size
-        assert abs(exported.info['dpi'][0] - 300) < 0.1
-        assert exported.convert('RGBA').getpixel((size[0]//5, size[1]//2)) == colour
+        assert exported.size == expected_size
+        assert abs(exported.info['dpi'][0] - profile.dpi) < 0.1
+        front_probe = (
+            round(profile.canvas_width_px * profile.front_centre_x),
+            round(profile.canvas_height_px * profile.front_centre_y),
+        )
+        assert exported.convert('RGBA').getpixel(front_probe) == colour
         if manual:
-            assert exported.convert('RGBA').getpixel((size[0]//5, size[1]//2)) != before.image.getpixel((247, 231))
+            assert exported.convert('RGBA').getpixel(front_probe) != before.image.getpixel((247, 231))
 
 
 
@@ -107,7 +146,7 @@ def test_unapproved_export_rejected_before_rear(prepared, monkeypatch, state, me
                         lambda *a: pytest.fail('rear must not run'))
     destination = root / 'blocked.png'
     with pytest.raises(AuthoritativeArtworkError, match=message):
-        export_preprocessed_provider_png(root, data, street, destination, profile_id=PROFILES[0][0])
+        export_preprocessed_provider_png(root, data, street, destination, profile_id=PROFILES[0])
     assert not destination.exists()
 
 
@@ -129,7 +168,7 @@ def test_missing_or_invalid_authoritative_asset_never_falls_back(prepared, monke
     monkeypatch.setattr('mug_previewer.preprocessed_export.render_context_map_result',
                         lambda *a: pytest.fail('rear must not run'))
     with pytest.raises(AuthoritativeArtworkError, match='cannot rasterise|asset integrity'):
-        export_preprocessed_provider_png(root, data, street, root / 'bad.png', profile_id=PROFILES[0][0])
+        export_preprocessed_provider_png(root, data, street, root / 'bad.png', profile_id=PROFILES[0])
     assert not (root / 'bad.png').exists()
     if manual:
         assert path.read_text() == svg('blue')  # Last-good bytes restored in place.

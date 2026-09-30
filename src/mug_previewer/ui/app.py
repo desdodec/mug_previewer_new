@@ -24,10 +24,11 @@ from ..preview_v2 import (
     resolve_calibration_profile,
     render_mug_preview_v2,
 )
-from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, DesignOptions
+from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, REAR_HIGHLIGHT_WEIGHT_MAX, DesignOptions
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
 from .batch_export_panel import BatchExportPanel
+from .mockup_batch_panel import MockupBatchPanel
 from .manual_review import ManualReviewController, ManualReviewWindow
 from .production import ProductionStatus, production_status, production_summary, production_unrenderable_items
 from .state import (
@@ -132,7 +133,10 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.front_weight_display = tk.StringVar()
         self.rear_weight_display = tk.StringVar()
         self._add_weight_control(design, 0, "Street feature weight", self.front_weight_var, self.front_weight_display)
-        self._add_weight_control(design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display)
+        self._add_weight_control(
+            design, 2, "Map highlight weight", self.rear_weight_var, self.rear_weight_display,
+            maximum=REAR_HIGHLIGHT_WEIGHT_MAX,
+        )
         ttk.Button(design, text="Reset design", command=self._reset_design).grid(row=4, column=0, sticky="w", pady=(4, 0))
         self.export_button = ttk.Button(
             controls,
@@ -233,11 +237,6 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             )
             rear_design.grid(row=10, column=0, sticky='ew', pady=(4, 0))
             rear_design.columnconfigure(0, weight=1)
-            self._add_weight_control(
-                rear_design, 0, 'Rear highlighted-street width',
-                self.rear_weight_var, self.rear_weight_display,
-            )
-
             self.v2_calibration_profiles = list_calibration_profiles()
             self.v2_calibration_by_label = {
                 profile.display_label: profile for profile in self.v2_calibration_profiles
@@ -250,39 +249,39 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
                 value=self._v2_calibration_detail_text(default_calibration)
             )
             ttk.Separator(rear_design, orient='horizontal').grid(
-                row=2, column=0, columnspan=2, sticky='ew', pady=(7, 5),
+                row=0, column=0, columnspan=2, sticky='ew', pady=(7, 5),
             )
             ttk.Label(
                 rear_design,
                 text='Mug preview geometry (screen only)',
                 font=('TkDefaultFont', 9, 'bold'),
-            ).grid(row=3, column=0, columnspan=2, sticky='w')
+            ).grid(row=1, column=0, columnspan=2, sticky='w')
             ttk.Label(
                 rear_design,
                 textvariable=self.v2_calibration_detail,
                 wraplength=260,
                 justify='left',
-            ).grid(row=4, column=0, columnspan=2, sticky='w', pady=(2, 0))
+            ).grid(row=2, column=0, columnspan=2, sticky='w', pady=(2, 0))
 
             self.v2_yaw_var = tk.DoubleVar(value=0.0)
             self.v2_yaw_display = tk.StringVar(value='0°')
             ttk.Label(rear_design, text='Preview camera yaw').grid(
-                row=5, column=0, sticky='w', pady=(6, 0),
+                row=3, column=0, sticky='w', pady=(6, 0),
             )
             ttk.Label(
                 rear_design, textvariable=self.v2_yaw_display,
-            ).grid(row=5, column=1, sticky='e', pady=(6, 0))
+            ).grid(row=3, column=1, sticky='e', pady=(6, 0))
             self.v2_yaw_scale = tk.Scale(
                 rear_design, from_=-30, to=30, resolution=1, orient=tk.HORIZONTAL,
                 showvalue=False, variable=self.v2_yaw_var,
                 command=self._v2_camera_changed, highlightthickness=0,
             )
-            self.v2_yaw_scale.grid(row=6, column=0, columnspan=2, sticky='ew')
+            self.v2_yaw_scale.grid(row=4, column=0, columnspan=2, sticky='ew')
             ttk.Label(
                 rear_design,
                 text='Preview only — does not change production PNG placement.',
                 wraplength=260, justify='left',
-            ).grid(row=7, column=0, columnspan=2, sticky='w')
+            ).grid(row=5, column=0, columnspan=2, sticky='w')
 
             self.current_face_var = tk.StringVar(value='Select a face')
             ttk.Label(
@@ -330,6 +329,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._build_artwork_panel()
         self.batch_panel = BatchExportPanel(self.workflow_tabs, self)
         self.workflow_tabs.add(self.batch_panel, text='Export PNG')
+        self.mockup_batch_panel = MockupBatchPanel(self.workflow_tabs, self)
+        self.workflow_tabs.add(self.mockup_batch_panel, text='Export Mockups')
         selected = ttk.LabelFrame(self.batch_panel, text='Selected face', padding=6)
         selected.grid(row=13, column=0, sticky='ew', pady=8)
         selected.columnconfigure(0, weight=1)
@@ -405,13 +406,14 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         label: str,
         variable: tk.DoubleVar,
         display: tk.StringVar,
+        maximum: float = DESIGN_WEIGHT_MAX,
     ) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
         ttk.Label(parent, textvariable=display).grid(row=row, column=1, sticky="e")
         scale = tk.Scale(
             parent,
             from_=DESIGN_WEIGHT_MIN,
-            to=DESIGN_WEIGHT_MAX,
+            to=maximum,
             resolution=DESIGN_WEIGHT_STEP,
             orient=tk.HORIZONTAL,
             showvalue=False,
@@ -432,8 +434,11 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             round(self.front_weight_var.get(), 2), round(self.rear_weight_var.get(), 2),
         )
         self._update_weight_displays()
-        if self.state.design_options != previous and "batch_panel" in self.__dict__:
-            self.batch_panel.invalidate()
+        if self.state.design_options != previous:
+            if "batch_panel" in self.__dict__:
+                self.batch_panel.invalidate()
+            if "mockup_batch_panel" in self.__dict__:
+                self.mockup_batch_panel.invalidate()
         if self.state.current_wrap is not None:
             self.status_var.set("Design settings changed \u2014 render to update preview.")
 
@@ -474,6 +479,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self.state.selected_dataset = data
         if "batch_panel" in self.__dict__:
             self.batch_panel.invalidate()
+        if "mockup_batch_panel" in self.__dict__:
+            self.mockup_batch_panel.invalidate()
         self.state.selected_street = None
         self.state.current_wrap = self.state.current_front_preview = self.state.current_rear_preview = None
         self.state.framing_mode = None
@@ -795,6 +802,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
             self._shutting_down = True
             if "batch_panel" in self.__dict__:
                 self.batch_panel.cancel_event.set()
+            if "mockup_batch_panel" in self.__dict__:
+                self.mockup_batch_panel.cancel_event.set()
 
     def _shutdown(self) -> None:
         """Invalidate worker completions before the Tk interpreter is destroyed."""
@@ -803,6 +812,8 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._shutting_down = True
         if "batch_panel" in self.__dict__:
             self.batch_panel.cancel_event.set()
+        if "mockup_batch_panel" in self.__dict__:
+            self.mockup_batch_panel.cancel_event.set()
         self._invalidate_active_production_status_request()
         self._invalidate_active_render_request()
         if self._resize_pending is not None:

@@ -87,5 +87,6 @@ def test_prodigi_h_mug_w_profile_matches_product_specific_template() -> None:
     profile = get_provider_profile("prodigi_h_mug_w")
     assert (profile.canvas_width_px, profile.canvas_height_px, profile.dpi) == (2705, 1122, 300)
     assert (profile.physical_width_mm, profile.physical_height_mm) == (229.0, 95.0)
-    assert (profile.front_centre_x, profile.rear_centre_x) == (0.25, 0.75)
+    assert (profile.front_centre_x, profile.rear_centre_x) == (0.225, 0.775)
     assert profile.inward_offset_mm == 0.0
+    assert profile.verified_date == "2026-09-28"

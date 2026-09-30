@@ -1,7 +1,8 @@
 """Production composition from indexed prepared artwork, without live face generation."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import os
+import re
 import tempfile
 
 from PIL import Image
@@ -16,6 +17,25 @@ from .providers import get_provider_profile
 from .review_index import current_review_state
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
+from .rendering.face import extract_street_feature_colour, street_feature_colour
+from .rendering.svg_raster import rasterize_face_svg
+
+
+PRODUCTION_FRONT_WEIGHT_KEY = "mug_previewer_front_feature_weight"
+PRODUCTION_REAR_WEIGHT_KEY = "mug_previewer_rear_highlight_weight"
+
+
+def production_png_matches_design(path: Path | str, design_options: DesignOptions | None) -> bool:
+    """Return true only when an existing production PNG records these design settings."""
+    design = design_options or DesignOptions()
+    try:
+        with Image.open(path) as image:
+            return (
+                image.info.get(PRODUCTION_FRONT_WEIGHT_KEY) == f"{design.front_feature_weight:.2f}"
+                and image.info.get(PRODUCTION_REAR_WEIGHT_KEY) == f"{design.rear_highlight_weight:.2f}"
+            )
+    except (OSError, ValueError):
+        return False
 
 
 class AuthoritativeArtworkError(ValueError):
@@ -59,12 +79,38 @@ def _resolve_front_source(preprocessed: Path | str, dataset: Dataset, street: St
     return resolution, source
 
 
+def _scale_prepared_street_stroke(markup: str, scale: float) -> str:
+    """Scale only the coloured .street feature in a prepared face SVG."""
+    if scale == 1.0:
+        return markup
+
+    def adjust(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        classes = re.search(r'\bclass="([^"]*)"', tag)
+        if classes is None or "street" not in classes.group(1).split():
+            return tag
+        width = re.search(r'\bstroke-width="([0-9.]+)"', tag)
+        if width is not None:
+            value = float(width.group(1)) * scale
+            return tag[:width.start(1)] + f"{value:.3f}" + tag[width.end(1):]
+        style = re.search(r'\bstyle="([^"]*)"', tag)
+        if style is not None:
+            width = re.search(r'(?P<prefix>(?:^|;)\s*stroke-width\s*:\s*)(?P<value>[0-9.]+)', style.group(1))
+            if width is not None:
+                value = float(width.group("value")) * scale
+                revised = style.group(1)[:width.start("value")] + f"{value:.3f}" + style.group(1)[width.end("value"):]
+                return tag[:style.start(1)] + revised + tag[style.end(1):]
+        return tag
+
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', adjust, markup)
+
 def render_authoritative_face_panel(
     preprocessed: Path | str,
     dataset: Dataset,
     street: StreetRecord,
     *,
     require_production_approved: bool = False,
+    street_stroke_scale: float = 1.0,
 ) -> AuthoritativeFacePanel:
     """Resolve and rasterise the prepared face without regenerating it.
 
@@ -86,7 +132,11 @@ def render_authoritative_face_panel(
     if source is None:
         raise AuthoritativeArtworkError(f"{label}: prepared front artwork is missing; asset integrity problem.")
     try:
-        panel = load_prepared_face_image(source)
+        if source.is_svg and street_stroke_scale != 1.0:
+            markup = source.path.read_text(encoding="utf-8")
+            panel = rasterize_face_svg(_scale_prepared_street_stroke(markup, street_stroke_scale))
+        else:
+            panel = load_prepared_face_image(source)
     except Exception as error:
         raise AuthoritativeArtworkError(
             f"{label}: cannot rasterise prepared face source {source.path}: {error}"
@@ -103,14 +153,35 @@ def render_preprocessed_artwork_groups(
     require_production_approved: bool = True,
 ) -> tuple[Image.Image, Image.Image]:
     """Render supplier-independent front and rear artwork groups exactly once."""
+    design = design_options or DesignOptions()
     front = render_authoritative_face_panel(
         preprocessed,
         dataset,
         street,
         require_production_approved=require_production_approved,
+        street_stroke_scale=design.front_feature_weight,
     )
-    options = build_render_options(design_options or DesignOptions(), area=dataset.display_name)
-    rear = render_context_map_result(dataset, street, options.context_options)
+    options = build_render_options(design, area=dataset.display_name)
+    feature_colour = None
+    if front.source.is_svg:
+        try:
+            feature_colour = extract_street_feature_colour(
+                front.source.path.read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError):
+            feature_colour = None
+    if feature_colour is None and not front.source.is_svg:
+        try:
+            feature_colour = street_feature_colour(street)
+        except Exception:
+            feature_colour = None
+    context_options = options.context_options
+    if context_options is not None and feature_colour is not None:
+        context_options = replace(
+            context_options,
+            highlight_stroke_colour=feature_colour,
+        )
+    rear = render_context_map_result(dataset, street, context_options)
     return front.image, rear.image
 
 
@@ -191,6 +262,10 @@ def export_preprocessed_provider_png(
             profile,
             temporary,
             debug_destination=temporary_debug,
+            png_metadata={
+                PRODUCTION_FRONT_WEIGHT_KEY: f"{(design_options or DesignOptions()).front_feature_weight:.2f}",
+                PRODUCTION_REAR_WEIGHT_KEY: f"{(design_options or DesignOptions()).rear_highlight_weight:.2f}",
+            },
         )
         if checkpoint() != before:
             raise AuthoritativeArtworkError(

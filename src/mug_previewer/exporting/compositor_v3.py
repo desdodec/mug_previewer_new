@@ -9,6 +9,7 @@ import re
 import unicodedata
 
 from PIL import Image, ImageDraw
+from PIL.PngImagePlugin import PngInfo
 
 from ..providers import ProviderProfile, get_provider_profile
 from ..rendering.artwork import PixelBox, TEMPLATE_V2_WRAP_LAYOUT
@@ -87,6 +88,7 @@ def save_provider_artwork(
     destination: Path | str,
     *,
     debug_destination: Path | str | None = None,
+    png_metadata: dict[str, str] | None = None,
 ) -> ProviderCompositionResult:
     destination = Path(destination)
     if destination.suffix.casefold() != ".png":
@@ -95,7 +97,12 @@ def save_provider_artwork(
         front_artwork, rear_artwork, profile, debug=debug_destination is not None,
     )
     destination.parent.mkdir(parents=True, exist_ok=True)
-    result.image.save(destination, format="PNG", dpi=(profile.dpi, profile.dpi))
+    pnginfo = None
+    if png_metadata:
+        pnginfo = PngInfo()
+        for key, value in png_metadata.items():
+            pnginfo.add_text(str(key), str(value))
+    result.image.save(destination, format="PNG", dpi=(profile.dpi, profile.dpi), pnginfo=pnginfo)
     if debug_destination is not None:
         debug_path = Path(debug_destination)
         if debug_path.suffix.casefold() != ".png":
@@ -193,7 +200,12 @@ def _debug(
     if safe:
         draw.rectangle((0, 0, safe - 1, height - 1), fill=(255, 80, 80, 45), outline=(255, 80, 80, 210), width=2)
         draw.rectangle((width - safe, 0, width - 1, height - 1), fill=(255, 80, 80, 45), outline=(255, 80, 80, 210), width=2)
-    for fraction in (0.25, 0.50, 0.75):
+    guide_fractions = sorted({
+        profile.front_centre_x,
+        0.50,
+        profile.rear_centre_x,
+    })
+    for fraction in guide_fractions:
         x = _round_half_up(width * fraction)
         draw.line((x, 0, x, height - 1), fill=(50, 120, 255, 210), width=2)
     y = _round_half_up(height * 0.5)

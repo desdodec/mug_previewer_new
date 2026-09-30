@@ -8,13 +8,13 @@ V28 front and metric rear renderers remain independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PIL import Image, ImageDraw
 
 from ..datasets.models import Dataset, StreetRecord
 from .context_map import ContextRenderOptions, ContextRenderResult, render_context_map_result
-from .face import FaceRenderOptions, render_face
+from .face import FaceRenderOptions, render_face, street_feature_colour
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,15 @@ def render_wrap_result(
     options = options or WrapRenderOptions()
     face_options = options.face_options or FaceRenderOptions(area=dataset.display_name)
     front_panel = render_face(street, face_options)
-    context = render_context_map_result(dataset, street, options.context_options)
+    context_options = options.context_options or ContextRenderOptions()
+    feature_colour = front_panel.info.get("street_feature_colour")
+    if not isinstance(feature_colour, str):
+        feature_colour = street_feature_colour(street)
+    context_options = replace(
+        context_options,
+        highlight_stroke_colour=feature_colour,
+    )
+    context = render_context_map_result(dataset, street, context_options)
     rear_panel = context.image
     image, front_box, rear_box = WrapComposer(options.layout).compose(
         front_panel, rear_panel, debug_guides=options.debug_guides,

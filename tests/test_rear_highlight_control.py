@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from mug_previewer import batch_export, preprocessed_export
+from mug_previewer import batch_export, preprocessed_export, mockup_batch
 from mug_previewer.design import DesignOptions, build_render_options
 from mug_previewer.rendering.artwork import render_wrap_result
 from mug_previewer.rendering.context_map import _scale_highlight_stroke
@@ -245,3 +245,42 @@ def test_single_export_button_passes_current_design_to_worker(prepared, monkeypa
                         lambda *args, **kwargs: received.append(kwargs))
     calls[0]['target'](*calls[0]['args'])
     assert received == [{'profile_id': provider, 'design_options': DesignOptions(rear_highlight_weight=0.75)}]
+
+
+def test_mockup_batch_passes_current_rear_width_to_preprocessed_wrap(prepared, monkeypatch):
+    root, data, records, write = prepared
+    from test_batch_export import svg
+    from mug_previewer.review_index import save_review_record
+
+    edited = root / '0000.svg'
+    edited.write_text(svg('blue'))
+    records[0]['production_state'] = 'MANUAL_APPROVED'
+    records[:] = records[:1]
+    write()
+    save_review_record(root, data.id, data.streets[0].id, 'pass', edited)
+    data = replace(data, streets=data.streets[:1])
+
+    selected = DesignOptions(rear_highlight_weight=1.50)
+    plan = mockup_batch.build_mockup_batch_plan(
+        root, data, root / 'mockups', design_options=selected,
+    )
+    assert plan.design_options == selected
+
+    seen = []
+    original = mockup_batch.render_preprocessed_wrap
+
+    def capture(*args, **kwargs):
+        seen.append(kwargs['design_options'])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(mockup_batch, 'render_preprocessed_wrap', capture)
+    result = mockup_batch.execute_mockup_batch(plan)
+
+    assert result.summary['exported'] == 1
+    assert seen == [selected]
+    assert mockup_batch._mockup_output_matches(
+        plan.items[0].rear_destination,
+        selected,
+        mockup_batch.STUDIO_MOCKUP_STYLE_ID,
+        plan.items[0].source.authoritative_svg_sha256,
+    )

@@ -23,7 +23,7 @@ from mug_previewer.rendering.context_map import (
     REAR_PANEL_PX,
     _rear_panel_layout,
 )
-from mug_previewer.rendering.face import FRONT_PANEL_PX, FaceRenderError
+from mug_previewer.rendering.face import FRONT_PANEL_PX, FaceRenderError, street_feature_colour
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
 
@@ -88,6 +88,30 @@ def test_enlarged_rear_content_stays_centred_inside_rear_zone() -> None:
     assert rear_box.right <= TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px
     assert map_left - rear_box.x == pytest.approx(rear_box.right - map_right)
     assert rear_box.x + rear_box.width / 2 == TEMPLATE_V2_WRAP_LAYOUT.rear_box.x + TEMPLATE_V2_WRAP_LAYOUT.rear_box.width / 2
+
+def test_wrap_links_rear_highlight_to_the_live_front_street_colour(tmp_path: Path, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    captured = {}
+
+    def fake_context(dataset, selected, options):
+        captured["colour"] = options.highlight_stroke_colour
+        return SimpleNamespace(
+            image=Image.new("RGBA", REAR_PANEL_PX, (0, 0, 0, 0)),
+            framing_mode="metric",
+        )
+
+    monkeypatch.setattr(
+        "mug_previewer.rendering.artwork.render_context_map_result",
+        fake_context,
+    )
+    result = render_wrap_result(data, street)
+
+    assert result.image.size == (2362, 1063)
+    assert captured["colour"] == street_feature_colour(street)
+
 
 def test_real_front_and_rear_renderers_compose(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))

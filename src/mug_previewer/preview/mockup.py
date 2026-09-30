@@ -7,7 +7,7 @@ from enum import StrEnum
 from math import asin, ceil, floor, pi, radians, sin
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 
 class MugPreviewError(ValueError):
@@ -142,16 +142,45 @@ def render_mug_preview(wrap: Image.Image, options: MugPreviewOptions | None = No
     )
     local_mask = body_mask.crop((left, top, right, bottom))
     projected.putalpha(ImageChops.multiply(projected.getchannel("A"), local_mask))
-    artwork = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    artwork.alpha_composite(projected, (left, top))
-    result = Image.alpha_composite(base, artwork)
-    # The supplied studio asset already carries the mug's rim, body, handle,
-    # and cast-shadow lighting. Do not overlay lighting over the projected
-    # rectangle: even a feathered layer makes a blank wrap change ceramic.
+    result = _composite_print_onto_ceramic(base, projected, (left, top))
+    # Treat the wrap as printed ink on the photographed ceramic rather than as
+    # a replacement rectangle. Pure white therefore leaves the mug photograph
+    # unchanged, preserving the strong highlight/shadow transitions where the
+    # handle joins the body. Coloured and dark artwork still follows the mug's
+    # underlying luminance, which is both more realistic and avoids pale seams.
     if options.show_debug_guides:
         _draw_debug_guides(result, layout, handle_on_left=orientation.mirror_mug)
     return result
 
+
+
+def _composite_print_onto_ceramic(
+    base: Image.Image,
+    projected: Image.Image,
+    origin: tuple[int, int],
+) -> Image.Image:
+    """Apply projected artwork as ink while preserving photographed ceramic light.
+
+    Canonical/provider wraps can contain an opaque white background. Alpha
+    compositing that rectangle over the mug photograph erases the photographed
+    shading and creates visible vertical patches at the handle/body junction.
+    Multiplication models print on a white substrate: white is neutral, while
+    coloured/dark pixels tint the existing ceramic light and shadow.
+    """
+    left, top = origin
+    right, bottom = left + projected.width, top + projected.height
+    ceramic = base.crop((left, top, right, bottom)).convert("RGBA")
+    ceramic_rgb = ceramic.convert("RGB")
+    print_rgb = projected.convert("RGB")
+    multiplied_rgb = ImageChops.multiply(ceramic_rgb, print_rgb)
+    multiplied = Image.merge(
+        "RGBA",
+        (*multiplied_rgb.split(), ceramic.getchannel("A")),
+    )
+    blended = Image.composite(multiplied, ceramic, projected.getchannel("A"))
+    result = base.copy()
+    result.paste(blended, (left, top))
+    return result
 
 def project_canonical_wrap(
     wrap: Image.Image,
@@ -237,8 +266,82 @@ def _load_owned_mug_assets(layout: MugPreviewLayout) -> tuple[Image.Image, Image
     if base.size != layout.canvas_size:
         base = base.resize(layout.canvas_size, Image.Resampling.LANCZOS)
         mask = mask.resize(layout.canvas_size, Image.Resampling.NEAREST)
+    base = _repair_owned_mug_handle_junction(base, mask, layout)
     return base, mask
 
+
+
+def _repair_owned_mug_handle_junction(
+    base: Image.Image,
+    body_mask: Image.Image,
+    layout: MugPreviewLayout,
+) -> Image.Image:
+    """Clone-heal the owned mug's upper handle/body retouch seam.
+
+    The source studio photograph contains a narrow vertical retouch boundary at
+    the upper handle join. A blur only softens that boundary; at native preview
+    resolution it remains visible. Instead, copy clean ceramic from immediately
+    inside the mug body across the defective strip, then feather the repair and
+    constrain it to the printable mug body so the handle silhouette is untouched.
+    """
+    left, top, right, bottom = layout.body_bounds_xyxy
+    body_width = right - left
+    body_height = bottom - top
+
+    # The seam sits just inside the handle-side body edge. These values are
+    # expressed relative to the owned mug geometry so scaled screen previews and
+    # native 1024x1536 batch mockups use the same physical repair.
+    target_left = max(left, right - round(body_width * 0.055))
+    target_right = min(base.width, right + round(body_width * 0.008))
+    target_top = max(top, top + round(body_height * 0.025))
+    target_bottom = min(bottom, top + round(body_height * 0.190))
+    if target_right <= target_left or target_bottom <= target_top:
+        return base
+
+    target_width = target_right - target_left
+    donor_shift = max(4, round(body_width * 0.060))
+    donor_left = max(left, target_left - donor_shift)
+    donor_right = donor_left + target_width
+    if donor_right > right:
+        donor_right = right
+        donor_left = max(left, donor_right - target_width)
+
+    donor = base.crop((donor_left, target_top, donor_right, target_bottom))
+    if donor.size != (target_width, target_bottom - target_top):
+        return base
+
+    # Ceramic is smooth in this area. A light blur removes copied sensor/retouch
+    # texture without flattening the rim/handle silhouette because the blend is
+    # limited to the body mask below.
+    donor = donor.filter(ImageFilter.GaussianBlur(radius=max(0.8, body_width * 0.004)))
+
+    repair_mask = Image.new("L", base.size, 0)
+    local = Image.new("L", (target_width, target_bottom - target_top), 0)
+    draw = ImageDraw.Draw(local)
+    inset_x = max(1, round(body_width * 0.004))
+    inset_y = max(1, round(body_height * 0.004))
+    draw.rounded_rectangle(
+        (
+            inset_x,
+            inset_y,
+            max(inset_x, local.width - inset_x - 1),
+            max(inset_y, local.height - inset_y - 1),
+        ),
+        radius=max(2, round(body_width * 0.014)),
+        fill=235,
+    )
+    local = local.filter(
+        ImageFilter.GaussianBlur(radius=max(1.5, body_width * 0.012))
+    )
+    repair_mask.paste(local, (target_left, target_top))
+
+    # Never paint outside the mug-body region. The mask is the same asset used
+    # by the artwork projector, so the handle/background contour remains exact.
+    repair_mask = ImageChops.multiply(repair_mask, body_mask)
+
+    donor_canvas = base.copy()
+    donor_canvas.paste(donor, (target_left, target_top))
+    return Image.composite(donor_canvas, base, repair_mask)
 
 def _validate_wrap(wrap: Image.Image, geometry: CanonicalWrapPreviewGeometry = CANONICAL_WRAP_PREVIEW_GEOMETRY) -> None:
     if wrap.size != (geometry.width_px, geometry.height_px):

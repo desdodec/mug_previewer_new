@@ -26,8 +26,11 @@ from mug_previewer.rendering.face import (
     _front_group_transform,
     _render_face_standard,
     _front_text_y_positions,
+    extract_street_feature_colour,
     render_face,
+    render_face_svg,
     select_title_font,
+    street_feature_colour,
 )
 from mug_previewer.rendering.native import face_policy as native
 
@@ -38,6 +41,16 @@ def dataset_copy(tmp_path: Path) -> Path:
     path = tmp_path / "workflow_v6_valid"
     shutil.copytree(FIXTURE, path)
     return path
+
+
+def test_canonical_svg_exposes_the_same_street_feature_colour_used_by_front_face(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    expected = street_feature_colour(street)
+    markup = render_face_svg(data, street, FaceRenderOptions(area=data.display_name))
+
+    assert expected.startswith("#") and len(expected) == 7
+    assert extract_street_feature_colour(markup) == expected
 
 
 def test_render_face_returns_v28_front_panel(tmp_path: Path) -> None:
@@ -51,13 +64,13 @@ def test_final_front_composition_scale_offset_and_text_gap_remain_shared_and_saf
     data = load_dataset(dataset_copy(tmp_path))
     assert FRONT_GROUP_SCALE == pytest.approx(1.18)
     assert FRONT_GROUP_Y_OFFSET == pytest.approx(60.0)
-    assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(4.0)
-    assert FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX == pytest.approx(-12.0)
+    assert FRONT_TITLE_LOCALITY_GAP_DELTA_PX == pytest.approx(6.0)
+    assert FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX == pytest.approx(-14.0)
     title_y, locality_y = _front_text_y_positions(
         462, FRONT_TITLE_LOCALITY_GAP_DELTA_PX, FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX,
     )
-    assert title_y == pytest.approx(462 * TITLE_Y_RATIO - 12.0)
-    assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 4.0)
+    assert title_y == pytest.approx(462 * TITLE_Y_RATIO - 14.0)
+    assert locality_y - title_y == pytest.approx((AREA_Y_RATIO - TITLE_Y_RATIO) * 462 + 6.0)
     transform = _front_group_transform(247.5, FRONT_PANEL_PX[1], FRONT_GROUP_SCALE, FRONT_GROUP_Y_OFFSET)
     assert "translate(247.50 231.00) scale(1.1800) translate(-247.50 -231.00)" in transform
 
@@ -112,6 +125,7 @@ def test_render_face_uses_the_production_adapted_transform(tmp_path: Path, monke
     data = load_dataset(dataset_copy(tmp_path))
     image = render_face(data.get_street("0001"), FaceRenderOptions(area=data.display_name))
     assert image.size == FRONT_PANEL_PX
+    assert image.info["street_feature_colour"] == native.get_face_palette(native.DEFAULT_PALETTE_KEY).feature.upper()
 
 
 

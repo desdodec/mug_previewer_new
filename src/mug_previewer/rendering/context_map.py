@@ -47,6 +47,11 @@ ATTRIBUTION_LINES = ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 # not affect the underlying street path, crop, map scale or palette.
 # Scale the production pink centreline and white halo together to expose road edges.
 REAR_STREET_HIGHLIGHT_SCALE = 0.50
+# Never allow the highlighted street centreline to touch the rear-map crop.
+# This is a final rendering safety margin, independent of the normal framing
+# policy. It also protects unusually long streets whose 2:3 crop cannot fit
+# wholly inside an older, narrow context SVG.
+REAR_STREET_MIN_MARGIN_FRACTION = 0.10
 
 # Legacy context SVGs predate the workflow-v6 metric contract. Their map is
 # an embedded raster in SVG-space, so these values operate in that coordinate
@@ -94,6 +99,8 @@ class ContextRenderOptions:
     panel_size: tuple[int, int] = REAR_PANEL_PX
     policy: ContextScalePolicy = DEFAULT_CONTEXT_SCALE_POLICY
     highlight_stroke_scale: float = REAR_STREET_HIGHLIGHT_SCALE
+    highlight_stroke_colour: str | None = None
+    minimum_highlight_margin_fraction: float = REAR_STREET_MIN_MARGIN_FRACTION
 
 
 @dataclass(frozen=True)
@@ -185,7 +192,7 @@ def render_context_map_result(
         raise ContextRenderError("Rear context panel dimensions must be positive.")
     markup = _read_context_svg(street)
     try:
-        _svg_view_box(markup)
+        source_view_box = _svg_view_box(markup)
     except RearMapMetadataError as error:
         raise ContextRenderError(f"Context SVG has no valid viewBox: {street.context_path}") from error
 
@@ -216,6 +223,16 @@ def render_context_map_result(
     else:
         markup, diagnostics = _legacy_crop_markup(dataset, street, markup, options)
     try:
+        markup = _ensure_highlight_margin(
+            markup,
+            source_view_box,
+            options.minimum_highlight_margin_fraction,
+        )
+        if options.highlight_stroke_colour is not None:
+            markup = _colour_highlight_street(
+                markup,
+                options.highlight_stroke_colour,
+            )
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
         image = _rasterise_rear_panel(markup, panel_width, panel_height)
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
@@ -273,6 +290,50 @@ def _refine_context_markup(markup: str, street: StreetRecord) -> str:
 
     refined = re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
     return re.sub(r'(<image\b[^>]*\bopacity=")[0-9.]+', r'\g<1>0.58', refined, count=1)
+
+
+def _colour_highlight_street(markup: str, colour: str) -> str:
+    """Set only the coloured highlighted road to the linked front feature colour."""
+    if not isinstance(colour, str) or re.fullmatch(r"#[0-9A-Fa-f]{6}", colour.strip()) is None:
+        raise ContextRenderError("Rear highlighted-street colour must be a #RRGGBB value.")
+    target = colour.strip().upper()
+    legacy = re.search(r'"highlight_color"\s*:\s*"(#[0-9A-Fa-f]{6})"', markup)
+    legacy_colour = legacy.group(1).casefold() if legacy else None
+
+    root = ET.fromstring(markup)
+    shapes = [
+        element for element in root.iter()
+        if element.tag.rsplit("}", 1)[-1] in {"polyline", "path"}
+    ]
+    selected = iter(
+        (
+            "highlighted-street" in element.get("class", "").split()
+            and "highlighted-street-halo" not in element.get("class", "").split()
+        )
+        or (
+            legacy_colour is not None
+            and element.get("stroke", "").casefold() == legacy_colour
+        )
+        for element in shapes
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        if not next(selected):
+            return tag
+        classes = re.search(r'\bclass="([^"]*)"', tag)
+        if classes is None:
+            insert_at = -2 if tag.endswith("/>") else -1
+            tag = tag[:insert_at] + ' class="highlighted-street"' + tag[insert_at:]
+        elif "highlighted-street" not in classes.group(1).split():
+            revised = " ".join([*classes.group(1).split(), "highlighted-street"])
+            tag = tag[:classes.start(1)] + revised + tag[classes.end(1):]
+        if re.search(r'\bstroke="[^"]*"', tag):
+            return re.sub(r'\bstroke="[^"]*"', f'stroke="{target}"', tag, count=1)
+        insert_at = -2 if tag.endswith("/>") else -1
+        return tag[:insert_at] + f' stroke="{target}"' + tag[insert_at:]
+
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', replace, markup)
 
 
 def _scale_highlight_stroke(markup: str, scale: float) -> str:
@@ -603,6 +664,89 @@ def _highlight_bounds(markup: str) -> tuple[float, float, float, float] | None:
         return None
     xs, ys = zip(*points)
     return min(xs), min(ys), max(xs), max(ys)
+
+
+def _ensure_highlight_margin(
+    markup: str,
+    source_view_box: tuple[float, float, float, float],
+    margin_fraction: float,
+) -> str:
+    """Guarantee a visible inset around the highlighted street.
+
+    Normal metric/legacy framing is allowed to choose a larger context window.
+    This post-condition only intervenes when that framing leaves the highlighted
+    centreline too close to an edge.  When an old context SVG is too narrow for
+    a 2:3 crop around a very long street, the viewBox may extend beyond the
+    source image. CairoSVG then letterboxes the available map rather than
+    clipping the street or distorting the map.
+    """
+    if not math.isfinite(margin_fraction) or not 0 <= margin_fraction < 0.5:
+        raise ContextRenderError(
+            "Rear highlighted-street margin must be finite and between 0 and 0.5."
+        )
+    if margin_fraction == 0:
+        return markup
+
+    bounds = _highlight_bounds(markup)
+    if bounds is None:
+        return markup
+
+    view_x, view_y, view_width, view_height = _svg_view_box(markup)
+    left, top, right, bottom = bounds
+    horizontal_margin = view_width * margin_fraction
+    vertical_margin = view_height * margin_fraction
+    tolerance = 1e-7
+    if (
+        left - view_x >= horizontal_margin - tolerance
+        and view_x + view_width - right >= horizontal_margin - tolerance
+        and top - view_y >= vertical_margin - tolerance
+        and view_y + view_height - bottom >= vertical_margin - tolerance
+    ):
+        return markup
+
+    usable_fraction = 1.0 - 2.0 * margin_fraction
+    aspect = REAR_MAP_PHYSICAL_ASPECT
+    highlight_width = max(0.0, right - left)
+    highlight_height = max(0.0, bottom - top)
+    required_width = max(
+        view_width,
+        highlight_width / usable_fraction,
+        highlight_height * aspect / usable_fraction,
+    )
+    required_height = required_width / aspect
+
+    source_x, source_y, source_width, source_height = source_view_box
+
+    def positioned_origin(
+        feature_low: float,
+        feature_high: float,
+        span: float,
+        source_low: float,
+        source_span: float,
+    ) -> float:
+        # Origins in this interval preserve the requested feature margin.
+        margin_low = feature_high - (1.0 - margin_fraction) * span
+        margin_high = feature_low - margin_fraction * span
+        preferred = (feature_low + feature_high - span) / 2.0
+
+        # Prefer keeping the whole crop inside the source context whenever that
+        # is possible. This is the normal path for almost every street.
+        source_origin_low = source_low
+        source_origin_high = source_low + source_span - span
+        if source_origin_low <= source_origin_high:
+            feasible_low = max(margin_low, source_origin_low)
+            feasible_high = min(margin_high, source_origin_high)
+            if feasible_low <= feasible_high:
+                return min(max(preferred, feasible_low), feasible_high)
+
+        # The source itself is too narrow/short to satisfy both constraints.
+        # Keep the feature margin and minimise off-source letterboxing.
+        source_centre_origin = source_low + (source_span - span) / 2.0
+        return min(max(source_centre_origin, margin_low), margin_high)
+
+    crop_x = positioned_origin(left, right, required_width, source_x, source_width)
+    crop_y = positioned_origin(top, bottom, required_height, source_y, source_height)
+    return _replace_view_box(markup, (crop_x, crop_y, required_width, required_height))
 
 
 def _positive_finite(value: object, label: str) -> float:
