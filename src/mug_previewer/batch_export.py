@@ -13,7 +13,7 @@ from .datasets.models import Dataset
 from .design import DesignOptions
 from .prepared_asset import resolve_prepared_face_source
 from .preprocess import INDEX_FILENAME, resolve_authoritative_face_svg
-from .preprocessed_export import export_preprocessed_provider_png
+from .preprocessed_export import export_preprocessed_provider_png, production_png_matches_design
 from .providers import get_provider_profile
 from .review_index import current_review_state
 
@@ -257,8 +257,12 @@ def execute_batch_export(plan, *, on_progress=None, cancel_event=None):
             continue
         try:
             current = _recheck(plan, item)
-            if item.destination.exists() and not plan.replace_existing:
-                result = BatchItemResult(item, 'SKIPPED_EXISTING', 'Destination already exists; left unchanged')
+            if (
+                item.destination.exists()
+                and not plan.replace_existing
+                and production_png_matches_design(item.destination, plan.design_options)
+            ):
+                result = BatchItemResult(item, 'SKIPPED_EXISTING', 'Destination already matches current production settings')
             else:
                 with tempfile.TemporaryDirectory(dir=plan.output_directory, prefix='.batch-') as staging:
                     temporary = Path(staging) / item.destination.name
@@ -266,18 +270,21 @@ def execute_batch_export(plan, *, on_progress=None, cancel_event=None):
                         plan.dataset.get_street(item.street_id), temporary,
                         profile_id=plan.provider_id, design_options=plan.design_options)
                     _recheck(plan, current)
-                    if plan.replace_existing:
+                    if plan.replace_existing or item.destination.exists():
                         os.replace(temporary, item.destination)
+                        result = BatchItemResult(current, 'EXPORTED')
                     else:
                         try:
                             os.link(temporary, item.destination)
                         except FileExistsError:
-                            result = BatchItemResult(item, 'SKIPPED_EXISTING',
-                                                     'Destination appeared during export; left unchanged')
+                            if production_png_matches_design(item.destination, plan.design_options):
+                                result = BatchItemResult(item, 'SKIPPED_EXISTING',
+                                                         'Destination appeared and matches current production settings')
+                            else:
+                                os.replace(temporary, item.destination)
+                                result = BatchItemResult(current, 'EXPORTED')
                         else:
                             result = BatchItemResult(current, 'EXPORTED')
-                    if plan.replace_existing:
-                        result = BatchItemResult(current, 'EXPORTED')
         except Exception as error:
             result = BatchItemResult(item, 'FAILED', str(error))
         results.append(result)
