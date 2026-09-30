@@ -21,6 +21,23 @@ from .rendering.face import extract_street_feature_colour, street_feature_colour
 from .rendering.svg_raster import rasterize_face_svg
 
 
+PRODUCTION_FRONT_WEIGHT_KEY = "mug_previewer_front_feature_weight"
+PRODUCTION_REAR_WEIGHT_KEY = "mug_previewer_rear_highlight_weight"
+
+
+def production_png_matches_design(path: Path | str, design_options: DesignOptions | None) -> bool:
+    """Return true only when an existing production PNG records these design settings."""
+    design = design_options or DesignOptions()
+    try:
+        with Image.open(path) as image:
+            return (
+                image.info.get(PRODUCTION_FRONT_WEIGHT_KEY) == f"{design.front_feature_weight:.2f}"
+                and image.info.get(PRODUCTION_REAR_WEIGHT_KEY) == f"{design.rear_highlight_weight:.2f}"
+            )
+    except (OSError, ValueError):
+        return False
+
+
 class AuthoritativeArtworkError(ValueError):
     """Indexed artwork is unavailable, invalid, or not approved for production."""
 
@@ -246,6 +263,10 @@ def export_preprocessed_provider_png(
             profile,
             temporary,
             debug_destination=temporary_debug,
+            png_metadata={
+                PRODUCTION_FRONT_WEIGHT_KEY: f"{(design_options or DesignOptions()).front_feature_weight:.2f}",
+                PRODUCTION_REAR_WEIGHT_KEY: f"{(design_options or DesignOptions()).rear_highlight_weight:.2f}",
+            },
         )
         if checkpoint() != before:
             raise AuthoritativeArtworkError(
