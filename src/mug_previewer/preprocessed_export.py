@@ -86,24 +86,23 @@ def _scale_prepared_street_stroke(markup: str, scale: float) -> str:
 
     def adjust(match: re.Match[str]) -> str:
         tag = match.group(0)
-        classes = re.search(r'\\bclass="([^"]*)"', tag)
+        classes = re.search(r'\bclass="([^"]*)"', tag)
         if classes is None or "street" not in classes.group(1).split():
             return tag
-        width = re.search(r'\\bstroke-width="([0-9.]+)"', tag)
+        width = re.search(r'\bstroke-width="([0-9.]+)"', tag)
         if width is not None:
             value = float(width.group(1)) * scale
             return tag[:width.start(1)] + f"{value:.3f}" + tag[width.end(1):]
-        style = re.search(r'\\bstyle="([^"]*)"', tag)
+        style = re.search(r'\bstyle="([^"]*)"', tag)
         if style is not None:
-            width = re.search(r'(?P<prefix>(?:^|;)\\s*stroke-width\\s*:\\s*)(?P<value>[0-9.]+)', style.group(1))
+            width = re.search(r'(?P<prefix>(?:^|;)\s*stroke-width\s*:\s*)(?P<value>[0-9.]+)', style.group(1))
             if width is not None:
                 value = float(width.group("value")) * scale
                 revised = style.group(1)[:width.start("value")] + f"{value:.3f}" + style.group(1)[width.end("value"):]
                 return tag[:style.start(1)] + revised + tag[style.end(1):]
         return tag
 
-    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\\b[^>]*>', adjust, markup)
-
+    return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', adjust, markup)
 
 def render_authoritative_face_panel(
     preprocessed: Path | str,
