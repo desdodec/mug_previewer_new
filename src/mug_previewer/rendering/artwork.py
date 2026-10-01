@@ -8,12 +8,18 @@ V28 front and metric rear renderers remain independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PIL import Image, ImageDraw
 
 from ..datasets.models import Dataset, StreetRecord
-from .context_map import ContextRenderOptions, ContextRenderResult, render_context_map_result
+from .context_map import (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    ContextRenderOptions,
+    ContextRenderResult,
+    REAR_PANEL_PX,
+    render_context_map_result,
+)
 from .face import FaceRenderOptions, render_face
 
 
@@ -65,6 +71,14 @@ TEMPLATE_V2_WRAP_LAYOUT = WrapLayout(
 CANONICAL_WRAP_SIZE = (
     TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px,
     TEMPLATE_V2_WRAP_LAYOUT.canvas_height_px,
+)
+
+# Render the rear composition directly at the size it occupies in the canonical
+# wrap. This avoids the old 495 px -> 945 px enlargement step while preserving
+# the exact historical panel aspect ratio and physical composition.
+CANONICAL_REAR_PANEL_SIZE = (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    round(CANONICAL_REAR_PANEL_WIDTH_PX * REAR_PANEL_PX[1] / REAR_PANEL_PX[0]),
 )
 
 
@@ -142,7 +156,9 @@ def render_wrap_result(
     options = options or WrapRenderOptions()
     face_options = options.face_options or FaceRenderOptions(area=dataset.display_name)
     front_panel = render_face(street, face_options)
-    context = render_context_map_result(dataset, street, options.context_options)
+    requested_context = options.context_options or ContextRenderOptions()
+    context_options = replace(requested_context, panel_size=CANONICAL_REAR_PANEL_SIZE)
+    context = render_context_map_result(dataset, street, context_options)
     rear_panel = context.image
     image, front_box, rear_box = WrapComposer(options.layout).compose(
         front_panel, rear_panel, debug_guides=options.debug_guides,
