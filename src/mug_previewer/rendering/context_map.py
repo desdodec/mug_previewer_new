@@ -21,8 +21,11 @@ from .native import face_policy as native
 
 LOGGER = logging.getLogger(__name__)
 
-# The rear half of V28's 990 x 462 fast preview.
+# The rear half of V28's 990 x 462 fast preview. This remains the reference
+# composition size for GUI/CLI context previews. Production wrap rendering
+# requests the same composition directly at canonical rear-zone resolution.
 REAR_PANEL_PX = (495, 462)
+CANONICAL_REAR_PANEL_WIDTH_PX = 945
 REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
 # Physical composition only: metric framing is calculated before this panel is
 # rasterised. Keep the selected production presentation scale centralised here:
@@ -30,11 +33,13 @@ REAR_MAP_PHYSICAL_ASPECT = 2 / 3  # width / height
 REAR_PANEL_BASE_SCALE = 1.00
 REAR_PANEL_SCALE = 1.20
 # The optical correction was measured on the final 2362 x 1063 production wrap.
-# This module renders a 495 px-wide rear panel which is later enlarged to the
-# 945 px-wide template-v2 rear zone, so convert the desired 15 canonical pixels
-# back into rear-panel pixels here rather than accidentally scaling it twice.
+# Keep the legacy/reference-size value exported for compatibility; layout code
+# scales the correction from canonical pixels to whatever panel resolution is
+# requested so previews and production stay geometrically identical.
 REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX = 15.0
-REAR_COMPOSITION_OFFSET_Y_PX = REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX * REAR_PANEL_PX[0] / 945
+REAR_COMPOSITION_OFFSET_Y_PX = (
+    REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX * REAR_PANEL_PX[0] / CANONICAL_REAR_PANEL_WIDTH_PX
+)
 REAR_MAP_BASE_HEIGHT_RATIO = 0.70
 REAR_MAP_HEIGHT_RATIO = REAR_MAP_BASE_HEIGHT_RATIO * (REAR_PANEL_SCALE / REAR_PANEL_BASE_SCALE)
 # Keep the required credit plainly legible while making it visually secondary
@@ -61,8 +66,9 @@ LEGACY_BBOX_PERCENTILE = 90.0
 LEGACY_DATASET_CONTEXT_MULTIPLIER = 2.0
 LEGACY_STREET_PADDING = 1.60
 LEGACY_MAX_RASTER_MAGNIFICATION = 2.5
-# The context panel is enlarged into a 945 px-wide template-v2 print zone.
-LEGACY_CANONICAL_REAR_PANEL_SCALE = 945 / REAR_PANEL_PX[0]
+# Compatibility value for callers/tests using the legacy 495 px reference
+# panel. Runtime resolution diagnostics derive this scale from panel_size.
+LEGACY_CANONICAL_REAR_PANEL_SCALE = CANONICAL_REAR_PANEL_WIDTH_PX / REAR_PANEL_PX[0]
 
 
 class ContextRenderError(ValueError):
@@ -441,8 +447,9 @@ def _legacy_crop_markup(
     crop_raster_width = crop_width * raster_size[0] / image_size[0]
     crop_raster_height = crop_height * raster_size[1] / image_size[1]
     _, _, map_width, map_height, _ = _rear_panel_layout(*options.panel_size)
-    final_map_width = map_width * LEGACY_CANONICAL_REAR_PANEL_SCALE
-    final_map_height = map_height * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    canonical_scale = CANONICAL_REAR_PANEL_WIDTH_PX / options.panel_size[0]
+    final_map_width = map_width * canonical_scale
+    final_map_height = map_height * canonical_scale
     magnification = max(final_map_width / crop_raster_width, final_map_height / crop_raster_height)
     highlight_width = _highlight_stroke_width(markup)
     diagnostics.update({
@@ -522,8 +529,9 @@ def _legacy_resolution_floor_span(
 ) -> float:
     """Minimum SVG crop width that keeps the canonical map at <= 2.5x raster scale."""
     _, _, map_width, map_height, _ = _rear_panel_layout(*panel_size)
-    output_width = map_width * LEGACY_CANONICAL_REAR_PANEL_SCALE
-    output_height = map_height * LEGACY_CANONICAL_REAR_PANEL_SCALE
+    canonical_scale = CANONICAL_REAR_PANEL_WIDTH_PX / panel_size[0]
+    output_width = map_width * canonical_scale
+    output_height = map_height * canonical_scale
     raster_width, raster_height = raster_size
     image_width, image_height = image_size
     horizontal = output_width / LEGACY_MAX_RASTER_MAGNIFICATION * image_width / raster_width
@@ -556,6 +564,9 @@ def _highlight_stroke_width(markup: str) -> float | None:
 
 def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> Image.Image:
     map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
+    scale = _panel_reference_scale(panel_width)
+    attribution_font_size = ATTRIBUTION_FONT_SIZE * scale
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
     # CairoSVG can omit vector overlays (including the highlighted street) when
     # an SVG containing a raster map is itself used as an SVG ``<image>``.
     # Rasterise the completed source SVG first, then place that bitmap in the
@@ -573,8 +584,8 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
         map_image = map_image.resize(target_size, Image.Resampling.LANCZOS)
     attribution_svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{panel_width}" height="{panel_height}" viewBox="0 0 {panel_width} {panel_height}">\n'
-        f'  <style>.attribution {{ font:400 {ATTRIBUTION_FONT_SIZE:.1f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}</style>\n'
-        f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">{ATTRIBUTION_LINES[0]}</tspan><tspan x="{panel_width / 2:.1f}" dy="{ATTRIBUTION_LINE_HEIGHT:.1f}">{ATTRIBUTION_LINES[1]}</tspan></text>\n'
+        f'  <style>.attribution {{ font:400 {attribution_font_size:.2f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}</style>\n'
+        f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">{ATTRIBUTION_LINES[0]}</tspan><tspan x="{panel_width / 2:.1f}" dy="{attribution_line_height:.2f}">{ATTRIBUTION_LINES[1]}</tspan></text>\n'
         '</svg>'
     )
     attribution_png = cairosvg.svg2png(bytestring=attribution_svg.encode("utf-8"), output_width=panel_width, output_height=panel_height)
@@ -586,16 +597,31 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
     return panel
 
 
+def _panel_reference_scale(panel_width: int) -> float:
+    """Scale physical composition constants from the 495 px reference panel."""
+    if panel_width <= 0:
+        raise ContextRenderError("Rear context panel width must be positive.")
+    return panel_width / REAR_PANEL_PX[0]
+
+
 def _rear_panel_layout(panel_width: int, panel_height: int) -> tuple[float, float, float, float, float]:
     """Return optically aligned map bounds and first attribution baseline."""
+    scale = _panel_reference_scale(panel_width)
     map_height = panel_height * REAR_MAP_HEIGHT_RATIO
     map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
-    content_height = map_height + ATTRIBUTION_MAP_GAP + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES)
+    attribution_gap = ATTRIBUTION_MAP_GAP * scale
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
+    composition_offset_y = (
+        REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX
+        * panel_width
+        / CANONICAL_REAR_PANEL_WIDTH_PX
+    )
+    content_height = map_height + attribution_gap + attribution_line_height * len(ATTRIBUTION_LINES)
     if content_height > panel_height:
         raise ContextRenderError("Rear map and attribution do not fit inside the context panel.")
-    map_y = (panel_height - content_height) / 2 + REAR_COMPOSITION_OFFSET_Y_PX
+    map_y = (panel_height - content_height) / 2 + composition_offset_y
     map_x = (panel_width - map_width) / 2
-    return map_x, map_y, map_width, map_height, map_y + map_height + ATTRIBUTION_MAP_GAP
+    return map_x, map_y, map_width, map_height, map_y + map_height + attribution_gap
 
 def _dataset_p90(dataset: Dataset) -> float:
     value = dataset.statistics.context_scale.get("bbox_span_p90_m")
