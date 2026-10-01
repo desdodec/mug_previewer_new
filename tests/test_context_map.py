@@ -383,32 +383,49 @@ def test_rear_highlight_and_supplied_halo_scale_together() -> None:
     assert 'stroke="#e83e8c" stroke-width="12.50"' in adjusted
 
 
-def test_rear_composition_moves_down_fifteen_canonical_pixels_as_one_group(tmp_path: Path, monkeypatch) -> None:
-    from mug_previewer.rendering import context_map
-
-    data = load_dataset(dataset_copy(tmp_path))
-    street = data.get_street("0001")
-    shifted_layout = _rear_panel_layout(*REAR_PANEL_PX)
-    shifted = render_context_map_result(data, street).image
-    canonical_scale = 945 / REAR_PANEL_PX[0]
+def test_rear_composition_moves_down_fifteen_canonical_pixels_at_any_resolution() -> None:
+    reference = _rear_panel_layout(*REAR_PANEL_PX)
+    canonical_size = (945, round(945 * REAR_PANEL_PX[1] / REAR_PANEL_PX[0]))
+    canonical = _rear_panel_layout(*canonical_size)
 
     assert REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX == pytest.approx(15.0)
-    assert REAR_COMPOSITION_OFFSET_Y_PX * canonical_scale == pytest.approx(15.0)
+    assert REAR_COMPOSITION_OFFSET_Y_PX * (945 / REAR_PANEL_PX[0]) == pytest.approx(15.0)
 
-    monkeypatch.setattr(context_map, "REAR_COMPOSITION_OFFSET_Y_PX", 0)
-    baseline_layout = _rear_panel_layout(*REAR_PANEL_PX)
-    baseline = render_context_map_result(data, street).image
+    reference_scale = REAR_PANEL_PX[0] / 945
+    reference_content_height = (
+        reference[3]
+        + ATTRIBUTION_MAP_GAP
+        + ATTRIBUTION_LINE_HEIGHT * len(ATTRIBUTION_LINES)
+    )
+    reference_unshifted_y = (REAR_PANEL_PX[1] - reference_content_height) / 2
+    assert reference[1] - reference_unshifted_y == pytest.approx(15.0 * reference_scale)
 
-    panel_shift = shifted_layout[1] - baseline_layout[1]
-    assert panel_shift == pytest.approx(REAR_COMPOSITION_OFFSET_Y_PX)
-    assert (shifted_layout[4] - baseline_layout[4]) * canonical_scale == pytest.approx(15.0)
-    for index in (0, 2, 3):
-        assert shifted_layout[index] == baseline_layout[index]
-    assert shifted.size == baseline.size == REAR_PANEL_PX
-    shifted_bounds = shifted.getbbox()
-    baseline_bounds = baseline.getbbox()
-    assert shifted_bounds is not None and baseline_bounds is not None
-    # Raster placement rounds the 7.86 panel-pixel correction to about 8 px,
-    # which becomes the intended 15 px after the 945/495 wrap enlargement.
-    assert shifted_bounds[1] - baseline_bounds[1] in (7, 8)
-    assert shifted_bounds[3] - baseline_bounds[3] in (7, 8)
+    high_scale = canonical_size[0] / REAR_PANEL_PX[0]
+    high_content_height = (
+        canonical[3]
+        + ATTRIBUTION_MAP_GAP * high_scale
+        + ATTRIBUTION_LINE_HEIGHT * high_scale * len(ATTRIBUTION_LINES)
+    )
+    high_unshifted_y = (canonical_size[1] - high_content_height) / 2
+    assert canonical[1] - high_unshifted_y == pytest.approx(15.0)
+
+
+def test_high_resolution_context_preserves_reference_geometry(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    high_size = (945, round(945 * REAR_PANEL_PX[1] / REAR_PANEL_PX[0]))
+    reference = render_context_map_result(data, street).image
+    high = render_context_map_result(
+        data,
+        street,
+        ContextRenderOptions(panel_size=high_size),
+    ).image
+
+    assert reference.size == REAR_PANEL_PX
+    assert high.size == high_size
+
+    reference_layout = _rear_panel_layout(*reference.size)
+    high_layout = _rear_panel_layout(*high.size)
+    scale = high.width / reference.width
+    for reference_value, high_value in zip(reference_layout, high_layout):
+        assert high_value == pytest.approx(reference_value * scale, abs=0.02)
