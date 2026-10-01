@@ -13,7 +13,13 @@ from dataclasses import dataclass, replace
 from PIL import Image, ImageDraw
 
 from ..datasets.models import Dataset, StreetRecord
-from .context_map import ContextRenderOptions, ContextRenderResult, render_context_map_result
+from .context_map import (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    ContextRenderOptions,
+    ContextRenderResult,
+    REAR_PANEL_PX,
+    render_context_map_result,
+)
 from .face import FaceRenderOptions, render_face, street_feature_colour
 
 
@@ -65,6 +71,14 @@ TEMPLATE_V2_WRAP_LAYOUT = WrapLayout(
 CANONICAL_WRAP_SIZE = (
     TEMPLATE_V2_WRAP_LAYOUT.canvas_width_px,
     TEMPLATE_V2_WRAP_LAYOUT.canvas_height_px,
+)
+
+# Render the rear composition directly at the size it occupies in the canonical
+# wrap. This removes the old 495 px -> 945 px enlargement step while preserving
+# the established rear-panel aspect ratio and physical composition.
+CANONICAL_REAR_PANEL_SIZE = (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    round(CANONICAL_REAR_PANEL_WIDTH_PX * REAR_PANEL_PX[1] / REAR_PANEL_PX[0]),
 )
 
 
@@ -148,6 +162,7 @@ def render_wrap_result(
         feature_colour = street_feature_colour(street)
     context_options = replace(
         context_options,
+        panel_size=CANONICAL_REAR_PANEL_SIZE,
         highlight_stroke_colour=feature_colour,
     )
     context = render_context_map_result(dataset, street, context_options)
