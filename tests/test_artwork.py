@@ -10,6 +10,7 @@ from PIL import Image
 from mug_previewer.cli import main
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.rendering.artwork import (
+    CANONICAL_REAR_PANEL_SIZE,
     PixelBox,
     TEMPLATE_V2_WRAP_LAYOUT,
     WrapComposer,
@@ -96,9 +97,15 @@ def test_real_front_and_rear_renderers_compose(tmp_path: Path) -> None:
     assert result.image.size == (2362, 1063)
     assert result.image.mode == "RGBA"
     assert result.front_panel.size == FRONT_PANEL_PX
-    assert result.rear_panel.size == REAR_PANEL_PX
+    assert result.rear_panel.size == CANONICAL_REAR_PANEL_SIZE
     assert result.front_placed_box == PixelBox(0, 90, 945, 882)
     assert result.rear_placed_box == PixelBox(1417, 90, 945, 882)
+    # Production rear artwork is already rasterised at its final canonical
+    # placement size, so WrapComposer no longer enlarges the 495 px preview.
+    assert result.rear_panel.size == (
+        result.rear_placed_box.width,
+        result.rear_placed_box.height,
+    )
     assert result.context.framing_mode == "metric"
     front_bounds = result.front_panel.getchannel("A").getbbox()
     assert front_bounds is not None
