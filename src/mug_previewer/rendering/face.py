@@ -490,61 +490,42 @@ def _scale_stroke_width_declarations(text: str, multiplier: float) -> str:
 
 
 def _scale_face_linework(face_asset: str, multiplier: float) -> str:
-    """Scale all non-street facial linework without changing street geometry.
+    """Scale non-street facial strokes while preserving the original SVG text.
 
-    Eyes are filled circles rather than strokes, so this intentionally leaves
-    their radius unchanged.  Hair, brows, lashes, mouth/chin details, ears and
-    nose linework all participate.
+    This intentionally avoids parsing and reserialising the complete nested SVG.
+    CairoSVG is sensitive to some namespace/stylesheet rewrites in embedded SVG
+    assets on Windows, so calibration must leave the document structure intact.
     """
     factor = _positive_style_multiplier(multiplier, "Facial linework multiplier")
     if factor == 1.0:
         return face_asset
 
-    root = ET.fromstring(face_asset)
-
-    # Scale the native class rules that define the ordinary line vocabulary.
     controlled_selectors = (".ink", ".feature", ".thin", ".brow", ".soft-detail")
-    for style_node in root.iter():
-        if _svg_local_name(style_node.tag) != "style" or not style_node.text:
-            continue
 
-        def scale_rule(match: re.Match[str]) -> str:
-            selector, body = match.group(1), match.group(2)
-            if ".street" in selector:
-                return match.group(0)
-            if not any(name in selector for name in controlled_selectors):
-                return match.group(0)
-            return f"{selector}{{{_scale_stroke_width_declarations(body, factor)}}}"
+    def scale_rule(match: re.Match[str]) -> str:
+        selector, body = match.group(1), match.group(2)
+        if ".street" in selector:
+            return match.group(0)
+        if not any(name in selector for name in controlled_selectors):
+            return match.group(0)
+        return f"{selector}{{{_scale_stroke_width_declarations(body, factor)}}}"
 
-        style_node.text = re.sub(r"([^{}]+)\{([^{}]*)\}", scale_rule, style_node.text)
+    # Scale class rules in <style> blocks without touching XML structure.
+    revised = re.sub(r"([^{}]+)\{([^{}]*)\}", scale_rule, face_asset)
 
-    # V28 hierarchy hair/brows and role-specific features carry inline widths.
-    face_content = next(
-        (
-            node for node in root.iter()
-            if _svg_local_name(node.tag) == "g"
-            and "face-content" in node.get("class", "").split()
-        ),
-        None,
-    )
-    if face_content is not None:
-        for element in face_content.iter():
-            classes = set(element.get("class", "").split())
-            if "street" in classes:
-                continue
-            style = element.get("style")
-            if style and "stroke-width" in style:
-                element.set("style", _scale_stroke_width_declarations(style, factor))
-            width = element.get("stroke-width")
-            if width is not None:
-                match = re.fullmatch(r"\s*([-+]?\d*\.?\d+)(px)?\s*", width)
-                if match is not None:
-                    element.set(
-                        "stroke-width",
-                        f"{float(match.group(1)) * factor:.3f}{match.group(2) or ''}",
-                    )
+    # Scale inline stroke-width declarations on non-street primitives.
+    tag_pattern = re.compile(r"<(?:path|polyline|line|ellipse)\b[^>]*>", re.IGNORECASE)
 
-    return ET.tostring(root, encoding="unicode")
+    def scale_tag(match: re.Match[str]) -> str:
+        tag = match.group(0)
+        classes = re.search(r'\bclass="([^"]*)"', tag)
+        if classes is not None and "street" in classes.group(1).split():
+            return tag
+        if "stroke-width" not in tag:
+            return tag
+        return _scale_stroke_width_declarations(tag, factor)
+
+    return tag_pattern.sub(scale_tag, revised)
 
 
 def _primitive_vertical_centre(element: ET.Element) -> float | None:
