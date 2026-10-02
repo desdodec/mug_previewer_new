@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 from mug_previewer.ui.prepared_linking import prepared_dataset_options
@@ -32,6 +33,15 @@ def test_prepared_folder_without_index_relinks_to_matching_source_and_loads_stre
     from types import SimpleNamespace
     from mug_previewer.ui.state import DatasetOption
 
+    @dataclass(frozen=True)
+    class SourceDataset:
+        id: str
+        display_name: str
+        streets: tuple
+        warnings: tuple
+        path: Path
+        index_row_count: int = 0
+
     face_folder = tmp_path / "faces" / "20260905_150413_hebden"
     face_folder.mkdir(parents=True)
     catalogue = PreprocessedCatalogue(tmp_path, {})
@@ -41,7 +51,7 @@ def test_prepared_folder_without_index_relinks_to_matching_source_and_loads_stre
         display_name="Aspinall Street",
         street_name="Aspinall Street",
     )
-    source = SimpleNamespace(
+    source = SourceDataset(
         id="20260905_150413_hebden",
         display_name="Hebden",
         streets=(street,),
