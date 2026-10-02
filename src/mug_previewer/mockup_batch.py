@@ -21,7 +21,7 @@ from .batch_export import (
     production_filename,
     sanitize_filename,
 )
-from .design import DesignOptions
+from .design import DesignOptions, design_profile_fingerprint
 from .preprocessed_export import render_preprocessed_wrap
 from .preview.mockup import MugPreviewOptions, PreviewOrientation, render_mug_preview
 
@@ -119,6 +119,7 @@ def _mockup_metadata(
         "mug_previewer_mockup_renderer_version": MOCKUP_RENDERER_VERSION,
         "mug_previewer_front_feature_weight": f"{design.front_feature_weight:.2f}",
         "mug_previewer_rear_highlight_weight": f"{design.rear_highlight_weight:.2f}",
+        "mug_previewer_style_fingerprint": design_profile_fingerprint(design),
         "mug_previewer_source_svg_sha256": source_digest or "",
     }
 
