@@ -18,6 +18,7 @@ from mug_previewer.rendering.face import (
     FRONT_TITLE_LOCALITY_GAP_DELTA_PX,
     FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX,
     LOCALITY_FONT_SIZE,
+    STREET_STROKE_MULTIPLIER,
     TITLE_FONT_SIZE_TIERS,
     TITLE_SAFE_WIDTH_PX,
     TITLE_Y_RATIO,
@@ -36,7 +37,6 @@ from mug_previewer.rendering.face import (
 from mug_previewer.rendering.native import face_policy as native
 
 FIXTURE = Path(__file__).parent / "fixtures" / "workflow_v6_valid"
-
 
 def dataset_copy(tmp_path: Path) -> Path:
     path = tmp_path / "workflow_v6_valid"
