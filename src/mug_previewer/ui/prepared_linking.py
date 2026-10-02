@@ -278,9 +278,9 @@ def _prepared_only_dataset(
                 context_path=None,
             )
         )
-    if not streets:
-        return None
-
+    # The physical face folder is authoritative for workspace visibility.
+    # A folder can legitimately exist before/after an index rebuild, so keep
+    # it visible even when no indexed street records are currently available.
     physical_root = next(
         (
             catalogue.root / container / prepared_id
@@ -330,11 +330,14 @@ def prepared_dataset_options(
     """
     groups = _prepared_records(catalogue)
     folder_ids = _prepared_folder_ids(catalogue)
-    prepared_ids = sorted(set(groups) & folder_ids)
+    # Actual folders under faces/ are authoritative. Do not hide a folder just
+    # because preprocess_index.json is incomplete, stale or has not yet been
+    # rebuilt for that set.
+    prepared_ids = sorted(folder_ids)
 
     options: list[DatasetOption] = []
     for prepared_id in prepared_ids:
-        records = groups[prepared_id]
+        records = groups.get(prepared_id, [])
         source = _best_source(prepared_id, records, source_options)
         dataset = _linked_dataset(prepared_id, records, source) if source is not None else None
         if dataset is None:
