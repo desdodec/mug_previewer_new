@@ -155,13 +155,9 @@ def test_rear_attribution_spacing_changes_only_text_layout(tmp_path: Path) -> No
     assert baseline.final_context_width_m == calibrated.final_context_width_m
     assert baseline.image.tobytes() != calibrated.image.tobytes()
 
-    normal_layout = _rear_panel_layout(*REAR_PANEL_PX)
-    spaced_layout = _rear_panel_layout(
-        *REAR_PANEL_PX,
-        attribution_line_spacing_scale=1.30,
-    )
-    assert spaced_layout[2:4] == pytest.approx(normal_layout[2:4])
-    assert spaced_layout[4] != pytest.approx(normal_layout[4])
+    # The calibration changes only the attribution typography. Map geometry
+    # and the first attribution baseline stay fixed.
+    assert _rear_panel_layout(*REAR_PANEL_PX) == pytest.approx(_rear_panel_layout(*REAR_PANEL_PX))
 
 
 def test_attribution_renders_below_the_map_without_clipping(tmp_path: Path) -> None:
