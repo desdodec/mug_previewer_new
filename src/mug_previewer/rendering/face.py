@@ -566,13 +566,13 @@ def _primitive_vertical_centre(element: ET.Element) -> float | None:
 
 def _primitive_vertical_centre_markup(tag_markup: str) -> float | None:
     """Return an approximate Y centre from one SVG primitive opening tag."""
-    name_match = re.match(r"<(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_]+)\\b", tag_markup)
+    name_match = re.match(r"<(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_]+)\b", tag_markup)
     if name_match is None:
         return None
     tag = name_match.group(1).casefold()
 
     def attribute(name: str) -> str | None:
-        match = re.search(rf\'\\b{re.escape(name)}="([^"]*)"\', tag_markup)
+        match = re.search(rf'\b{re.escape(name)}="([^"]*)"', tag_markup)
         return None if match is None else match.group(1)
 
     try:
@@ -588,7 +588,7 @@ def _primitive_vertical_centre_markup(tag_markup: str) -> float | None:
             values = [
                 float(value)
                 for value in re.findall(
-                    r"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?",
+                    r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?",
                     attribute("points") or "",
                 )
             ]
@@ -598,7 +598,7 @@ def _primitive_vertical_centre_markup(tag_markup: str) -> float | None:
             values = [
                 float(value)
                 for value in re.findall(
-                    r"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?",
+                    r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?",
                     attribute("d") or "",
                 )
             ]
@@ -611,7 +611,7 @@ def _primitive_vertical_centre_markup(tag_markup: str) -> float | None:
 
 def _translate_svg_opening_tag(tag_markup: str, shift: float) -> str:
     """Append a Y translation without parsing/reserialising the SVG document."""
-    transform = re.search(r\'\\btransform="([^"]*)"\', tag_markup)
+    transform = re.search(r'\btransform="([^"]*)"', tag_markup)
     if transform is not None:
         revised = _with_downward_translation(transform.group(1), shift)
         return (
@@ -639,7 +639,7 @@ def _spread_face_component_rows(face_asset: str, spread: float) -> str:
         return face_asset
 
     primitive_pattern = re.compile(
-        r"<(?:[A-Za-z0-9_]+:)?(?:circle|ellipse|line|polyline|path)\\b[^>]*>",
+        r"<(?:[A-Za-z0-9_]+:)?(?:circle|ellipse|line|polyline|path)\b[^>]*>",
         re.IGNORECASE,
     )
     matches = list(primitive_pattern.finditer(face_asset))
