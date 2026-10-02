@@ -26,6 +26,7 @@ from mug_previewer.rendering.face import (
     _front_group_transform,
     _render_face_standard,
     _front_text_y_positions,
+    _spread_vertical_position,
     extract_street_feature_colour,
     render_face,
     render_face_svg,
@@ -100,6 +101,54 @@ def test_title_font_selection_uses_only_approved_bounded_tiers() -> None:
     assert all(choice.rendered_width_px <= TITLE_SAFE_WIDTH_PX for choice in choices)
     assert LOCALITY_FONT_SIZE == pytest.approx(18.0)
     assert FaceRenderOptions().typography_block_y_offset == FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
+
+
+def test_print_calibration_defaults_preserve_existing_front_style() -> None:
+    options = FaceRenderOptions()
+    assert options.title_font_scale == pytest.approx(1.0)
+    assert options.locality_font_scale == pytest.approx(1.0)
+    assert options.supporting_stroke_multiplier == pytest.approx(1.0)
+    assert options.street_feature_stroke_multiplier == pytest.approx(STREET_STROKE_MULTIPLIER)
+    assert options.vertical_spread == pytest.approx(1.0)
+
+
+def test_title_font_scale_changes_actual_selected_size_without_changing_safe_width() -> None:
+    font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
+    baseline = select_title_font("Park Road", font_stack)
+    enlarged = select_title_font("Park Road", font_stack, font_scale=1.20)
+
+    assert enlarged.size_px == pytest.approx(baseline.size_px * 1.20)
+    assert enlarged.rendered_width_px > baseline.rendered_width_px
+    assert enlarged.rendered_width_px <= TITLE_SAFE_WIDTH_PX
+
+
+def test_vertical_spread_moves_rows_away_from_centre_and_identity_is_exact() -> None:
+    height = 462.0
+    above = 120.0
+    below = 340.0
+    assert _spread_vertical_position(above, height, 1.0) == pytest.approx(above)
+    assert _spread_vertical_position(below, height, 1.0) == pytest.approx(below)
+    assert _spread_vertical_position(above, height, 1.20) < above
+    assert _spread_vertical_position(below, height, 1.20) > below
+
+
+def test_editable_svg_exposes_independent_print_calibration_controls(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+    markup = render_face_svg(
+        data,
+        street,
+        FaceRenderOptions(
+            area=data.display_name,
+            title_font_scale=1.10,
+            locality_font_scale=1.20,
+            supporting_stroke_multiplier=1.50,
+            vertical_spread=1.10,
+        ),
+    )
+
+    assert f"stroke-width:{1.68 * 1.50:.2f}px" in markup
+    assert f"font:500 {LOCALITY_FONT_SIZE * 1.20:.1f}px" in markup
 
 
 def test_title_font_selection_refuses_text_that_cannot_fit_at_the_minimum_tier() -> None:
