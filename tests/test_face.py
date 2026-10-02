@@ -27,6 +27,7 @@ from mug_previewer.rendering.face import (
     _front_group_transform,
     _render_face_standard,
     _front_text_y_positions,
+    _scale_face_linework,
     _spread_face_component_rows,
     _spread_vertical_position,
     extract_street_feature_colour,
@@ -108,6 +109,7 @@ def test_print_calibration_defaults_preserve_existing_front_style() -> None:
     options = FaceRenderOptions()
     assert options.title_font_scale == pytest.approx(1.0)
     assert options.locality_font_scale == pytest.approx(1.0)
+    assert options.facial_linework_multiplier == pytest.approx(1.0)
     assert options.supporting_stroke_multiplier == pytest.approx(1.0)
     assert options.street_feature_stroke_multiplier == pytest.approx(STREET_STROKE_MULTIPLIER)
     assert options.vertical_spread == pytest.approx(1.0)
@@ -131,6 +133,27 @@ def test_vertical_spread_moves_rows_away_from_centre_and_identity_is_exact() -> 
     assert _spread_vertical_position(below, height, 1.0) == pytest.approx(below)
     assert _spread_vertical_position(above, height, 1.20) < above
     assert _spread_vertical_position(below, height, 1.20) > below
+
+
+def test_facial_linework_multiplier_scales_non_street_strokes_only() -> None:
+    source = (
+        '<svg xmlns="http://www.w3.org/2000/svg"><defs><style>'
+        '.ink { stroke-width: 1.0; }.street { stroke-width: 3.0; }'
+        '.soft-detail { stroke-width: 0.5; }'
+        '</style></defs><g class="face-content">'
+        '<path d="M 0,0 L 1,1" class="ink hierarchy-brow" style="stroke-width:1.2"/>'
+        '<path d="M 0,2 L 1,2" class="soft-detail"/>'
+        '<polyline points="0,3 1,3" class="street" style="stroke-width:3.0"/>'
+        '<circle cx="1" cy="1" r="2" class="eye"/>'
+        '</g></svg>'
+    )
+    adjusted = _scale_face_linework(source, 2.0)
+
+    assert "stroke-width: 2.000" in adjusted
+    assert "stroke-width:2.400" in adjusted
+    assert "stroke-width: 1.000" in adjusted
+    assert 'class="street" style="stroke-width:3.0"' in adjusted
+    assert 'r="2"' in adjusted
 
 
 def test_vertical_spread_separates_native_face_rows_without_changing_geometry() -> None:
