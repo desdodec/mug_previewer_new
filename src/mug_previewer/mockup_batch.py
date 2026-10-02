@@ -389,6 +389,7 @@ def execute_mockup_batch(plan: MockupBatchPlan, *, on_progress=None, cancel_even
         "cancelled": cancelled,
         "replace_existing": plan.replace_existing,
         "design_options": asdict(_resolved_design_options(plan.design_options)),
+        "style_fingerprint": design_profile_fingerprint(plan.design_options),
         "summary": summary,
         "progress_errors": progress_errors,
         "items": [
