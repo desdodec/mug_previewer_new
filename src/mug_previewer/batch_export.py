@@ -10,7 +10,7 @@ import tempfile
 import unicodedata
 
 from .datasets.models import Dataset
-from .design import DesignOptions
+from .design import DesignOptions, design_profile_fingerprint
 from .prepared_asset import resolve_prepared_face_source
 from .preprocess import INDEX_FILENAME, resolve_authoritative_face_svg
 from .preprocessed_export import export_preprocessed_provider_png, production_png_matches_design
@@ -296,10 +296,13 @@ def execute_batch_export(plan, *, on_progress=None, cancel_event=None):
                 progress_errors.append(str(error))
     summary = asdict(plan.summary) | {key.lower(): sum(r.result == key for r in results)
                                     for key in ('EXPORTED', 'FAILED', 'SKIPPED_EXISTING', 'CANCELLED')}
+    resolved_design = plan.design_options or DesignOptions()
     payload = dict(version=1, provider_id=plan.provider_id, dataset_id=plan.dataset.id,
                    started_at=started, completed_at=datetime.now(timezone.utc).isoformat(),
-                   cancelled=cancelled, replace_existing=plan.replace_existing, summary=summary,
-                   progress_errors=progress_errors,
+                   cancelled=cancelled, replace_existing=plan.replace_existing,
+                   design_options=asdict(resolved_design),
+                   style_fingerprint=design_profile_fingerprint(resolved_design),
+                   summary=summary, progress_errors=progress_errors,
                    items=[asdict(r.item) | {'authoritative_svg': str(r.item.authoritative_svg) if r.item.authoritative_svg else None,
                           'destination': str(r.item.destination) if r.item.destination else None,
                           'result': r.result, 'reason': r.reason} for r in results])
