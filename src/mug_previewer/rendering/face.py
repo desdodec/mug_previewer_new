@@ -74,6 +74,7 @@ class FaceRenderOptions:
     typography_block_y_offset: float = FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
     title_font_scale: float = 1.0
     locality_font_scale: float = 1.0
+    facial_linework_multiplier: float = 1.0
     supporting_stroke_multiplier: float = 1.0
     street_feature_stroke_multiplier: float = STREET_STROKE_MULTIPLIER
     vertical_spread: float = 1.0
@@ -195,6 +196,7 @@ def _render_face_with_decision(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
         supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        facial_linework_multiplier=options.facial_linework_multiplier,
         vertical_spread=options.vertical_spread,
     )
     standard = _render_face_standard(street, options, face_markup=face_markup)
@@ -262,6 +264,7 @@ def _render_face_standard(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
         supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        facial_linework_multiplier=options.facial_linework_multiplier,
         vertical_spread=options.vertical_spread,
     )
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
@@ -397,10 +400,12 @@ def _render_native_face(
     group_scale: float = FRONT_GROUP_SCALE,
     group_y_offset: float = FRONT_GROUP_Y_OFFSET,
     supporting_stroke_multiplier: float = 1.0,
+    facial_linework_multiplier: float = 1.0,
     vertical_spread: float = 1.0,
 ) -> str:
     _positive_style_multiplier(street_feature_stroke_multiplier, "Front street feature stroke multiplier")
     support_scale = _positive_style_multiplier(supporting_stroke_multiplier, "Supporting facial stroke multiplier")
+    linework_scale = _positive_style_multiplier(facial_linework_multiplier, "Facial linework multiplier")
     spread = _positive_style_multiplier(vertical_spread, "Front vertical spread")
     palette, specs = _face_specs_for_glyph(glyph)
     with tempfile.TemporaryDirectory(prefix="mug_v28_face_") as temporary:
@@ -436,9 +441,10 @@ def _render_native_face(
         f"{ET.tostring(face_group, encoding='unicode')}</g></svg>"
     )
     face_asset = face_asset.replace("vector-effect: non-scaling-stroke;", "")
+    face_asset = _scale_face_linework(face_asset, linework_scale)
     face_asset = face_asset.replace(
         "</svg>",
-        f'<style>.v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * support_scale:.2f}px !important; }}</style></svg>',
+        f'<style>.v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * support_scale * linework_scale:.2f}px !important; }}</style></svg>',
     )
     face_asset = _spread_face_component_rows(face_asset, spread)
     href = "data:image/svg+xml;base64," + base64.b64encode(face_asset.encode("utf-8")).decode("ascii")
@@ -470,6 +476,75 @@ def _render_native_face(
         f'<image class="v28-face" href="{href}" x="{face_x:.1f}" y="{face_y:.1f}" '
         f'width="{face_width:.1f}" height="{face_height:.1f}" preserveAspectRatio="xMidYMid meet"/>'
     )
+
+
+def _scale_stroke_width_declarations(text: str, multiplier: float) -> str:
+    """Scale numeric SVG/CSS stroke-width declarations while preserving units."""
+    pattern = re.compile(r"(stroke-width\s*:\s*)([-+]?\d*\.?\d+)(px)?", re.IGNORECASE)
+
+    def replace(match: re.Match[str]) -> str:
+        value = float(match.group(2)) * multiplier
+        return f"{match.group(1)}{value:.3f}{match.group(3) or ''}"
+
+    return pattern.sub(replace, text)
+
+
+def _scale_face_linework(face_asset: str, multiplier: float) -> str:
+    """Scale all non-street facial linework without changing street geometry.
+
+    Eyes are filled circles rather than strokes, so this intentionally leaves
+    their radius unchanged.  Hair, brows, lashes, mouth/chin details, ears and
+    nose linework all participate.
+    """
+    factor = _positive_style_multiplier(multiplier, "Facial linework multiplier")
+    if factor == 1.0:
+        return face_asset
+
+    root = ET.fromstring(face_asset)
+
+    # Scale the native class rules that define the ordinary line vocabulary.
+    controlled_selectors = (".ink", ".feature", ".thin", ".brow", ".soft-detail")
+    for style_node in root.iter():
+        if _svg_local_name(style_node.tag) != "style" or not style_node.text:
+            continue
+
+        def scale_rule(match: re.Match[str]) -> str:
+            selector, body = match.group(1), match.group(2)
+            if ".street" in selector:
+                return match.group(0)
+            if not any(name in selector for name in controlled_selectors):
+                return match.group(0)
+            return f"{selector}{{{_scale_stroke_width_declarations(body, factor)}}}"
+
+        style_node.text = re.sub(r"([^{}]+)\{([^{}]*)\}", scale_rule, style_node.text)
+
+    # V28 hierarchy hair/brows and role-specific features carry inline widths.
+    face_content = next(
+        (
+            node for node in root.iter()
+            if _svg_local_name(node.tag) == "g"
+            and "face-content" in node.get("class", "").split()
+        ),
+        None,
+    )
+    if face_content is not None:
+        for element in face_content.iter():
+            classes = set(element.get("class", "").split())
+            if "street" in classes:
+                continue
+            style = element.get("style")
+            if style and "stroke-width" in style:
+                element.set("style", _scale_stroke_width_declarations(style, factor))
+            width = element.get("stroke-width")
+            if width is not None:
+                match = re.fullmatch(r"\s*([-+]?\d*\.?\d+)(px)?\s*", width)
+                if match is not None:
+                    element.set(
+                        "stroke-width",
+                        f"{float(match.group(1)) * factor:.3f}{match.group(2) or ''}",
+                    )
+
+    return ET.tostring(root, encoding="unicode")
 
 
 def _primitive_vertical_centre(element: ET.Element) -> float | None:
@@ -708,6 +783,7 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
         supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        facial_linework_multiplier=options.facial_linework_multiplier,
         vertical_spread=options.vertical_spread,
     )
     asset = _decode_native_face_asset(face_markup)
@@ -759,7 +835,7 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
   <style>
     .mug-title {{ font-family:{font_stack}; font-size:{title.size_px:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
     .mug-area {{ font:500 {locality_font_size:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
-    .v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * options.supporting_stroke_multiplier:.2f}px !important; }}
+    .v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * options.supporting_stroke_multiplier * options.facial_linework_multiplier:.2f}px !important; }}
   </style>
   <g class="front-composition" transform="{group_transform}">
     <g id="title"><text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text></g>
