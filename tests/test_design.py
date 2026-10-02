@@ -82,6 +82,7 @@ def test_calibration_profile_maps_to_complete_production_design(tmp_path: Path) 
                 "vertical_spread": 1.08,
             },
             "rear_render_options": {
+                "highlight_stroke_scale": REAR_STREET_HIGHLIGHT_SCALE * 1.60,
                 "attribution_line1_font_scale": 1.25,
                 "attribution_line2_font_scale": 1.10,
                 "attribution_line_spacing_scale": 1.15,
@@ -96,6 +97,7 @@ def test_calibration_profile_maps_to_complete_production_design(tmp_path: Path) 
     options = build_render_options(design, area="Hebden Bridge")
 
     assert design.front_feature_weight == pytest.approx(1.30)
+    assert design.rear_highlight_weight == pytest.approx(1.60)
     assert design.front_facial_linework_multiplier == pytest.approx(1.45)
     assert design.rear_attribution_line1_font_scale == pytest.approx(1.25)
     assert design.rear_attribution_line2_font_scale == pytest.approx(1.10)
