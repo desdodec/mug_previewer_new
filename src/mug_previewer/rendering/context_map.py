@@ -582,11 +582,7 @@ def _rasterise_rear_panel(
         raise ContextRenderError("Rear attribution font scale must be positive and finite.")
     if not math.isfinite(attribution_line_spacing_scale) or attribution_line_spacing_scale <= 0:
         raise ContextRenderError("Rear attribution line-spacing scale must be positive and finite.")
-    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(
-        panel_width,
-        panel_height,
-        attribution_line_spacing_scale=attribution_line_spacing_scale,
-    )
+    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
     scale = _panel_reference_scale(panel_width)
     attribution_font_size = ATTRIBUTION_FONT_SIZE * scale * attribution_font_scale
     attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale * attribution_line_spacing_scale
@@ -627,20 +623,13 @@ def _panel_reference_scale(panel_width: int) -> float:
     return panel_width / REAR_PANEL_PX[0]
 
 
-def _rear_panel_layout(
-    panel_width: int,
-    panel_height: int,
-    *,
-    attribution_line_spacing_scale: float = 1.0,
-) -> tuple[float, float, float, float, float]:
+def _rear_panel_layout(panel_width: int, panel_height: int) -> tuple[float, float, float, float, float]:
     """Return optically aligned map bounds and first attribution baseline."""
-    if not math.isfinite(attribution_line_spacing_scale) or attribution_line_spacing_scale <= 0:
-        raise ContextRenderError("Rear attribution line-spacing scale must be positive and finite.")
     scale = _panel_reference_scale(panel_width)
     map_height = panel_height * REAR_MAP_HEIGHT_RATIO
     map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
     attribution_gap = ATTRIBUTION_MAP_GAP * scale
-    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale * attribution_line_spacing_scale
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
     composition_offset_y = (
         REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX
         * panel_width
