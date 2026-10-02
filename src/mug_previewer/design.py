@@ -48,8 +48,11 @@ class DesignOptions:
     front_group_scale: float = FRONT_GROUP_SCALE
     front_group_y_offset: float = FRONT_GROUP_Y_OFFSET
 
-    rear_attribution_font_scale: float = 1.0
+    rear_attribution_line1_font_scale: float = 1.0
+    rear_attribution_line2_font_scale: float = 1.0
     rear_attribution_line_spacing_scale: float = 1.0
+    rear_attribution_line1_y_offset: float = 0.0
+    rear_attribution_line2_y_offset: float = 0.0
 
     def __post_init__(self) -> None:
         limits = (
@@ -67,7 +70,8 @@ class DesignOptions:
             ("Front supporting stroke multiplier", self.front_supporting_stroke_multiplier),
             ("Front vertical spread", self.front_vertical_spread),
             ("Front group scale", self.front_group_scale),
-            ("Rear attribution font scale", self.rear_attribution_font_scale),
+            ("Rear attribution line 1 font scale", self.rear_attribution_line1_font_scale),
+            ("Rear attribution line 2 font scale", self.rear_attribution_line2_font_scale),
             ("Rear attribution line-spacing scale", self.rear_attribution_line_spacing_scale),
         )
         for name, value in positive:
@@ -78,6 +82,8 @@ class DesignOptions:
             ("Front title/locality gap", self.front_title_locality_gap_delta),
             ("Front typography block Y offset", self.front_typography_block_y_offset),
             ("Front group Y offset", self.front_group_y_offset),
+            ("Rear attribution line 1 Y offset", self.rear_attribution_line1_y_offset),
+            ("Rear attribution line 2 Y offset", self.rear_attribution_line2_y_offset),
         ):
             if not math.isfinite(value):
                 raise ValueError(f"{name} must be finite.")
@@ -101,8 +107,11 @@ def build_render_options(design: DesignOptions, *, area: str) -> WrapRenderOptio
         ),
         context_options=ContextRenderOptions(
             highlight_stroke_scale=REAR_STREET_HIGHLIGHT_SCALE * design.rear_highlight_weight,
-            attribution_font_scale=design.rear_attribution_font_scale,
+            attribution_line1_font_scale=design.rear_attribution_line1_font_scale,
+            attribution_line2_font_scale=design.rear_attribution_line2_font_scale,
             attribution_line_spacing_scale=design.rear_attribution_line_spacing_scale,
+            attribution_line1_y_offset=design.rear_attribution_line1_y_offset,
+            attribution_line2_y_offset=design.rear_attribution_line2_y_offset,
         ),
     )
 
@@ -147,9 +156,26 @@ def load_design_profile(path: Path | str) -> DesignOptions:
         front_vertical_spread=float(face.get("vertical_spread", defaults.front_vertical_spread)),
         front_group_scale=float(face.get("group_scale", defaults.front_group_scale)),
         front_group_y_offset=float(face.get("group_y_offset", defaults.front_group_y_offset)),
-        rear_attribution_font_scale=float(rear.get("attribution_font_scale", defaults.rear_attribution_font_scale)),
+        rear_attribution_line1_font_scale=float(
+            rear.get(
+                "attribution_line1_font_scale",
+                rear.get("attribution_font_scale", defaults.rear_attribution_line1_font_scale),
+            )
+        ),
+        rear_attribution_line2_font_scale=float(
+            rear.get(
+                "attribution_line2_font_scale",
+                rear.get("attribution_font_scale", defaults.rear_attribution_line2_font_scale),
+            )
+        ),
         rear_attribution_line_spacing_scale=float(
             rear.get("attribution_line_spacing_scale", defaults.rear_attribution_line_spacing_scale)
+        ),
+        rear_attribution_line1_y_offset=float(
+            rear.get("attribution_line1_y_offset", defaults.rear_attribution_line1_y_offset)
+        ),
+        rear_attribution_line2_y_offset=float(
+            rear.get("attribution_line2_y_offset", defaults.rear_attribution_line2_y_offset)
         ),
     )
 
@@ -168,6 +194,7 @@ def design_profile_summary(options: DesignOptions | None) -> str:
         f"{resolved.front_locality_font_scale:.2f}× · "
         f"linework {resolved.front_facial_linework_multiplier:.2f}× · "
         f"street {resolved.front_feature_weight:.2f}× · "
-        f"Rear text {resolved.rear_attribution_font_scale:.2f}× · "
+        f"Rear text {resolved.rear_attribution_line1_font_scale:.2f}×/"
+        f"{resolved.rear_attribution_line2_font_scale:.2f}× · "
         f"spacing {resolved.rear_attribution_line_spacing_scale:.2f}×"
     )
