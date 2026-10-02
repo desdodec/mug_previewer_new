@@ -60,14 +60,23 @@ class FaceRenderError(ValueError):
 
 @dataclass(frozen=True)
 class FaceRenderOptions:
-    """Display-area text and internal typography positioning for one front panel."""
+    """Front artwork style controls.
+
+    Defaults preserve the established production appearance.  The additional
+    multipliers are primarily exposed by the separate print-calibration lab so
+    physical print tests can be performed without changing production defaults.
+    """
 
     area: str = ""
     group_scale: float = FRONT_GROUP_SCALE
     group_y_offset: float = FRONT_GROUP_Y_OFFSET
     title_locality_gap_delta: float = FRONT_TITLE_LOCALITY_GAP_DELTA_PX
     typography_block_y_offset: float = FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX
+    title_font_scale: float = 1.0
+    locality_font_scale: float = 1.0
+    supporting_stroke_multiplier: float = 1.0
     street_feature_stroke_multiplier: float = STREET_STROKE_MULTIPLIER
+    vertical_spread: float = 1.0
     manual_override: ManualPlacementOverride | None = None
 
 
@@ -185,6 +194,8 @@ def _render_face_with_decision(
     face_markup = _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
+        supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        vertical_spread=options.vertical_spread,
     )
     standard = _render_face_standard(street, options, face_markup=face_markup)
     override = options.manual_override
@@ -250,14 +261,21 @@ def _render_face_standard(
     face_markup = face_markup or _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
+        supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        vertical_spread=options.vertical_spread,
     )
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
-    title = select_title_font(street_name, font_stack)
+    title = select_title_font(street_name, font_stack, font_scale=options.title_font_scale)
     area = street.locality_label or options.area.strip()
     title_y, area_y = _front_text_y_positions(
         height, options.title_locality_gap_delta, options.typography_block_y_offset,
+    )
+    title_y = _spread_vertical_position(title_y, height, options.vertical_spread)
+    area_y = _spread_vertical_position(area_y, height, options.vertical_spread)
+    locality_font_size = LOCALITY_FONT_SIZE * _positive_style_multiplier(
+        options.locality_font_scale, "Locality font scale",
     )
     group_transform = _front_group_transform(
         panel_center, height, options.group_scale, options.group_y_offset,
@@ -265,7 +283,7 @@ def _render_face_standard(
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
   <defs><style>
     .mug-title {{ font-family:{font_stack}; font-size:{title.size_px:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
-    .mug-area {{ font:500 {LOCALITY_FONT_SIZE:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
+    .mug-area {{ font:500 {locality_font_size:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
   </style></defs>
   <g class="front-composition" transform="{group_transform}">
     <text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text>
@@ -322,17 +340,37 @@ def select_title_font(
     font_stack: str,
     *,
     safe_width_px: float = TITLE_SAFE_WIDTH_PX,
+    font_scale: float = 1.0,
 ) -> TitleFontChoice:
-    """Choose the first approved title tier whose measured SVG text fits."""
+    """Choose the first approved title tier, optionally scaled for print calibration."""
     if safe_width_px <= 0 or not math.isfinite(safe_width_px):
         raise FaceRenderError("Title safe width must be positive and finite.")
-    for size_px in TITLE_FONT_SIZE_TIERS:
+    scale = _positive_style_multiplier(font_scale, "Title font scale")
+    for base_size_px in TITLE_FONT_SIZE_TIERS:
+        size_px = base_size_px * scale
         rendered_width_px = _measure_title_width(text, font_stack, size_px)
         if rendered_width_px <= safe_width_px:
             return TitleFontChoice(size_px=size_px, rendered_width_px=rendered_width_px)
     raise FaceRenderError(
         f'Title cannot fit safely at the minimum approved size: "{text}" exceeds {safe_width_px:.0f}px.'
     )
+
+
+def _positive_style_multiplier(value: float, label: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as error:
+        raise FaceRenderError(f"{label} must be positive and finite.") from error
+    if not math.isfinite(numeric) or numeric <= 0:
+        raise FaceRenderError(f"{label} must be positive and finite.")
+    return numeric
+
+
+def _spread_vertical_position(position: float, panel_height: float, spread: float) -> float:
+    """Move a component away from the vertical centre without changing its size."""
+    factor = _positive_style_multiplier(spread, "Front vertical spread")
+    anchor = panel_height / 2
+    return anchor + (position - anchor) * factor
 
 
 def _measure_title_width(text: str, font_stack: str, size_px: float) -> int:
@@ -358,9 +396,12 @@ def _render_native_face(
     *,
     group_scale: float = FRONT_GROUP_SCALE,
     group_y_offset: float = FRONT_GROUP_Y_OFFSET,
+    supporting_stroke_multiplier: float = 1.0,
+    vertical_spread: float = 1.0,
 ) -> str:
-    if not math.isfinite(street_feature_stroke_multiplier) or street_feature_stroke_multiplier <= 0:
-        raise FaceRenderError("Front street feature stroke multiplier must be positive and finite.")
+    _positive_style_multiplier(street_feature_stroke_multiplier, "Front street feature stroke multiplier")
+    support_scale = _positive_style_multiplier(supporting_stroke_multiplier, "Supporting facial stroke multiplier")
+    spread = _positive_style_multiplier(vertical_spread, "Front vertical spread")
     palette, specs = _face_specs_for_glyph(glyph)
     with tempfile.TemporaryDirectory(prefix="mug_v28_face_") as temporary:
         native_path = Path(temporary) / "face.svg"
@@ -397,7 +438,7 @@ def _render_native_face(
     face_asset = face_asset.replace("vector-effect: non-scaling-stroke;", "")
     face_asset = face_asset.replace(
         "</svg>",
-        f'<style>.v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH:.2f}px !important; }}</style></svg>',
+        f'<style>.v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * support_scale:.2f}px !important; }}</style></svg>',
     )
     href = "data:image/svg+xml;base64," + base64.b64encode(face_asset.encode("utf-8")).decode("ascii")
     face_width = width * FACE_WIDTH_RATIO
@@ -409,6 +450,9 @@ def _render_native_face(
         top_text_bottom, height - top_text_bottom,
     )
     face_y = min(max(face_y, 0.0), height - face_height)
+    face_center_y = face_y + face_height / 2
+    face_center_y = _spread_vertical_position(face_center_y, height, spread)
+    face_y = min(max(face_center_y - face_height / 2, 0.0), height - face_height)
     face_asset, _clearance = _apply_tiny_nose_street_clearance(
         face_asset,
         panel_center=panel_center,
@@ -597,6 +641,8 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
     face_markup = _render_native_face(
         glyph, panel_center, width, height, options.street_feature_stroke_multiplier,
         group_scale=options.group_scale, group_y_offset=options.group_y_offset,
+        supporting_stroke_multiplier=options.supporting_stroke_multiplier,
+        vertical_spread=options.vertical_spread,
     )
     asset = _decode_native_face_asset(face_markup)
     asset_root = ET.fromstring(asset)
@@ -611,10 +657,15 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
     palette = native.get_face_palette(native.DEFAULT_PALETTE_KEY)
     font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
     street_name = street.display_name.strip() or street.street_name.strip() or street.id
-    title = select_title_font(street_name, font_stack)
+    title = select_title_font(street_name, font_stack, font_scale=options.title_font_scale)
     area = street.locality_label or options.area.strip()
     title_y, area_y = _front_text_y_positions(
         height, options.title_locality_gap_delta, options.typography_block_y_offset,
+    )
+    title_y = _spread_vertical_position(title_y, height, options.vertical_spread)
+    area_y = _spread_vertical_position(area_y, height, options.vertical_spread)
+    locality_font_size = LOCALITY_FONT_SIZE * _positive_style_multiplier(
+        options.locality_font_scale, "Locality font scale",
     )
     group_transform = _front_group_transform(
         panel_center, height, options.group_scale, options.group_y_offset,
@@ -641,8 +692,8 @@ def render_face_svg(dataset: "Dataset", street: StreetRecord, options: FaceRende
   {ET.tostring(defs, encoding="unicode")}
   <style>
     .mug-title {{ font-family:{font_stack}; font-size:{title.size_px:.1f}px; font-weight:{TITLE_WEIGHT}; fill:{palette.feature}; text-anchor:middle; }}
-    .mug-area {{ font:500 {LOCALITY_FONT_SIZE:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
-    .v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH:.2f}px !important; }}
+    .mug-area {{ font:500 {locality_font_size:.1f}px {font_stack}; fill:{palette.feature}; text-anchor:middle; letter-spacing:0.6px; }}
+    .v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * options.supporting_stroke_multiplier:.2f}px !important; }}
   </style>
   <g class="front-composition" transform="{group_transform}">
     <g id="title"><text class="mug-title" x="{panel_center:.1f}" y="{title_y:.1f}">{_escape(street_name)}</text></g>
