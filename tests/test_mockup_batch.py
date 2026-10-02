@@ -195,6 +195,28 @@ def test_mockup_executor_skips_existing_pair_only_when_settings_match(tmp_path: 
     assert result.summary["skipped_existing"] == 1
 
 
+def test_mockup_metadata_invalidates_when_loaded_style_profile_changes(tmp_path: Path) -> None:
+    path = tmp_path / "rear.png"
+    image = Image.new("RGBA", (32, 32), (10, 20, 30, 255))
+    old_design = DesignOptions(rear_attribution_font_scale=1.0)
+    new_design = DesignOptions(rear_attribution_font_scale=1.25)
+
+    mockup_batch._save_png(
+        image,
+        path,
+        design_options=old_design,
+        style_id=mockup_batch.STUDIO_MOCKUP_STYLE_ID,
+        source_digest="abc123",
+    )
+
+    assert mockup_batch._mockup_output_matches(
+        path, old_design, mockup_batch.STUDIO_MOCKUP_STYLE_ID, "abc123"
+    )
+    assert not mockup_batch._mockup_output_matches(
+        path, new_design, mockup_batch.STUDIO_MOCKUP_STYLE_ID, "abc123"
+    )
+
+
 def test_mockup_executor_regenerates_existing_pair_when_rear_slider_changes(tmp_path: Path, monkeypatch) -> None:
     street = SimpleNamespace(id="0042", display_name="Aspinall Street")
     dataset = SimpleNamespace(id="Hebden Bridge", get_street=lambda sid: street)
