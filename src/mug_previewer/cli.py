@@ -31,6 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("ui", help="Launch the desktop Mug Previewer UI.")
     commands.add_parser("preprocess-ui", help="Launch the desktop preprocessing UI.")
+    commands.add_parser(
+        "front-style-lab",
+        help="Launch the standalone front print-style calibration helper.",
+    )
     preprocess = commands.add_parser("preprocess", help="Prepare resumable editable face assets for GUI use.")
     preprocess.add_argument("--dataset-root", dest="preprocess_dataset_root", type=Path)
     preprocess.add_argument(
@@ -133,6 +137,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             dataset_root=args.dataset_root or DEFAULT_PREPROCESS_UI_DATASET_ROOT,
             output_root=DEFAULT_PREPROCESS_UI_OUTPUT_ROOT,
         )
+
+    if args.command == "front-style-lab":
+        from .ui.front_style_lab import launch
+
+        root = args.dataset_root or load_settings().dataset_root
+        if root is None:
+            print("No dataset root is configured. Set MUG_PREVIEWER_DATASET_ROOT or pass --dataset-root.")
+            return 2
+        return launch(dataset_root=root)
 
     if args.command == "ui":
         from .ui.app import launch
