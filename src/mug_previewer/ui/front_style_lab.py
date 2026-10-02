@@ -221,7 +221,7 @@ class FrontStyleLab(ttk.Frame):
             return None
         return dataset, street
 
-    def _options(self) -> FaceRenderOptions:
+    def _face_options(self) -> FaceRenderOptions:
         selected = self._selected()
         area = "" if selected is None else selected[0].display_name
         return FaceRenderOptions(
@@ -249,7 +249,7 @@ class FrontStyleLab(ttk.Frame):
             return
         dataset, street = selected
         try:
-            image = render_face(street, self._options())
+            image = render_face(street, self._face_options())
         except FaceRenderError as error:
             self.status_var.set(str(error))
             return
@@ -277,7 +277,7 @@ class FrontStyleLab(ttk.Frame):
         self._schedule_preview()
 
     def _profile_payload(self) -> dict[str, object]:
-        options = self._options()
+        options = self._face_options()
         return {
             "profile_version": PROFILE_VERSION,
             "purpose": "front-print-calibration",
@@ -342,7 +342,7 @@ class FrontStyleLab(ttk.Frame):
         if not path:
             return
         try:
-            render_face(street, self._options()).save(path)
+            render_face(street, self._face_options()).save(path)
         except Exception as error:
             messagebox.showerror("Export error", str(error), parent=self.root)
             return
@@ -363,7 +363,7 @@ class FrontStyleLab(ttk.Frame):
         if not path:
             return
 
-        base = self._options()
+        base = self._face_options()
         stroke_factors = (0.85, 1.00, 1.15, 1.30)
         text_factors = (0.90, 1.00, 1.10)
         cell_w, cell_h = 560, 560
