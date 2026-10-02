@@ -107,6 +107,8 @@ class ContextRenderOptions:
     highlight_stroke_scale: float = REAR_STREET_HIGHLIGHT_SCALE
     highlight_stroke_colour: str | None = None
     minimum_highlight_margin_fraction: float = REAR_STREET_MIN_MARGIN_FRACTION
+    attribution_font_scale: float = 1.0
+    attribution_line_spacing_scale: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -240,7 +242,13 @@ def render_context_map_result(
                 options.highlight_stroke_colour,
             )
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
-        image = _rasterise_rear_panel(markup, panel_width, panel_height)
+        image = _rasterise_rear_panel(
+            markup,
+            panel_width,
+            panel_height,
+            attribution_font_scale=options.attribution_font_scale,
+            attribution_line_spacing_scale=options.attribution_line_spacing_scale,
+        )
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
         raise ContextRenderError(f"Could not rasterise context SVG for street {street.id}: {error}") from error
     LOGGER.info(
@@ -562,11 +570,26 @@ def _highlight_stroke_width(markup: str) -> float | None:
     return min(widths) if widths else None
 
 
-def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> Image.Image:
-    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
+def _rasterise_rear_panel(
+    markup: str,
+    panel_width: int,
+    panel_height: int,
+    *,
+    attribution_font_scale: float = 1.0,
+    attribution_line_spacing_scale: float = 1.0,
+) -> Image.Image:
+    if not math.isfinite(attribution_font_scale) or attribution_font_scale <= 0:
+        raise ContextRenderError("Rear attribution font scale must be positive and finite.")
+    if not math.isfinite(attribution_line_spacing_scale) or attribution_line_spacing_scale <= 0:
+        raise ContextRenderError("Rear attribution line-spacing scale must be positive and finite.")
+    map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(
+        panel_width,
+        panel_height,
+        attribution_line_spacing_scale=attribution_line_spacing_scale,
+    )
     scale = _panel_reference_scale(panel_width)
-    attribution_font_size = ATTRIBUTION_FONT_SIZE * scale
-    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
+    attribution_font_size = ATTRIBUTION_FONT_SIZE * scale * attribution_font_scale
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale * attribution_line_spacing_scale
     # CairoSVG can omit vector overlays (including the highlighted street) when
     # an SVG containing a raster map is itself used as an SVG ``<image>``.
     # Rasterise the completed source SVG first, then place that bitmap in the
@@ -604,13 +627,20 @@ def _panel_reference_scale(panel_width: int) -> float:
     return panel_width / REAR_PANEL_PX[0]
 
 
-def _rear_panel_layout(panel_width: int, panel_height: int) -> tuple[float, float, float, float, float]:
+def _rear_panel_layout(
+    panel_width: int,
+    panel_height: int,
+    *,
+    attribution_line_spacing_scale: float = 1.0,
+) -> tuple[float, float, float, float, float]:
     """Return optically aligned map bounds and first attribution baseline."""
+    if not math.isfinite(attribution_line_spacing_scale) or attribution_line_spacing_scale <= 0:
+        raise ContextRenderError("Rear attribution line-spacing scale must be positive and finite.")
     scale = _panel_reference_scale(panel_width)
     map_height = panel_height * REAR_MAP_HEIGHT_RATIO
     map_width = map_height * REAR_MAP_PHYSICAL_ASPECT
     attribution_gap = ATTRIBUTION_MAP_GAP * scale
-    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale * attribution_line_spacing_scale
     composition_offset_y = (
         REAR_COMPOSITION_CANONICAL_OFFSET_Y_PX
         * panel_width
