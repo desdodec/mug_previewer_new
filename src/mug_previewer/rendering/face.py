@@ -440,6 +440,7 @@ def _render_native_face(
         "</svg>",
         f'<style>.v28-face-linework .v28-support {{ stroke-width:{SUPPORTING_STROKE_WIDTH * support_scale:.2f}px !important; }}</style></svg>',
     )
+    face_asset = _spread_face_component_rows(face_asset, spread)
     href = "data:image/svg+xml;base64," + base64.b64encode(face_asset.encode("utf-8")).decode("ascii")
     face_width = width * FACE_WIDTH_RATIO
     face_height = height * FACE_HEIGHT_RATIO
@@ -469,6 +470,71 @@ def _render_native_face(
         f'<image class="v28-face" href="{href}" x="{face_x:.1f}" y="{face_y:.1f}" '
         f'width="{face_width:.1f}" height="{face_height:.1f}" preserveAspectRatio="xMidYMid meet"/>'
     )
+
+
+def _primitive_vertical_centre(element: ET.Element) -> float | None:
+    """Return an approximate centre Y for one native face primitive."""
+    tag = _svg_local_name(element.tag)
+    try:
+        if tag in {"circle", "ellipse"}:
+            return float(element.get("cy", ""))
+        if tag == "line":
+            return (float(element.get("y1", "")) + float(element.get("y2", ""))) / 2
+        if tag == "polyline":
+            values = [
+                float(value)
+                for value in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", element.get("points", ""))
+            ]
+            ys = values[1::2]
+            return (min(ys) + max(ys)) / 2 if ys else None
+        if tag == "path":
+            values = [
+                float(value)
+                for value in re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", element.get("d", ""))
+            ]
+            ys = values[1::2]
+            return (min(ys) + max(ys)) / 2 if ys else None
+    except ValueError:
+        return None
+    return None
+
+
+def _spread_face_component_rows(face_asset: str, spread: float) -> str:
+    """Separate native facial rows vertically by translation, never reshaping paths."""
+    factor = _positive_style_multiplier(spread, "Front vertical spread")
+    if factor == 1.0:
+        return face_asset
+    root = ET.fromstring(face_asset)
+    face_content = next(
+        (
+            node for node in root.iter()
+            if _svg_local_name(node.tag) == "g"
+            and "face-content" in node.get("class", "").split()
+        ),
+        None,
+    )
+    if face_content is None:
+        return face_asset
+
+    primitives: list[tuple[ET.Element, float]] = []
+    for element in face_content.iter():
+        centre = _primitive_vertical_centre(element)
+        if centre is not None and math.isfinite(centre):
+            primitives.append((element, centre))
+    if not primitives:
+        return face_asset
+
+    centres = [centre for _element, centre in primitives]
+    anchor = (min(centres) + max(centres)) / 2
+    for element, centre in primitives:
+        shift = (centre - anchor) * (factor - 1.0)
+        if abs(shift) < 1e-9:
+            continue
+        element.set(
+            "transform",
+            _with_downward_translation(element.get("transform", ""), shift),
+        )
+    return ET.tostring(root, encoding="unicode")
 
 
 def assess_nose_street_clearance(nose_mask: Image.Image, street_mask: Image.Image) -> NoseStreetClearanceCorrection:
