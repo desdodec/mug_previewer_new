@@ -147,8 +147,6 @@ def _best_source(
         return exact
 
     prepared_names = _record_names(records)
-    if not prepared_names:
-        return None
     prepared_name = _prepared_display_name(prepared_id, records)
     prepared_area = _normalise(prepared_name)
     prepared_key = _dataset_key(prepared_id)
@@ -158,23 +156,25 @@ def _best_source(
         source = option.dataset
         source_names = {_normalise(street.display_name) for street in source.streets}
         overlap = len(prepared_names & source_names)
-        if not overlap:
-            continue
-        coverage = overlap / len(prepared_names)
+        coverage = overlap / len(prepared_names) if prepared_names else 0.0
         same_area = prepared_area == _normalise(source.display_name)
         same_key = bool(prepared_key) and prepared_key == _dataset_key(source.id)
 
-        # A renamed place/run may still be safely linked when the street-name
-        # fingerprint overwhelmingly agrees. Small prepared sets require a
-        # place/key match to avoid accidental matches on common road names.
+        # When the index is missing, the prepared folder name is still enough
+        # to relink to an unambiguous source run with the same normalized key.
+        # With indexed street names available, keep the stronger fingerprint
+        # checks used for renamed/replaced runs.
         strong_fingerprint = len(prepared_names) >= 10 and coverage >= 0.80
-        if not (same_area or same_key or strong_fingerprint):
+        if prepared_names:
+            if not overlap or not (same_area or same_key or strong_fingerprint):
+                continue
+        elif not (same_key or same_area):
             continue
 
-        count_delta = abs(len(source.streets) - len(records))
+        count_delta = abs(len(source.streets) - len(records)) if records else 0
         score = (
-            1.0 if same_area else 0.0,
             1.0 if same_key else 0.0,
+            1.0 if same_area else 0.0,
             coverage,
             float(overlap),
             -float(count_delta),
@@ -231,7 +231,9 @@ def _linked_dataset(
         )
 
     if not linked:
-        if source.id == prepared_id:
+        same_key = bool(_dataset_key(prepared_id)) and _dataset_key(prepared_id) == _dataset_key(source.id)
+        same_area = _normalise(_prepared_display_name(prepared_id, records)) == _normalise(source.display_name)
+        if source.id == prepared_id or same_key or (not records and same_area):
             linked = list(source.streets)
         else:
             return None
@@ -278,6 +280,40 @@ def _prepared_only_dataset(
                 context_path=None,
             )
         )
+    # If index records are absent/stale, recover navigation directly from
+    # canonical SVG filenames: <street_id>_<street_name>.svg. This is only a
+    # selector/navigation fallback; source geometry is still required for map
+    # rendering/export.
+    face_folder = catalogue.root / "faces" / prepared_id
+    if not streets and face_folder.is_dir():
+        try:
+            candidates = sorted(face_folder.glob("*.svg"))
+        except OSError:
+            candidates = []
+        for candidate in candidates:
+            stem = candidate.stem
+            if stem.endswith(".approved") or stem.endswith(".generated") or stem.endswith("_edit"):
+                continue
+            street_id, separator, slug_name = stem.partition("_")
+            if not street_id or street_id in seen:
+                continue
+            seen.add(street_id)
+            street_name = (
+                slug_name.replace("_", " ").strip().title()
+                if separator and slug_name
+                else street_id
+            )
+            streets.append(
+                StreetRecord(
+                    id=street_id,
+                    group_id=None,
+                    street_name=street_name,
+                    display_name=street_name,
+                    glyph_path=candidate,
+                    context_path=None,
+                )
+            )
+
     # The physical face folder is authoritative for workspace visibility.
     # A folder can legitimately exist before/after an index rebuild, so keep
     # it visible even when no indexed street records are currently available.
