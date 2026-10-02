@@ -109,11 +109,21 @@ class AppState:
     design_options: DesignOptions = field(default_factory=DesignOptions)
 
     def set_design_options(self, front_feature_weight: float, rear_highlight_weight: float) -> None:
-        """Validate and retain the current style selections for this app session."""
-        self.design_options = DesignOptions(front_feature_weight, rear_highlight_weight)
+        """Update the two legacy quick-adjust weights without discarding a loaded profile."""
+        self.design_options = replace(
+            self.design_options,
+            front_feature_weight=front_feature_weight,
+            rear_highlight_weight=rear_highlight_weight,
+        )
+
+    def apply_design_options(self, options: DesignOptions) -> None:
+        """Replace the active production style with a validated profile."""
+        if not isinstance(options, DesignOptions):
+            raise TypeError("Production style must be DesignOptions.")
+        self.design_options = options
 
     def reset_design_options(self) -> None:
-        """Restore only user-adjustable design values, preserving selection state."""
+        """Restore the complete production style to built-in defaults."""
         self.design_options = DesignOptions()
 
 

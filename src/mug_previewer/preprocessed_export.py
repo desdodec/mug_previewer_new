@@ -8,7 +8,7 @@ import tempfile
 from PIL import Image
 
 from .datasets.models import Dataset, StreetRecord
-from .design import DesignOptions, build_render_options
+from .design import DesignOptions, build_render_options, design_profile_fingerprint
 from .diagnostics.front_candidates import ProductionTriageStatus
 from .exporting import DEFAULT_PROFILE_IDS, save_profile_set, save_provider_artwork
 from .prepared_asset import PreparedFaceSource, load_prepared_face_image, resolve_prepared_face_source
@@ -17,12 +17,23 @@ from .providers import get_provider_profile
 from .review_index import current_review_state
 from .rendering.artwork import WrapComposer
 from .rendering.context_map import render_context_map_result
-from .rendering.face import extract_street_feature_colour, street_feature_colour
+from .rendering.face import (
+    AREA_Y_RATIO,
+    LOCALITY_FONT_SIZE,
+    SUPPORTING_STROKE_WIDTH,
+    TITLE_Y_RATIO,
+    _scale_face_linework,
+    _spread_face_component_rows,
+    _spread_vertical_position,
+    extract_street_feature_colour,
+    street_feature_colour,
+)
 from .rendering.svg_raster import rasterize_face_svg
 
 
 PRODUCTION_FRONT_WEIGHT_KEY = "mug_previewer_front_feature_weight"
 PRODUCTION_REAR_WEIGHT_KEY = "mug_previewer_rear_highlight_weight"
+PRODUCTION_STYLE_FINGERPRINT_KEY = "mug_previewer_style_fingerprint"
 
 
 def production_png_matches_design(path: Path | str, design_options: DesignOptions | None) -> bool:
@@ -30,9 +41,16 @@ def production_png_matches_design(path: Path | str, design_options: DesignOption
     design = design_options or DesignOptions()
     try:
         with Image.open(path) as image:
+            recorded_fingerprint = image.info.get(PRODUCTION_STYLE_FINGERPRINT_KEY)
+            if recorded_fingerprint is not None:
+                return recorded_fingerprint == design_profile_fingerprint(design)
             return (
                 image.info.get(PRODUCTION_FRONT_WEIGHT_KEY) == f"{design.front_feature_weight:.2f}"
                 and image.info.get(PRODUCTION_REAR_WEIGHT_KEY) == f"{design.rear_highlight_weight:.2f}"
+                and design == DesignOptions(
+                    front_feature_weight=design.front_feature_weight,
+                    rear_highlight_weight=design.rear_highlight_weight,
+                )
             )
     except (OSError, ValueError):
         return False
@@ -104,6 +122,108 @@ def _scale_prepared_street_stroke(markup: str, scale: float) -> str:
 
     return re.sub(r'<(?:[A-Za-z0-9_]+:)?(?:polyline|path)\b[^>]*>', adjust, markup)
 
+def _replace_css_numeric(markup: str, selector: str, property_name: str, multiplier: float) -> str:
+    pattern = re.compile(
+        rf"({re.escape(selector)}\s*\{{[^}}]*?{re.escape(property_name)}\s*:\s*)([0-9.]+)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    return pattern.sub(
+        lambda match: match.group(1) + f"{float(match.group(2)) * multiplier:.3f}",
+        markup,
+        count=1,
+    )
+
+
+def _apply_prepared_design_profile(markup: str, design: DesignOptions) -> str:
+    """Apply one production style to authoritative canonical SVG markup.
+
+    This changes presentation values only. Source path coordinates, reviewed
+    street geometry and the authoritative SVG on disk are never modified.
+    """
+    adjusted = _scale_prepared_street_stroke(markup, design.front_feature_weight)
+
+    if design.front_title_font_scale != 1.0:
+        adjusted = _replace_css_numeric(
+            adjusted, ".mug-title", "font-size", design.front_title_font_scale,
+        )
+    if design.front_locality_font_scale != 1.0:
+        adjusted = re.sub(
+            r"(\.mug-area\s*\{\s*font\s*:\s*500\s+)([0-9.]+)(px)",
+            lambda match: (
+                match.group(1)
+                + f"{float(match.group(2)) * design.front_locality_font_scale:.3f}"
+                + match.group(3)
+            ),
+            adjusted,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    if design.front_facial_linework_multiplier != 1.0:
+        adjusted = _scale_face_linework(
+            adjusted, design.front_facial_linework_multiplier,
+        )
+
+    support_width = (
+        SUPPORTING_STROKE_WIDTH
+        * design.front_facial_linework_multiplier
+        * design.front_supporting_stroke_multiplier
+    )
+    adjusted = re.sub(
+        r"(\.v28-face-linework\s+\.v28-support\s*\{[^}]*?stroke-width\s*:)[^;!}]+",
+        rf"\g<1>{support_width:.3f}px ",
+        adjusted,
+        count=1,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    view_box = re.search(r'\bviewBox="[^"]*\s([0-9.]+)\s([0-9.]+)"', adjusted)
+    panel_height = float(view_box.group(2)) if view_box is not None else 462.0
+    title_y = panel_height * TITLE_Y_RATIO + design.front_typography_block_y_offset
+    area_y = (
+        panel_height * AREA_Y_RATIO
+        + design.front_title_locality_gap_delta
+        + design.front_typography_block_y_offset
+    )
+    title_y = _spread_vertical_position(
+        title_y, panel_height, design.front_vertical_spread,
+    )
+    area_y = _spread_vertical_position(
+        area_y, panel_height, design.front_vertical_spread,
+    )
+    adjusted = re.sub(
+        r'(<g id="title"><text\b[^>]*\by=")[^"]+(")',
+        rf"\g<1>{title_y:.3f}\g<2>",
+        adjusted,
+        count=1,
+    )
+    adjusted = re.sub(
+        r'(<g id="locality"><text\b[^>]*\by=")[^"]+(")',
+        rf"\g<1>{area_y:.3f}\g<2>",
+        adjusted,
+        count=1,
+    )
+
+    if design.front_vertical_spread != 1.0:
+        adjusted = _spread_face_component_rows(
+            adjusted, design.front_vertical_spread,
+        )
+
+    adjusted = re.sub(
+        r'(class="front-composition"\s+transform=")translate\(0\s+[-+0-9.]+\)(\s+translate\([^)]*\)\s+scale\()[-+0-9.]+(\))',
+        lambda match: (
+            match.group(1)
+            + f"translate(0 {design.front_group_y_offset:.2f})"
+            + match.group(2)
+            + f"{design.front_group_scale:.4f}"
+            + match.group(3)
+        ),
+        adjusted,
+        count=1,
+    )
+    return adjusted
+
+
 def render_authoritative_face_panel(
     preprocessed: Path | str,
     dataset: Dataset,
@@ -111,6 +231,7 @@ def render_authoritative_face_panel(
     *,
     require_production_approved: bool = False,
     street_stroke_scale: float = 1.0,
+    design_options: DesignOptions | None = None,
 ) -> AuthoritativeFacePanel:
     """Resolve and rasterise the prepared face without regenerating it.
 
@@ -132,7 +253,10 @@ def render_authoritative_face_panel(
     if source is None:
         raise AuthoritativeArtworkError(f"{label}: prepared front artwork is missing; asset integrity problem.")
     try:
-        if source.is_svg and street_stroke_scale != 1.0:
+        if source.is_svg and design_options is not None:
+            markup = source.path.read_text(encoding="utf-8")
+            panel = rasterize_face_svg(_apply_prepared_design_profile(markup, design_options))
+        elif source.is_svg and street_stroke_scale != 1.0:
             markup = source.path.read_text(encoding="utf-8")
             panel = rasterize_face_svg(_scale_prepared_street_stroke(markup, street_stroke_scale))
         else:
@@ -160,6 +284,7 @@ def render_preprocessed_artwork_groups(
         street,
         require_production_approved=require_production_approved,
         street_stroke_scale=design.front_feature_weight,
+        design_options=design,
     )
     options = build_render_options(design, area=dataset.display_name)
     feature_colour = None
@@ -265,6 +390,7 @@ def export_preprocessed_provider_png(
             png_metadata={
                 PRODUCTION_FRONT_WEIGHT_KEY: f"{(design_options or DesignOptions()).front_feature_weight:.2f}",
                 PRODUCTION_REAR_WEIGHT_KEY: f"{(design_options or DesignOptions()).rear_highlight_weight:.2f}",
+                PRODUCTION_STYLE_FINGERPRINT_KEY: design_profile_fingerprint(design_options),
             },
         )
         if checkpoint() != before:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import shutil
 
 import pytest
@@ -10,6 +11,8 @@ from mug_previewer.design import (
     DESIGN_WEIGHT_MIN,
     DesignOptions,
     build_render_options,
+    design_profile_fingerprint,
+    load_design_profile,
 )
 from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.rendering.artwork import render_wrap_result
@@ -42,7 +45,7 @@ def test_design_options_accept_global_weight_boundaries(value: float) -> None:
     assert options.rear_highlight_weight == value
 
 
-@pytest.mark.parametrize("value", [0.24, 1.51, float("inf"), float("nan")])
+@pytest.mark.parametrize("value", [DESIGN_WEIGHT_MIN - 0.01, DESIGN_WEIGHT_MAX + 0.01, float("inf"), float("nan")])
 def test_design_options_reject_invalid_weight_values(value: float) -> None:
     with pytest.raises(ValueError):
         DesignOptions(front_feature_weight=value)
@@ -59,6 +62,70 @@ def test_design_mapping_changes_only_the_exposed_renderer_strokes() -> None:
     assert options.context_options.highlight_stroke_scale == pytest.approx(REAR_STREET_HIGHLIGHT_SCALE * 0.75)
     assert options.face_options.group_scale == FRONT_GROUP_SCALE
     assert options.face_options.group_y_offset == FRONT_GROUP_Y_OFFSET
+
+
+def test_calibration_profile_maps_to_complete_production_design(tmp_path: Path) -> None:
+    profile = tmp_path / "style.json"
+    profile.write_text(
+        json.dumps({
+            "profile_version": 2,
+            "face_render_options": {
+                "group_scale": 1.12,
+                "group_y_offset": 58.0,
+                "title_locality_gap_delta": 11.0,
+                "typography_block_y_offset": -18.0,
+                "title_font_scale": 1.15,
+                "locality_font_scale": 1.10,
+                "facial_linework_multiplier": 1.45,
+                "supporting_stroke_multiplier": 1.05,
+                "street_feature_stroke_multiplier": STREET_STROKE_MULTIPLIER * 1.30,
+                "vertical_spread": 1.08,
+            },
+            "rear_render_options": {
+                "highlight_stroke_scale": REAR_STREET_HIGHLIGHT_SCALE * 1.60,
+                "attribution_line1_font_scale": 1.25,
+                "attribution_line2_font_scale": 1.10,
+                "attribution_line_spacing_scale": 1.15,
+                "attribution_line1_y_offset": -2.0,
+                "attribution_line2_y_offset": 3.0,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    design = load_design_profile(profile)
+    options = build_render_options(design, area="Hebden Bridge")
+
+    assert design.front_feature_weight == pytest.approx(1.30)
+    assert design.rear_highlight_weight == pytest.approx(1.60)
+    assert design.front_facial_linework_multiplier == pytest.approx(1.45)
+    assert design.rear_attribution_line1_font_scale == pytest.approx(1.25)
+    assert design.rear_attribution_line2_font_scale == pytest.approx(1.10)
+    assert design.rear_attribution_line1_y_offset == pytest.approx(-2.0)
+    assert design.rear_attribution_line2_y_offset == pytest.approx(3.0)
+    assert options.face_options.title_font_scale == pytest.approx(1.15)
+    assert options.face_options.vertical_spread == pytest.approx(1.08)
+    assert options.context_options.attribution_line1_font_scale == pytest.approx(1.25)
+    assert options.context_options.attribution_line2_font_scale == pytest.approx(1.10)
+    assert options.context_options.attribution_line_spacing_scale == pytest.approx(1.15)
+    assert options.context_options.attribution_line1_y_offset == pytest.approx(-2.0)
+    assert options.context_options.attribution_line2_y_offset == pytest.approx(3.0)
+    assert design_profile_fingerprint(design) != design_profile_fingerprint(DesignOptions())
+
+
+def test_quick_weight_change_does_not_discard_loaded_profile_values() -> None:
+    state = AppState(
+        design_options=DesignOptions(
+            front_title_font_scale=1.20,
+            rear_attribution_line1_font_scale=1.30,
+        )
+    )
+    state.set_design_options(1.4, 0.8)
+
+    assert state.design_options.front_feature_weight == pytest.approx(1.4)
+    assert state.design_options.rear_highlight_weight == pytest.approx(0.8)
+    assert state.design_options.front_title_font_scale == pytest.approx(1.20)
+    assert state.design_options.rear_attribution_line1_font_scale == pytest.approx(1.30)
 
 
 def test_default_design_render_options_preserve_the_existing_renderer_baseline(tmp_path: Path) -> None:
