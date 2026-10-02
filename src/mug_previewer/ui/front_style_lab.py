@@ -491,6 +491,7 @@ class FrontStyleLab(ttk.Frame):
         rear_options = self._rear_options()
         return {
             "profile_version": PROFILE_VERSION,
+            "profile_kind": "mug_previewer_production_style",
             "purpose": "mug-print-calibration",
             "face_render_options": {
                 key: value
@@ -506,10 +507,10 @@ class FrontStyleLab(ttk.Frame):
     def _save_profile(self) -> None:
         path = filedialog.asksaveasfilename(
             parent=self.root,
-            title="Save print calibration profile",
+            title="Save production style profile",
             defaultextension=".json",
             filetypes=(("JSON profile", "*.json"),),
-            initialfile="mug_print_style.json",
+            initialfile="mug_production_style.json",
         )
         if not path:
             return
@@ -519,7 +520,7 @@ class FrontStyleLab(ttk.Frame):
     def _load_profile(self) -> None:
         path = filedialog.askopenfilename(
             parent=self.root,
-            title="Load print calibration profile",
+            title="Load production style profile",
             filetypes=(("JSON profile", "*.json"),),
         )
         if not path:
