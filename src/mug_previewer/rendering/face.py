@@ -564,42 +564,108 @@ def _primitive_vertical_centre(element: ET.Element) -> float | None:
     return None
 
 
+def _primitive_vertical_centre_markup(tag_markup: str) -> float | None:
+    """Return an approximate Y centre from one SVG primitive opening tag."""
+    name_match = re.match(r"<(?:[A-Za-z0-9_]+:)?([A-Za-z0-9_]+)\\b", tag_markup)
+    if name_match is None:
+        return None
+    tag = name_match.group(1).casefold()
+
+    def attribute(name: str) -> str | None:
+        match = re.search(rf\'\\b{re.escape(name)}="([^"]*)"\', tag_markup)
+        return None if match is None else match.group(1)
+
+    try:
+        if tag in {"circle", "ellipse"}:
+            value = attribute("cy")
+            return None if value is None else float(value)
+        if tag == "line":
+            y1, y2 = attribute("y1"), attribute("y2")
+            if y1 is None or y2 is None:
+                return None
+            return (float(y1) + float(y2)) / 2
+        if tag == "polyline":
+            values = [
+                float(value)
+                for value in re.findall(
+                    r"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?",
+                    attribute("points") or "",
+                )
+            ]
+            ys = values[1::2]
+            return (min(ys) + max(ys)) / 2 if ys else None
+        if tag == "path":
+            values = [
+                float(value)
+                for value in re.findall(
+                    r"[-+]?\\d*\\.?\\d+(?:[eE][-+]?\\d+)?",
+                    attribute("d") or "",
+                )
+            ]
+            ys = values[1::2]
+            return (min(ys) + max(ys)) / 2 if ys else None
+    except ValueError:
+        return None
+    return None
+
+
+def _translate_svg_opening_tag(tag_markup: str, shift: float) -> str:
+    """Append a Y translation without parsing/reserialising the SVG document."""
+    transform = re.search(r\'\\btransform="([^"]*)"\', tag_markup)
+    if transform is not None:
+        revised = _with_downward_translation(transform.group(1), shift)
+        return (
+            tag_markup[:transform.start(1)]
+            + revised
+            + tag_markup[transform.end(1):]
+        )
+    insertion = -2 if tag_markup.endswith("/>") else -1
+    return (
+        tag_markup[:insertion]
+        + f\' transform="translate(0 {shift:.4f})"\'
+        + tag_markup[insertion:]
+    )
+
+
 def _spread_face_component_rows(face_asset: str, spread: float) -> str:
-    """Separate native facial rows vertically by translation, never reshaping paths."""
+    """Separate native facial rows without rewriting the embedded SVG XML.
+
+    CairoSVG can fail on namespace changes introduced by ElementTree.tostring
+    for a nested SVG data URI. Work directly on the original opening tags so
+    document structure, namespaces and stylesheet text remain intact.
+    """
     factor = _positive_style_multiplier(spread, "Front vertical spread")
     if factor == 1.0:
         return face_asset
-    root = ET.fromstring(face_asset)
-    face_content = next(
-        (
-            node for node in root.iter()
-            if _svg_local_name(node.tag) == "g"
-            and "face-content" in node.get("class", "").split()
-        ),
-        None,
+
+    primitive_pattern = re.compile(
+        r"<(?:[A-Za-z0-9_]+:)?(?:circle|ellipse|line|polyline|path)\\b[^>]*>",
+        re.IGNORECASE,
     )
-    if face_content is None:
+    matches = list(primitive_pattern.finditer(face_asset))
+    centres = [_primitive_vertical_centre_markup(match.group(0)) for match in matches]
+    finite = [
+        centre for centre in centres
+        if centre is not None and math.isfinite(centre)
+    ]
+    if not finite:
         return face_asset
 
-    primitives: list[tuple[ET.Element, float]] = []
-    for element in face_content.iter():
-        centre = _primitive_vertical_centre(element)
-        if centre is not None and math.isfinite(centre):
-            primitives.append((element, centre))
-    if not primitives:
-        return face_asset
+    anchor = (min(finite) + max(finite)) / 2
+    index = 0
 
-    centres = [centre for _element, centre in primitives]
-    anchor = (min(centres) + max(centres)) / 2
-    for element, centre in primitives:
+    def replace(match: re.Match[str]) -> str:
+        nonlocal index
+        centre = centres[index]
+        index += 1
+        if centre is None or not math.isfinite(centre):
+            return match.group(0)
         shift = (centre - anchor) * (factor - 1.0)
         if abs(shift) < 1e-9:
-            continue
-        element.set(
-            "transform",
-            _with_downward_translation(element.get("transform", ""), shift),
-        )
-    return ET.tostring(root, encoding="unicode")
+            return match.group(0)
+        return _translate_svg_opening_tag(match.group(0), shift)
+
+    return primitive_pattern.sub(replace, face_asset)
 
 
 def assess_nose_street_clearance(nose_mask: Image.Image, street_mask: Image.Image) -> NoseStreetClearanceCorrection:
