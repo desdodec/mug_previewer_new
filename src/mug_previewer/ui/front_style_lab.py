@@ -26,7 +26,7 @@ from ..rendering.face import (
     STREET_STROKE_MULTIPLIER,
     FaceRenderError,
     FaceRenderOptions,
-    render_face,
+    _render_face_standard,
 )
 
 
@@ -288,7 +288,7 @@ class FrontStyleLab(ttk.Frame):
 
         def worker() -> None:
             try:
-                image = render_face(street, options)
+                image = _render_face_standard(street, options)
             except Exception as error:
                 self._preview_queue.put((revision, "error", error))
             else:
@@ -413,7 +413,7 @@ class FrontStyleLab(ttk.Frame):
         if not path:
             return
         try:
-            render_face(street, self._face_options()).save(path)
+            _render_face_standard(street, self._face_options()).save(path)
         except Exception as error:
             messagebox.showerror("Export error", str(error), parent=self.root)
             return
@@ -451,7 +451,7 @@ class FrontStyleLab(ttk.Frame):
                         supporting_stroke_multiplier=base.supporting_stroke_multiplier * stroke_factor,
                         street_feature_stroke_multiplier=base.street_feature_stroke_multiplier * stroke_factor,
                     )
-                    face = render_face(street, options)
+                    face = _render_face_standard(street, options)
                     white = Image.new("RGB", face.size, "white")
                     white.paste(face, mask=face.getchannel("A"))
                     x = col * cell_w + (cell_w - face.width) // 2
