@@ -622,7 +622,7 @@ def _translate_svg_opening_tag(tag_markup: str, shift: float) -> str:
     insertion = -2 if tag_markup.endswith("/>") else -1
     return (
         tag_markup[:insertion]
-        + f\' transform="translate(0 {shift:.4f})"\'
+        + f' transform="translate(0 {shift:.4f})"'
         + tag_markup[insertion:]
     )
 
