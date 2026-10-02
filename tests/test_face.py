@@ -27,6 +27,7 @@ from mug_previewer.rendering.face import (
     _front_group_transform,
     _render_face_standard,
     _front_text_y_positions,
+    _spread_face_component_rows,
     _spread_vertical_position,
     extract_street_feature_colour,
     render_face,
@@ -130,6 +131,23 @@ def test_vertical_spread_moves_rows_away_from_centre_and_identity_is_exact() -> 
     assert _spread_vertical_position(below, height, 1.0) == pytest.approx(below)
     assert _spread_vertical_position(above, height, 1.20) < above
     assert _spread_vertical_position(below, height, 1.20) > below
+
+
+def test_vertical_spread_separates_native_face_rows_without_changing_geometry() -> None:
+    source = (
+        '<svg xmlns="http://www.w3.org/2000/svg"><g class="face-content">'
+        '<circle cx="10" cy="20" r="3" class="eye"/>'
+        '<polyline points="5,50 15,50" class="street"/>'
+        '<path d="M 5,80 L 15,80" class="soft-detail"/>'
+        '</g></svg>'
+    )
+    adjusted = _spread_face_component_rows(source, 1.20)
+
+    assert 'cy="20"' in adjusted
+    assert 'points="5,50 15,50"' in adjusted
+    assert 'd="M 5,80 L 15,80"' in adjusted
+    assert adjusted.count("translate(0 ") == 2
+    assert _spread_face_component_rows(source, 1.0) == source
 
 
 def test_editable_svg_exposes_independent_print_calibration_controls(tmp_path: Path) -> None:
