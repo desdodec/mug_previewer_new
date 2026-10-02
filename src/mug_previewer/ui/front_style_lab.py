@@ -45,9 +45,7 @@ class FrontStyleLab(ttk.Frame):
         self.preview_photo: ImageTk.PhotoImage | None = None
         self._refresh_after: str | None = None
         self._dataset_queue: queue.Queue[tuple[str, object]] = queue.Queue()
-        self._preview_queue: queue.Queue[tuple[int, str, object]] = queue.Queue()
         self._preview_revision = 0
-        self._preview_worker: threading.Thread | None = None
 
         root.title("Mug Previewer — Front Style Calibration Lab")
         root.geometry("1320x840")
@@ -265,69 +263,35 @@ class FrontStyleLab(ttk.Frame):
         )
 
     def _schedule_preview(self) -> None:
+        """Debounce slider changes, then render once on Tk's main thread.
+
+        CairoSVG/native face rendering mutates renderer globals temporarily and
+        is safest when kept on the same thread as the rest of this desktop app.
+        The standard renderer is deliberately used here so the synchronous
+        render stays quick.
+        """
         self._preview_revision += 1
         if self._refresh_after is not None:
             self.root.after_cancel(self._refresh_after)
-        self._refresh_after = self.root.after(120, self._start_preview_render)
+        self._refresh_after = self.root.after(140, self._render_preview)
 
-    def _start_preview_render(self) -> None:
+    def _render_preview(self) -> None:
         self._refresh_after = None
-        if self._preview_worker is not None and self._preview_worker.is_alive():
-            # The active render will finish shortly; its completion handler
-            # starts the newest requested revision rather than queueing every
-            # intermediate slider position.
-            return
-
         selected = self._selected()
         if selected is None:
             return
         dataset, street = selected
-        revision = self._preview_revision
-        options = self._face_options()
         self.status_var.set(f"Rendering {street.display_name}...")
-
-        def worker() -> None:
-            try:
-                image = _render_face_standard(street, options)
-            except Exception as error:
-                self._preview_queue.put((revision, "error", error))
-            else:
-                self._preview_queue.put((revision, "ok", (dataset, street, image)))
-
-        self._preview_worker = threading.Thread(
-            target=worker,
-            name="front-style-preview-render",
-            daemon=True,
-        )
-        self._preview_worker.start()
-        self.root.after(50, self._poll_preview_render)
-
-    def _poll_preview_render(self) -> None:
+        self.root.update_idletasks()
         try:
-            revision, status, payload = self._preview_queue.get_nowait()
-        except queue.Empty:
-            if self._preview_worker is not None and self._preview_worker.is_alive():
-                self.root.after(50, self._poll_preview_render)
-            else:
-                self._preview_worker = None
-                if self._preview_revision:
-                    self.root.after(0, self._start_preview_render)
+            image = _render_face_standard(street, self._face_options())
+        except FaceRenderError as error:
+            self.status_var.set(str(error))
+            return
+        except Exception as error:
+            self.status_var.set(f"Preview error: {error}")
             return
 
-        self._preview_worker = None
-        if revision != self._preview_revision:
-            self.root.after(0, self._start_preview_render)
-            return
-
-        if status == "error":
-            error = payload
-            if isinstance(error, FaceRenderError):
-                self.status_var.set(str(error))
-            else:
-                self.status_var.set(f"Preview error: {error}")
-            return
-
-        dataset, street, image = payload
         canvas = Image.new("RGB", image.size, "white")
         canvas.paste(image, mask=image.getchannel("A"))
         display = canvas.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
