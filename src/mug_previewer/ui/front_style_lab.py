@@ -7,6 +7,8 @@ real printed mugs, then save the chosen values as a small JSON profile.
 from __future__ import annotations
 
 import json
+import queue
+import threading
 import tkinter as tk
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -42,6 +44,10 @@ class FrontStyleLab(ttk.Frame):
         self.streets: dict[str, StreetRecord] = {}
         self.preview_photo: ImageTk.PhotoImage | None = None
         self._refresh_after: str | None = None
+        self._dataset_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+        self._preview_queue: queue.Queue[tuple[int, str, object]] = queue.Queue()
+        self._preview_revision = 0
+        self._preview_worker: threading.Thread | None = None
 
         root.title("Mug Previewer — Front Style Calibration Lab")
         root.geometry("1320x840")
@@ -54,7 +60,8 @@ class FrontStyleLab(ttk.Frame):
 
         self._build_controls()
         self._build_preview()
-        self._load_datasets()
+        self.status_var.set("Loading datasets...")
+        self.root.after(50, self._start_dataset_load)
 
     def _build_controls(self) -> None:
         controls = ttk.Frame(self, padding=(0, 0, 12, 0))
@@ -182,12 +189,32 @@ class FrontStyleLab(ttk.Frame):
             justify="center",
         ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
 
-    def _load_datasets(self) -> None:
+    def _start_dataset_load(self) -> None:
+        """Discover datasets off the Tk event loop so the window stays responsive."""
+        def worker() -> None:
+            try:
+                found = discover_datasets(self.dataset_root)
+            except Exception as error:
+                self._dataset_queue.put(("error", error))
+            else:
+                self._dataset_queue.put(("ok", found))
+
+        threading.Thread(target=worker, name="front-style-dataset-load", daemon=True).start()
+        self.root.after(75, self._poll_dataset_load)
+
+    def _poll_dataset_load(self) -> None:
         try:
-            found = discover_datasets(self.dataset_root)
-        except Exception as error:
-            messagebox.showerror("Dataset error", str(error), parent=self.root)
+            status, payload = self._dataset_queue.get_nowait()
+        except queue.Empty:
+            self.root.after(75, self._poll_dataset_load)
             return
+
+        if status == "error":
+            messagebox.showerror("Dataset error", str(payload), parent=self.root)
+            self.status_var.set("Dataset discovery failed.")
+            return
+
+        found = payload
         self.datasets = {
             f"{item.dataset.display_name} [{item.dataset.id}]": item.dataset
             for item in found
@@ -238,25 +265,69 @@ class FrontStyleLab(ttk.Frame):
         )
 
     def _schedule_preview(self) -> None:
+        self._preview_revision += 1
         if self._refresh_after is not None:
             self.root.after_cancel(self._refresh_after)
-        self._refresh_after = self.root.after(120, self._render_preview)
+        self._refresh_after = self.root.after(120, self._start_preview_render)
 
-    def _render_preview(self) -> None:
+    def _start_preview_render(self) -> None:
         self._refresh_after = None
+        if self._preview_worker is not None and self._preview_worker.is_alive():
+            # The active render will finish shortly; its completion handler
+            # starts the newest requested revision rather than queueing every
+            # intermediate slider position.
+            return
+
         selected = self._selected()
         if selected is None:
             return
         dataset, street = selected
+        revision = self._preview_revision
+        options = self._face_options()
+        self.status_var.set(f"Rendering {street.display_name}...")
+
+        def worker() -> None:
+            try:
+                image = render_face(street, options)
+            except Exception as error:
+                self._preview_queue.put((revision, "error", error))
+            else:
+                self._preview_queue.put((revision, "ok", (dataset, street, image)))
+
+        self._preview_worker = threading.Thread(
+            target=worker,
+            name="front-style-preview-render",
+            daemon=True,
+        )
+        self._preview_worker.start()
+        self.root.after(50, self._poll_preview_render)
+
+    def _poll_preview_render(self) -> None:
         try:
-            image = render_face(street, self._face_options())
-        except FaceRenderError as error:
-            self.status_var.set(str(error))
-            return
-        except Exception as error:
-            self.status_var.set(f"Preview error: {error}")
+            revision, status, payload = self._preview_queue.get_nowait()
+        except queue.Empty:
+            if self._preview_worker is not None and self._preview_worker.is_alive():
+                self.root.after(50, self._poll_preview_render)
+            else:
+                self._preview_worker = None
+                if self._preview_revision:
+                    self.root.after(0, self._start_preview_render)
             return
 
+        self._preview_worker = None
+        if revision != self._preview_revision:
+            self.root.after(0, self._start_preview_render)
+            return
+
+        if status == "error":
+            error = payload
+            if isinstance(error, FaceRenderError):
+                self.status_var.set(str(error))
+            else:
+                self.status_var.set(f"Preview error: {error}")
+            return
+
+        dataset, street, image = payload
         canvas = Image.new("RGB", image.size, "white")
         canvas.paste(image, mask=image.getchannel("A"))
         display = canvas.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
