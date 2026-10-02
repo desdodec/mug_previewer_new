@@ -149,10 +149,11 @@ def test_facial_linework_multiplier_scales_non_street_strokes_only() -> None:
     )
     adjusted = _scale_face_linework(source, 2.0)
 
-    assert "stroke-width: 2.000" in adjusted
-    assert "stroke-width:2.400" in adjusted
-    assert "stroke-width: 1.000" in adjusted
+    assert ".v28-face-linework .ink { stroke-width:2.000px !important; }" in adjusted
+    assert ".v28-face-linework .soft-detail { stroke-width:1.000px !important; }" in adjusted
+    assert ".v28-face-linework .hierarchy-brow { stroke-width:2.400px !important; }" in adjusted
     assert 'class="street" style="stroke-width:3.0"' in adjusted
+    assert ".v28-face-linework .street" not in adjusted
     assert 'r="2"' in adjusted
 
 
