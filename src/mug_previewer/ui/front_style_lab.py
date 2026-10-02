@@ -35,7 +35,7 @@ from ..rendering.face import (
 )
 
 
-PROFILE_VERSION = 2
+PROFILE_VERSION = 3
 
 
 class FrontStyleLab(ttk.Frame):
