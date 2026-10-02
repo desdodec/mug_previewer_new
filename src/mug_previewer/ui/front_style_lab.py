@@ -1,8 +1,8 @@
-"""Standalone front-artwork print calibration lab.
+"""Standalone print-style calibration lab for front and rear mug artwork.
 
-This deliberately exposes more controls than the production UI.  Its job is to
-help choose physically robust typography, line weights and vertical spacing on
-real printed mugs, then save the chosen values as a small JSON profile.
+The helper deliberately exposes more controls than the production UI.  Its job
+is to find robust physical-print settings, save them as a small JSON profile,
+and leave production defaults untouched until those settings are adopted.
 """
 from __future__ import annotations
 
@@ -18,6 +18,11 @@ from PIL import Image, ImageDraw, ImageTk
 
 from ..datasets.discovery import discover_datasets
 from ..datasets.models import Dataset, StreetRecord
+from ..rendering.context_map import (
+    ContextRenderError,
+    ContextRenderOptions,
+    render_context_map_result,
+)
 from ..rendering.face import (
     FRONT_GROUP_SCALE,
     FRONT_GROUP_Y_OFFSET,
@@ -30,11 +35,11 @@ from ..rendering.face import (
 )
 
 
-PROFILE_VERSION = 1
+PROFILE_VERSION = 2
 
 
 class FrontStyleLab(ttk.Frame):
-    """Interactive laboratory for choosing print-robust front artwork styling."""
+    """Interactive laboratory for choosing print-robust front and rear styling."""
 
     def __init__(self, root: tk.Tk, *, dataset_root: Path) -> None:
         super().__init__(root, padding=10)
@@ -42,47 +47,84 @@ class FrontStyleLab(ttk.Frame):
         self.dataset_root = Path(dataset_root)
         self.datasets: dict[str, Dataset] = {}
         self.streets: dict[str, StreetRecord] = {}
-        self.preview_photo: ImageTk.PhotoImage | None = None
-        self._refresh_after: str | None = None
+        self.front_preview_photo: ImageTk.PhotoImage | None = None
+        self.rear_preview_photo: ImageTk.PhotoImage | None = None
+        self._front_refresh_after: str | None = None
+        self._rear_refresh_after: str | None = None
         self._dataset_queue: queue.Queue[tuple[str, object]] = queue.Queue()
-        self._preview_revision = 0
 
-        root.title("Mug Previewer — Front Style Calibration Lab")
-        root.geometry("1320x840")
-        root.minsize(1120, 720)
+        root.title("Mug Previewer — Print Style Calibration Lab")
+        root.geometry("1320x860")
+        root.minsize(1120, 740)
         root.columnconfigure(0, weight=1)
         root.rowconfigure(0, weight=1)
         self.grid(sticky="nsew")
-        self.columnconfigure(1, weight=1)
+        self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        self._build_controls()
-        self._build_preview()
-        self.status_var.set("Loading datasets...")
+        self.dataset_var = tk.StringVar()
+        self.street_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Loading datasets...")
+
+        self.notebook = ttk.Notebook(self)
+        self.notebook.grid(row=0, column=0, sticky="nsew")
+        self.notebook.bind("<<NotebookTabChanged>>", self._tab_changed)
+
+        self.front_tab = ttk.Frame(self.notebook, padding=8)
+        self.rear_tab = ttk.Frame(self.notebook, padding=8)
+        self.notebook.add(self.front_tab, text="Front face")
+        self.notebook.add(self.rear_tab, text="Rear context")
+
+        self._build_front_tab()
+        self._build_rear_tab()
         self.root.after(50, self._start_dataset_load)
 
-    def _build_controls(self) -> None:
-        controls = ttk.Frame(self, padding=(0, 0, 12, 0))
-        controls.grid(row=0, column=0, sticky="ns")
-        controls.columnconfigure(0, weight=1)
-
-        source = ttk.LabelFrame(controls, text="Artwork", padding=8)
+    # ------------------------------------------------------------------
+    # Shared source selectors
+    # ------------------------------------------------------------------
+    def _build_source_controls(self, parent: ttk.Frame, *, rear: bool) -> tuple[ttk.Combobox, ttk.Combobox]:
+        source = ttk.LabelFrame(parent, text="Artwork", padding=8)
         source.grid(row=0, column=0, sticky="ew")
         source.columnconfigure(0, weight=1)
 
         ttk.Label(source, text="Dataset").grid(row=0, column=0, sticky="w")
-        self.dataset_var = tk.StringVar()
-        self.dataset_box = ttk.Combobox(source, state="readonly", textvariable=self.dataset_var, width=38)
-        self.dataset_box.grid(row=1, column=0, sticky="ew", pady=(2, 8))
-        self.dataset_box.bind("<<ComboboxSelected>>", self._select_dataset)
+        dataset_box = ttk.Combobox(
+            source,
+            state="readonly",
+            textvariable=self.dataset_var,
+            width=38,
+        )
+        dataset_box.grid(row=1, column=0, sticky="ew", pady=(2, 8))
+        dataset_box.bind("<<ComboboxSelected>>", self._select_dataset)
 
         ttk.Label(source, text="Street").grid(row=2, column=0, sticky="w")
-        self.street_var = tk.StringVar()
-        self.street_box = ttk.Combobox(source, state="readonly", textvariable=self.street_var, width=38)
-        self.street_box.grid(row=3, column=0, sticky="ew", pady=(2, 0))
-        self.street_box.bind("<<ComboboxSelected>>", lambda _event: self._schedule_preview())
+        street_box = ttk.Combobox(
+            source,
+            state="readonly",
+            textvariable=self.street_var,
+            width=38,
+        )
+        street_box.grid(row=3, column=0, sticky="ew", pady=(2, 0))
+        street_box.bind(
+            "<<ComboboxSelected>>",
+            lambda _event: self._schedule_rear_preview() if rear else self._schedule_front_preview(),
+        )
+        return dataset_box, street_box
 
-        style = ttk.LabelFrame(controls, text="Print style", padding=8)
+    # ------------------------------------------------------------------
+    # Front tab
+    # ------------------------------------------------------------------
+    def _build_front_tab(self) -> None:
+        self.front_tab.columnconfigure(1, weight=1)
+        self.front_tab.rowconfigure(0, weight=1)
+
+        controls = ttk.Frame(self.front_tab, padding=(0, 0, 12, 0))
+        controls.grid(row=0, column=0, sticky="ns")
+        controls.columnconfigure(0, weight=1)
+
+        self.front_dataset_box, self.front_street_box = self._build_source_controls(controls, rear=False)
+
+        style = ttk.LabelFrame(controls, text="Front print style", padding=8)
         style.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         style.columnconfigure(0, weight=1)
 
@@ -110,25 +152,116 @@ class FrontStyleLab(ttk.Frame):
             ("Whole composition Y offset", self.group_y, 20.0, 95.0, 1.0),
         )
         for row, (label, variable, low, high, resolution) in enumerate(sliders):
-            self._add_slider(style, row, label, variable, low, high, resolution)
+            self._add_slider(
+                style,
+                row,
+                label,
+                variable,
+                low,
+                high,
+                resolution,
+                callback=self._schedule_front_preview,
+            )
 
         actions = ttk.LabelFrame(controls, text="Calibration", padding=8)
         actions.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
-        ttk.Button(actions, text="Reset production", command=self._reset).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(actions, text="Reset production", command=self._reset_front).grid(row=0, column=0, sticky="ew", padx=(0, 4))
         ttk.Button(actions, text="Load profile", command=self._load_profile).grid(row=0, column=1, sticky="ew", padx=(4, 0))
         ttk.Button(actions, text="Save profile", command=self._save_profile).grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
-        ttk.Button(actions, text="Export front PNG", command=self._export_png).grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+        ttk.Button(actions, text="Export front PNG", command=self._export_front_png).grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
         ttk.Button(actions, text="Export 12-variant matrix", command=self._export_matrix).grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0)
         )
 
-        self.status_var = tk.StringVar(value="Choose a dataset and street.")
         ttk.Label(controls, textvariable=self.status_var, wraplength=330, justify="left").grid(
             row=3, column=0, sticky="ew", pady=(10, 0)
         )
 
+        preview = ttk.LabelFrame(self.front_tab, text="Live front preview", padding=10)
+        preview.grid(row=0, column=1, sticky="nsew")
+        preview.columnconfigure(0, weight=1)
+        preview.rowconfigure(0, weight=1)
+        self.front_preview_label = ttk.Label(preview, anchor="center")
+        self.front_preview_label.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(
+            preview,
+            text="Uses the production front renderer; calibration values do not alter production defaults.",
+            wraplength=760,
+            justify="center",
+        ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
+    # ------------------------------------------------------------------
+    # Rear tab
+    # ------------------------------------------------------------------
+    def _build_rear_tab(self) -> None:
+        self.rear_tab.columnconfigure(1, weight=1)
+        self.rear_tab.rowconfigure(0, weight=1)
+
+        controls = ttk.Frame(self.rear_tab, padding=(0, 0, 12, 0))
+        controls.grid(row=0, column=0, sticky="ns")
+        controls.columnconfigure(0, weight=1)
+
+        self.rear_dataset_box, self.rear_street_box = self._build_source_controls(controls, rear=True)
+
+        style = ttk.LabelFrame(controls, text="Rear attribution text", padding=8)
+        style.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        style.columnconfigure(0, weight=1)
+
+        self.rear_text_scale = tk.DoubleVar(value=1.0)
+        self.rear_line_spacing_scale = tk.DoubleVar(value=1.0)
+
+        self._add_slider(
+            style,
+            0,
+            "Text size ×",
+            self.rear_text_scale,
+            0.75,
+            2.00,
+            0.01,
+            callback=self._schedule_rear_preview,
+        )
+        self._add_slider(
+            style,
+            1,
+            "Vertical line spacing ×",
+            self.rear_line_spacing_scale,
+            0.70,
+            2.00,
+            0.01,
+            callback=self._schedule_rear_preview,
+        )
+
+        actions = ttk.LabelFrame(controls, text="Calibration", padding=8)
+        actions.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        actions.columnconfigure(0, weight=1)
+        actions.columnconfigure(1, weight=1)
+        ttk.Button(actions, text="Reset production", command=self._reset_rear).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(actions, text="Load profile", command=self._load_profile).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ttk.Button(actions, text="Save profile", command=self._save_profile).grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
+        ttk.Button(actions, text="Export rear PNG", command=self._export_rear_png).grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+
+        ttk.Label(controls, textvariable=self.status_var, wraplength=330, justify="left").grid(
+            row=3, column=0, sticky="ew", pady=(10, 0)
+        )
+
+        preview = ttk.LabelFrame(self.rear_tab, text="Live rear preview", padding=10)
+        preview.grid(row=0, column=1, sticky="nsew")
+        preview.columnconfigure(0, weight=1)
+        preview.rowconfigure(0, weight=1)
+        self.rear_preview_label = ttk.Label(preview, anchor="center")
+        self.rear_preview_label.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(
+            preview,
+            text="Only the two attribution lines are calibrated here; map framing and highlight geometry are unchanged.",
+            wraplength=760,
+            justify="center",
+        ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
+    # ------------------------------------------------------------------
+    # Slider helpers
+    # ------------------------------------------------------------------
     def _add_slider(
         self,
         parent: ttk.Frame,
@@ -138,13 +271,15 @@ class FrontStyleLab(ttk.Frame):
         low: float,
         high: float,
         resolution: float,
+        *,
+        callback,
     ) -> None:
         line = ttk.Frame(parent)
         line.grid(row=row, column=0, sticky="ew", pady=2)
         line.columnconfigure(0, weight=1)
         ttk.Label(line, text=label).grid(row=0, column=0, sticky="w")
-        value = ttk.Label(line, width=7, anchor="e")
-        value.grid(row=0, column=1, sticky="e")
+        value_label = ttk.Label(line, width=7, anchor="e")
+        value_label.grid(row=0, column=1, sticky="e")
         scale = tk.Scale(
             line,
             from_=low,
@@ -154,14 +289,14 @@ class FrontStyleLab(ttk.Frame):
             variable=variable,
             showvalue=False,
             length=330,
-            command=lambda _value, v=variable, out=value: self._slider_changed(v, out),
+            command=lambda _value, v=variable, out=value_label, cb=callback: self._slider_changed(v, out, cb),
         )
         scale.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self._update_value_label(variable, value)
+        self._update_value_label(variable, value_label)
 
-    def _slider_changed(self, variable: tk.DoubleVar, label: ttk.Label) -> None:
+    def _slider_changed(self, variable: tk.DoubleVar, label: ttk.Label, callback) -> None:
         self._update_value_label(variable, label)
-        self._schedule_preview()
+        callback()
 
     @staticmethod
     def _update_value_label(variable: tk.DoubleVar, label: ttk.Label) -> None:
@@ -171,26 +306,10 @@ class FrontStyleLab(ttk.Frame):
         else:
             label.configure(text=f"{value:.2f}")
 
-    def _build_preview(self) -> None:
-        preview = ttk.LabelFrame(self, text="Live production-renderer preview", padding=10)
-        preview.grid(row=0, column=1, sticky="nsew")
-        preview.columnconfigure(0, weight=1)
-        preview.rowconfigure(0, weight=1)
-
-        self.preview_label = ttk.Label(preview, anchor="center")
-        self.preview_label.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(
-            preview,
-            text=(
-                "This uses the same face renderer as production. The lab changes options only; "
-                "production defaults remain unchanged until you deliberately adopt a saved profile."
-            ),
-            wraplength=760,
-            justify="center",
-        ).grid(row=1, column=0, sticky="ew", pady=(8, 0))
-
+    # ------------------------------------------------------------------
+    # Dataset discovery and selection
+    # ------------------------------------------------------------------
     def _start_dataset_load(self) -> None:
-        """Discover datasets off the Tk event loop so the window stays responsive."""
         def worker() -> None:
             try:
                 found = discover_datasets(self.dataset_root)
@@ -199,7 +318,7 @@ class FrontStyleLab(ttk.Frame):
             else:
                 self._dataset_queue.put(("ok", found))
 
-        threading.Thread(target=worker, name="front-style-dataset-load", daemon=True).start()
+        threading.Thread(target=worker, name="print-style-dataset-load", daemon=True).start()
         self.root.after(75, self._poll_dataset_load)
 
     def _poll_dataset_load(self) -> None:
@@ -219,10 +338,11 @@ class FrontStyleLab(ttk.Frame):
             f"{item.dataset.display_name} [{item.dataset.id}]": item.dataset
             for item in found
         }
-        self.dataset_box["values"] = list(self.datasets)
+        values = list(self.datasets)
+        self.front_dataset_box["values"] = values
+        self.rear_dataset_box["values"] = values
         if self.datasets:
-            first = next(iter(self.datasets))
-            self.dataset_var.set(first)
+            self.dataset_var.set(values[0])
             self._select_dataset()
         else:
             self.status_var.set(f"No datasets found under {self.dataset_root}")
@@ -235,11 +355,12 @@ class FrontStyleLab(ttk.Frame):
             f"{street.id} — {street.display_name}": street
             for street in dataset.streets
         }
-        self.street_box["values"] = list(self.streets)
+        values = list(self.streets)
+        self.front_street_box["values"] = values
+        self.rear_street_box["values"] = values
         if self.streets:
-            first = next(iter(self.streets))
-            self.street_var.set(first)
-            self._schedule_preview()
+            self.street_var.set(values[0])
+            self._schedule_active_preview()
 
     def _selected(self) -> tuple[Dataset, StreetRecord] | None:
         dataset = self.datasets.get(self.dataset_var.get())
@@ -248,6 +369,18 @@ class FrontStyleLab(ttk.Frame):
             return None
         return dataset, street
 
+    def _tab_changed(self, _event: object | None = None) -> None:
+        self._schedule_active_preview()
+
+    def _schedule_active_preview(self) -> None:
+        if self.notebook.select() == str(self.rear_tab):
+            self._schedule_rear_preview()
+        else:
+            self._schedule_front_preview()
+
+    # ------------------------------------------------------------------
+    # Renderer options
+    # ------------------------------------------------------------------
     def _face_options(self) -> FaceRenderOptions:
         selected = self._selected()
         area = "" if selected is None else selected[0].display_name
@@ -265,26 +398,27 @@ class FrontStyleLab(ttk.Frame):
             vertical_spread=self.vertical_spread.get(),
         )
 
-    def _schedule_preview(self) -> None:
-        """Debounce slider changes, then render once on Tk's main thread.
+    def _rear_options(self) -> ContextRenderOptions:
+        return ContextRenderOptions(
+            attribution_font_scale=self.rear_text_scale.get(),
+            attribution_line_spacing_scale=self.rear_line_spacing_scale.get(),
+        )
 
-        CairoSVG/native face rendering mutates renderer globals temporarily and
-        is safest when kept on the same thread as the rest of this desktop app.
-        The standard renderer is deliberately used here so the synchronous
-        render stays quick.
-        """
-        self._preview_revision += 1
-        if self._refresh_after is not None:
-            self.root.after_cancel(self._refresh_after)
-        self._refresh_after = self.root.after(140, self._render_preview)
+    # ------------------------------------------------------------------
+    # Live previews
+    # ------------------------------------------------------------------
+    def _schedule_front_preview(self) -> None:
+        if self._front_refresh_after is not None:
+            self.root.after_cancel(self._front_refresh_after)
+        self._front_refresh_after = self.root.after(140, self._render_front_preview)
 
-    def _render_preview(self) -> None:
-        self._refresh_after = None
+    def _render_front_preview(self) -> None:
+        self._front_refresh_after = None
         selected = self._selected()
         if selected is None:
             return
         dataset, street = selected
-        self.status_var.set(f"Rendering {street.display_name}...")
+        self.status_var.set(f"Rendering front: {street.display_name}...")
         self.root.update_idletasks()
         try:
             image = _render_face_standard(street, self._face_options())
@@ -292,17 +426,49 @@ class FrontStyleLab(ttk.Frame):
             self.status_var.set(str(error))
             return
         except Exception as error:
-            self.status_var.set(f"Preview error: {error}")
+            self.status_var.set(f"Front preview error: {error}")
             return
 
         canvas = Image.new("RGB", image.size, "white")
         canvas.paste(image, mask=image.getchannel("A"))
         display = canvas.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
-        self.preview_photo = ImageTk.PhotoImage(display)
-        self.preview_label.configure(image=self.preview_photo)
+        self.front_preview_photo = ImageTk.PhotoImage(display)
+        self.front_preview_label.configure(image=self.front_preview_photo)
         self.status_var.set(f"{dataset.display_name} — {street.display_name}")
 
-    def _reset(self) -> None:
+    def _schedule_rear_preview(self) -> None:
+        if self._rear_refresh_after is not None:
+            self.root.after_cancel(self._rear_refresh_after)
+        self._rear_refresh_after = self.root.after(140, self._render_rear_preview)
+
+    def _render_rear_preview(self) -> None:
+        self._rear_refresh_after = None
+        selected = self._selected()
+        if selected is None:
+            return
+        dataset, street = selected
+        self.status_var.set(f"Rendering rear: {street.display_name}...")
+        self.root.update_idletasks()
+        try:
+            image = render_context_map_result(dataset, street, self._rear_options()).image
+        except ContextRenderError as error:
+            self.status_var.set(str(error))
+            return
+        except Exception as error:
+            self.status_var.set(f"Rear preview error: {error}")
+            return
+
+        canvas = Image.new("RGB", image.size, "white")
+        canvas.paste(image, mask=image.getchannel("A"))
+        display = canvas.resize((image.width * 2, image.height * 2), Image.Resampling.LANCZOS)
+        self.rear_preview_photo = ImageTk.PhotoImage(display)
+        self.rear_preview_label.configure(image=self.rear_preview_photo)
+        self.status_var.set(f"{dataset.display_name} — {street.display_name}")
+
+    # ------------------------------------------------------------------
+    # Reset/profile actions
+    # ------------------------------------------------------------------
+    def _reset_front(self) -> None:
         self.title_scale.set(1.0)
         self.locality_scale.set(1.0)
         self.text_gap.set(FRONT_TITLE_LOCALITY_GAP_DELTA_PX)
@@ -313,27 +479,37 @@ class FrontStyleLab(ttk.Frame):
         self.vertical_spread.set(1.0)
         self.group_scale.set(FRONT_GROUP_SCALE)
         self.group_y.set(FRONT_GROUP_Y_OFFSET)
-        self._schedule_preview()
+        self._schedule_front_preview()
+
+    def _reset_rear(self) -> None:
+        self.rear_text_scale.set(1.0)
+        self.rear_line_spacing_scale.set(1.0)
+        self._schedule_rear_preview()
 
     def _profile_payload(self) -> dict[str, object]:
-        options = self._face_options()
+        face_options = self._face_options()
+        rear_options = self._rear_options()
         return {
             "profile_version": PROFILE_VERSION,
-            "purpose": "front-print-calibration",
+            "purpose": "mug-print-calibration",
             "face_render_options": {
                 key: value
-                for key, value in asdict(options).items()
+                for key, value in asdict(face_options).items()
                 if key not in {"area", "manual_override"}
+            },
+            "rear_render_options": {
+                "attribution_font_scale": rear_options.attribution_font_scale,
+                "attribution_line_spacing_scale": rear_options.attribution_line_spacing_scale,
             },
         }
 
     def _save_profile(self) -> None:
         path = filedialog.asksaveasfilename(
             parent=self.root,
-            title="Save front style calibration profile",
+            title="Save print calibration profile",
             defaultextension=".json",
             filetypes=(("JSON profile", "*.json"),),
-            initialfile="front_print_style.json",
+            initialfile="mug_print_style.json",
         )
         if not path:
             return
@@ -343,7 +519,7 @@ class FrontStyleLab(ttk.Frame):
     def _load_profile(self) -> None:
         path = filedialog.askopenfilename(
             parent=self.root,
-            title="Load front style calibration profile",
+            title="Load print calibration profile",
             filetypes=(("JSON profile", "*.json"),),
         )
         if not path:
@@ -361,17 +537,24 @@ class FrontStyleLab(ttk.Frame):
             self.vertical_spread.set(float(values["vertical_spread"]))
             self.group_scale.set(float(values["group_scale"]))
             self.group_y.set(float(values["group_y_offset"]))
+
+            rear_values = payload.get("rear_render_options", {})
+            self.rear_text_scale.set(float(rear_values.get("attribution_font_scale", 1.0)))
+            self.rear_line_spacing_scale.set(float(rear_values.get("attribution_line_spacing_scale", 1.0)))
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
             messagebox.showerror("Profile error", f"Could not load profile:\n{error}", parent=self.root)
             return
-        self._schedule_preview()
+        self._schedule_active_preview()
         self.status_var.set(f"Loaded calibration profile: {path}")
 
-    def _export_png(self) -> None:
+    # ------------------------------------------------------------------
+    # Exports
+    # ------------------------------------------------------------------
+    def _export_front_png(self) -> None:
         selected = self._selected()
         if selected is None:
             return
-        dataset, street = selected
+        _dataset, street = selected
         path = filedialog.asksaveasfilename(
             parent=self.root,
             title="Export calibrated front PNG",
@@ -383,6 +566,27 @@ class FrontStyleLab(ttk.Frame):
             return
         try:
             _render_face_standard(street, self._face_options()).save(path)
+        except Exception as error:
+            messagebox.showerror("Export error", str(error), parent=self.root)
+            return
+        self.status_var.set(f"Exported: {path}")
+
+    def _export_rear_png(self) -> None:
+        selected = self._selected()
+        if selected is None:
+            return
+        dataset, street = selected
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export calibrated rear PNG",
+            defaultextension=".png",
+            filetypes=(("PNG image", "*.png"),),
+            initialfile=f"{street.id}_{street.display_name}_rear_calibration.png",
+        )
+        if not path:
+            return
+        try:
+            render_context_map_result(dataset, street, self._rear_options()).image.save(path)
         except Exception as error:
             messagebox.showerror("Export error", str(error), parent=self.root)
             return
