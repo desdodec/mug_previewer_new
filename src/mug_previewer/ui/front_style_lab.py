@@ -209,14 +209,17 @@ class FrontStyleLab(ttk.Frame):
         style.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         style.columnconfigure(0, weight=1)
 
-        self.rear_text_scale = tk.DoubleVar(value=1.0)
+        self.rear_line1_text_scale = tk.DoubleVar(value=1.0)
+        self.rear_line1_y_offset = tk.DoubleVar(value=0.0)
+        self.rear_line2_text_scale = tk.DoubleVar(value=1.0)
+        self.rear_line2_y_offset = tk.DoubleVar(value=0.0)
         self.rear_line_spacing_scale = tk.DoubleVar(value=1.0)
 
         self._add_slider(
             style,
             0,
-            "Text size ×",
-            self.rear_text_scale,
+            "Line 1 text size ×",
+            self.rear_line1_text_scale,
             0.75,
             2.00,
             0.01,
@@ -225,7 +228,37 @@ class FrontStyleLab(ttk.Frame):
         self._add_slider(
             style,
             1,
-            "Vertical line spacing ×",
+            "Line 1 vertical offset",
+            self.rear_line1_y_offset,
+            -30.0,
+            30.0,
+            1.0,
+            callback=self._schedule_rear_preview,
+        )
+        self._add_slider(
+            style,
+            2,
+            "Line 2 text size ×",
+            self.rear_line2_text_scale,
+            0.75,
+            2.00,
+            0.01,
+            callback=self._schedule_rear_preview,
+        )
+        self._add_slider(
+            style,
+            3,
+            "Line 2 vertical offset",
+            self.rear_line2_y_offset,
+            -30.0,
+            30.0,
+            1.0,
+            callback=self._schedule_rear_preview,
+        )
+        self._add_slider(
+            style,
+            4,
+            "Base line spacing ×",
             self.rear_line_spacing_scale,
             0.70,
             2.00,
@@ -400,8 +433,11 @@ class FrontStyleLab(ttk.Frame):
 
     def _rear_options(self) -> ContextRenderOptions:
         return ContextRenderOptions(
-            attribution_font_scale=self.rear_text_scale.get(),
+            attribution_line1_font_scale=self.rear_line1_text_scale.get(),
+            attribution_line2_font_scale=self.rear_line2_text_scale.get(),
             attribution_line_spacing_scale=self.rear_line_spacing_scale.get(),
+            attribution_line1_y_offset=self.rear_line1_y_offset.get(),
+            attribution_line2_y_offset=self.rear_line2_y_offset.get(),
         )
 
     # ------------------------------------------------------------------
@@ -482,7 +518,10 @@ class FrontStyleLab(ttk.Frame):
         self._schedule_front_preview()
 
     def _reset_rear(self) -> None:
-        self.rear_text_scale.set(1.0)
+        self.rear_line1_text_scale.set(1.0)
+        self.rear_line1_y_offset.set(0.0)
+        self.rear_line2_text_scale.set(1.0)
+        self.rear_line2_y_offset.set(0.0)
         self.rear_line_spacing_scale.set(1.0)
         self._schedule_rear_preview()
 
@@ -499,8 +538,11 @@ class FrontStyleLab(ttk.Frame):
                 if key not in {"area", "manual_override"}
             },
             "rear_render_options": {
-                "attribution_font_scale": rear_options.attribution_font_scale,
+                "attribution_line1_font_scale": rear_options.attribution_line1_font_scale,
+                "attribution_line2_font_scale": rear_options.attribution_line2_font_scale,
                 "attribution_line_spacing_scale": rear_options.attribution_line_spacing_scale,
+                "attribution_line1_y_offset": rear_options.attribution_line1_y_offset,
+                "attribution_line2_y_offset": rear_options.attribution_line2_y_offset,
             },
         }
 
@@ -540,8 +582,12 @@ class FrontStyleLab(ttk.Frame):
             self.group_y.set(float(values["group_y_offset"]))
 
             rear_values = payload.get("rear_render_options", {})
-            self.rear_text_scale.set(float(rear_values.get("attribution_font_scale", 1.0)))
+            legacy_scale = float(rear_values.get("attribution_font_scale", 1.0))
+            self.rear_line1_text_scale.set(float(rear_values.get("attribution_line1_font_scale", legacy_scale)))
+            self.rear_line2_text_scale.set(float(rear_values.get("attribution_line2_font_scale", legacy_scale)))
             self.rear_line_spacing_scale.set(float(rear_values.get("attribution_line_spacing_scale", 1.0)))
+            self.rear_line1_y_offset.set(float(rear_values.get("attribution_line1_y_offset", 0.0)))
+            self.rear_line2_y_offset.set(float(rear_values.get("attribution_line2_y_offset", 0.0)))
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as error:
             messagebox.showerror("Profile error", f"Could not load profile:\n{error}", parent=self.root)
             return
