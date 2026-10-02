@@ -146,7 +146,15 @@ def load_design_profile(path: Path | str) -> DesignOptions:
 
     return DesignOptions(
         front_feature_weight=front_weight,
-        rear_highlight_weight=float(payload.get("rear_highlight_weight", defaults.rear_highlight_weight)),
+        rear_highlight_weight=float(
+            payload.get(
+                "rear_highlight_weight",
+                (
+                    float(rear.get("highlight_stroke_scale", REAR_STREET_HIGHLIGHT_SCALE))
+                    / REAR_STREET_HIGHLIGHT_SCALE
+                ),
+            )
+        ),
         front_title_font_scale=float(face.get("title_font_scale", defaults.front_title_font_scale)),
         front_locality_font_scale=float(face.get("locality_font_scale", defaults.front_locality_font_scale)),
         front_title_locality_gap_delta=float(face.get("title_locality_gap_delta", defaults.front_title_locality_gap_delta)),
