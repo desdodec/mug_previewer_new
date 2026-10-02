@@ -21,6 +21,7 @@ from ..datasets.models import Dataset, StreetRecord
 from ..rendering.context_map import (
     ContextRenderError,
     ContextRenderOptions,
+    REAR_STREET_HIGHLIGHT_SCALE,
     render_context_map_result,
 )
 from ..rendering.face import (
@@ -209,6 +210,7 @@ class FrontStyleLab(ttk.Frame):
         style.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         style.columnconfigure(0, weight=1)
 
+        self.rear_highlight_weight = tk.DoubleVar(value=1.0)
         self.rear_line1_text_scale = tk.DoubleVar(value=1.0)
         self.rear_line1_y_offset = tk.DoubleVar(value=0.0)
         self.rear_line2_text_scale = tk.DoubleVar(value=1.0)
@@ -218,6 +220,16 @@ class FrontStyleLab(ttk.Frame):
         self._add_slider(
             style,
             0,
+            "Highlighted street width ×",
+            self.rear_highlight_weight,
+            0.25,
+            4.00,
+            0.05,
+            callback=self._schedule_rear_preview,
+        )
+        self._add_slider(
+            style,
+            1,
             "Line 1 text size ×",
             self.rear_line1_text_scale,
             0.75,
@@ -227,7 +239,7 @@ class FrontStyleLab(ttk.Frame):
         )
         self._add_slider(
             style,
-            1,
+            2,
             "Line 1 vertical offset",
             self.rear_line1_y_offset,
             -30.0,
@@ -237,7 +249,7 @@ class FrontStyleLab(ttk.Frame):
         )
         self._add_slider(
             style,
-            2,
+            3,
             "Line 2 text size ×",
             self.rear_line2_text_scale,
             0.75,
@@ -247,7 +259,7 @@ class FrontStyleLab(ttk.Frame):
         )
         self._add_slider(
             style,
-            3,
+            4,
             "Line 2 vertical offset",
             self.rear_line2_y_offset,
             -30.0,
@@ -257,7 +269,7 @@ class FrontStyleLab(ttk.Frame):
         )
         self._add_slider(
             style,
-            4,
+            5,
             "Base line spacing ×",
             self.rear_line_spacing_scale,
             0.70,
@@ -433,6 +445,7 @@ class FrontStyleLab(ttk.Frame):
 
     def _rear_options(self) -> ContextRenderOptions:
         return ContextRenderOptions(
+            highlight_stroke_scale=REAR_STREET_HIGHLIGHT_SCALE * self.rear_highlight_weight.get(),
             attribution_line1_font_scale=self.rear_line1_text_scale.get(),
             attribution_line2_font_scale=self.rear_line2_text_scale.get(),
             attribution_line_spacing_scale=self.rear_line_spacing_scale.get(),
@@ -518,6 +531,7 @@ class FrontStyleLab(ttk.Frame):
         self._schedule_front_preview()
 
     def _reset_rear(self) -> None:
+        self.rear_highlight_weight.set(1.0)
         self.rear_line1_text_scale.set(1.0)
         self.rear_line1_y_offset.set(0.0)
         self.rear_line2_text_scale.set(1.0)
@@ -538,6 +552,7 @@ class FrontStyleLab(ttk.Frame):
                 if key not in {"area", "manual_override"}
             },
             "rear_render_options": {
+                "highlight_stroke_scale": rear_options.highlight_stroke_scale,
                 "attribution_line1_font_scale": rear_options.attribution_line1_font_scale,
                 "attribution_line2_font_scale": rear_options.attribution_line2_font_scale,
                 "attribution_line_spacing_scale": rear_options.attribution_line_spacing_scale,
@@ -582,6 +597,10 @@ class FrontStyleLab(ttk.Frame):
             self.group_y.set(float(values["group_y_offset"]))
 
             rear_values = payload.get("rear_render_options", {})
+            highlight_scale = float(
+                rear_values.get("highlight_stroke_scale", REAR_STREET_HIGHLIGHT_SCALE)
+            )
+            self.rear_highlight_weight.set(highlight_scale / REAR_STREET_HIGHLIGHT_SCALE)
             legacy_scale = float(rear_values.get("attribution_font_scale", 1.0))
             self.rear_line1_text_scale.set(float(rear_values.get("attribution_line1_font_scale", legacy_scale)))
             self.rear_line2_text_scale.set(float(rear_values.get("attribution_line2_font_scale", legacy_scale)))
