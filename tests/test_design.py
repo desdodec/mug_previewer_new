@@ -82,8 +82,11 @@ def test_calibration_profile_maps_to_complete_production_design(tmp_path: Path) 
                 "vertical_spread": 1.08,
             },
             "rear_render_options": {
-                "attribution_font_scale": 1.25,
+                "attribution_line1_font_scale": 1.25,
+                "attribution_line2_font_scale": 1.10,
                 "attribution_line_spacing_scale": 1.15,
+                "attribution_line1_y_offset": -2.0,
+                "attribution_line2_y_offset": 3.0,
             },
         }),
         encoding="utf-8",
@@ -94,11 +97,17 @@ def test_calibration_profile_maps_to_complete_production_design(tmp_path: Path) 
 
     assert design.front_feature_weight == pytest.approx(1.30)
     assert design.front_facial_linework_multiplier == pytest.approx(1.45)
-    assert design.rear_attribution_font_scale == pytest.approx(1.25)
+    assert design.rear_attribution_line1_font_scale == pytest.approx(1.25)
+    assert design.rear_attribution_line2_font_scale == pytest.approx(1.10)
+    assert design.rear_attribution_line1_y_offset == pytest.approx(-2.0)
+    assert design.rear_attribution_line2_y_offset == pytest.approx(3.0)
     assert options.face_options.title_font_scale == pytest.approx(1.15)
     assert options.face_options.vertical_spread == pytest.approx(1.08)
-    assert options.context_options.attribution_font_scale == pytest.approx(1.25)
+    assert options.context_options.attribution_line1_font_scale == pytest.approx(1.25)
+    assert options.context_options.attribution_line2_font_scale == pytest.approx(1.10)
     assert options.context_options.attribution_line_spacing_scale == pytest.approx(1.15)
+    assert options.context_options.attribution_line1_y_offset == pytest.approx(-2.0)
+    assert options.context_options.attribution_line2_y_offset == pytest.approx(3.0)
     assert design_profile_fingerprint(design) != design_profile_fingerprint(DesignOptions())
 
 
@@ -106,7 +115,7 @@ def test_quick_weight_change_does_not_discard_loaded_profile_values() -> None:
     state = AppState(
         design_options=DesignOptions(
             front_title_font_scale=1.20,
-            rear_attribution_font_scale=1.30,
+            rear_attribution_line1_font_scale=1.30,
         )
     )
     state.set_design_options(1.4, 0.8)
@@ -114,7 +123,7 @@ def test_quick_weight_change_does_not_discard_loaded_profile_values() -> None:
     assert state.design_options.front_feature_weight == pytest.approx(1.4)
     assert state.design_options.rear_highlight_weight == pytest.approx(0.8)
     assert state.design_options.front_title_font_scale == pytest.approx(1.20)
-    assert state.design_options.rear_attribution_font_scale == pytest.approx(1.30)
+    assert state.design_options.rear_attribution_line1_font_scale == pytest.approx(1.30)
 
 
 def test_default_design_render_options_preserve_the_existing_renderer_baseline(tmp_path: Path) -> None:
