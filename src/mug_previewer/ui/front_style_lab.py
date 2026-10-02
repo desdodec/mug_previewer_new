@@ -90,6 +90,7 @@ class FrontStyleLab(ttk.Frame):
         self.locality_scale = tk.DoubleVar(value=1.0)
         self.text_gap = tk.DoubleVar(value=FRONT_TITLE_LOCALITY_GAP_DELTA_PX)
         self.text_offset = tk.DoubleVar(value=FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX)
+        self.facial_linework = tk.DoubleVar(value=1.0)
         self.support_stroke = tk.DoubleVar(value=1.0)
         self.street_stroke = tk.DoubleVar(value=STREET_STROKE_MULTIPLIER)
         self.vertical_spread = tk.DoubleVar(value=1.0)
@@ -101,7 +102,8 @@ class FrontStyleLab(ttk.Frame):
             ("Area/locality text ×", self.locality_scale, 0.80, 1.60, 0.01),
             ("Title → area gap (px)", self.text_gap, -8.0, 36.0, 1.0),
             ("Text block vertical offset", self.text_offset, -45.0, 20.0, 1.0),
-            ("Facial support strokes ×", self.support_stroke, 0.75, 2.75, 0.01),
+            ("All facial linework ×", self.facial_linework, 0.75, 3.00, 0.01),
+            ("Ear/nose extra weight ×", self.support_stroke, 0.75, 2.75, 0.01),
             ("Street facial feature ×", self.street_stroke, 0.75, 4.00, 0.01),
             ("Global vertical row spread ×", self.vertical_spread, 0.85, 1.35, 0.01),
             ("Whole composition scale ×", self.group_scale, 0.90, 1.35, 0.01),
@@ -257,6 +259,7 @@ class FrontStyleLab(ttk.Frame):
             typography_block_y_offset=self.text_offset.get(),
             title_font_scale=self.title_scale.get(),
             locality_font_scale=self.locality_scale.get(),
+            facial_linework_multiplier=self.facial_linework.get(),
             supporting_stroke_multiplier=self.support_stroke.get(),
             street_feature_stroke_multiplier=self.street_stroke.get(),
             vertical_spread=self.vertical_spread.get(),
@@ -304,6 +307,7 @@ class FrontStyleLab(ttk.Frame):
         self.locality_scale.set(1.0)
         self.text_gap.set(FRONT_TITLE_LOCALITY_GAP_DELTA_PX)
         self.text_offset.set(FRONT_TYPOGRAPHY_BLOCK_Y_OFFSET_PX)
+        self.facial_linework.set(1.0)
         self.support_stroke.set(1.0)
         self.street_stroke.set(STREET_STROKE_MULTIPLIER)
         self.vertical_spread.set(1.0)
@@ -351,6 +355,7 @@ class FrontStyleLab(ttk.Frame):
             self.locality_scale.set(float(values["locality_font_scale"]))
             self.text_gap.set(float(values["title_locality_gap_delta"]))
             self.text_offset.set(float(values["typography_block_y_offset"]))
+            self.facial_linework.set(float(values.get("facial_linework_multiplier", 1.0)))
             self.support_stroke.set(float(values["supporting_stroke_multiplier"]))
             self.street_stroke.set(float(values["street_feature_stroke_multiplier"]))
             self.vertical_spread.set(float(values["vertical_spread"]))
@@ -412,7 +417,8 @@ class FrontStyleLab(ttk.Frame):
                         base,
                         title_font_scale=base.title_font_scale * text_factor,
                         locality_font_scale=base.locality_font_scale * text_factor,
-                        supporting_stroke_multiplier=base.supporting_stroke_multiplier * stroke_factor,
+                        facial_linework_multiplier=base.facial_linework_multiplier * stroke_factor,
+                        supporting_stroke_multiplier=base.supporting_stroke_multiplier,
                         street_feature_stroke_multiplier=base.street_feature_stroke_multiplier * stroke_factor,
                     )
                     face = _render_face_standard(street, options)
