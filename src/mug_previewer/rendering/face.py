@@ -478,54 +478,63 @@ def _render_native_face(
     )
 
 
-def _scale_stroke_width_declarations(text: str, multiplier: float) -> str:
-    """Scale numeric SVG/CSS stroke-width declarations while preserving units."""
-    pattern = re.compile(r"(stroke-width\s*:\s*)([-+]?\d*\.?\d+)(px)?", re.IGNORECASE)
+def _extract_css_stroke_width(markup: str, selector: str) -> float | None:
+    pattern = re.compile(
+        rf"{re.escape(selector)}\s*\{{[^}}]*?stroke-width\s*:\s*([-+]?\d*\.?\d+)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    match = pattern.search(markup)
+    return None if match is None else float(match.group(1))
 
-    def replace(match: re.Match[str]) -> str:
-        value = float(match.group(2)) * multiplier
-        return f"{match.group(1)}{value:.3f}{match.group(3) or ''}"
 
-    return pattern.sub(replace, text)
+def _extract_inline_class_stroke_width(markup: str, class_name: str) -> float | None:
+    pattern = re.compile(
+        rf'<[^>]+class="[^"]*\b{re.escape(class_name)}\b[^"]*"[^>]*'
+        rf'style="[^"]*stroke-width\s*:\s*([-+]?\d*\.?\d+)',
+        re.IGNORECASE,
+    )
+    match = pattern.search(markup)
+    return None if match is None else float(match.group(1))
 
 
 def _scale_face_linework(face_asset: str, multiplier: float) -> str:
-    """Scale non-street facial strokes while preserving the original SVG text.
+    """Scale every stroked facial role while preserving its native hierarchy.
 
-    This intentionally avoids parsing and reserialising the complete nested SVG.
-    CairoSVG is sensitive to some namespace/stylesheet rewrites in embedded SVG
-    assets on Windows, so calibration must leave the document structure intact.
+    Native artwork mixes class-based and inline widths. We read those real
+    widths and append higher-specificity overrides. The coloured street
+    polyline is excluded because it has its own calibration control.
     """
     factor = _positive_style_multiplier(multiplier, "Facial linework multiplier")
     if factor == 1.0:
         return face_asset
 
-    controlled_selectors = (".ink", ".feature", ".thin", ".brow", ".soft-detail")
+    rules: list[str] = []
+    for selector in (".ink", ".feature", ".thin", ".brow", ".soft-detail"):
+        width = _extract_css_stroke_width(face_asset, selector)
+        if width is not None:
+            rules.append(
+                f".v28-face-linework {selector} "
+                f"{{ stroke-width:{width * factor:.3f}px !important; }}"
+            )
 
-    def scale_rule(match: re.Match[str]) -> str:
-        selector, body = match.group(1), match.group(2)
-        if ".street" in selector:
-            return match.group(0)
-        if not any(name in selector for name in controlled_selectors):
-            return match.group(0)
-        return f"{selector}{{{_scale_stroke_width_declarations(body, factor)}}}"
+    for class_name in ("hierarchy-hair", "hierarchy-brow"):
+        width = _extract_inline_class_stroke_width(face_asset, class_name)
+        if width is not None:
+            rules.append(
+                f".v28-face-linework .{class_name} "
+                f"{{ stroke-width:{width * factor:.3f}px !important; }}"
+            )
 
-    # Scale class rules in <style> blocks without touching XML structure.
-    revised = re.sub(r"([^{}]+)\{([^{}]*)\}", scale_rule, face_asset)
+    if not rules:
+        return face_asset
 
-    # Scale inline stroke-width declarations on non-street primitives.
-    tag_pattern = re.compile(r"<(?:path|polyline|line|ellipse)\b[^>]*>", re.IGNORECASE)
+    calibration_style = (
+        '<style id="mug-print-linework-calibration">'
+        + "".join(rules)
+        + "</style>"
+    )
+    return face_asset.replace("</svg>", calibration_style + "</svg>")
 
-    def scale_tag(match: re.Match[str]) -> str:
-        tag = match.group(0)
-        classes = re.search(r'\bclass="([^"]*)"', tag)
-        if classes is not None and "street" in classes.group(1).split():
-            return tag
-        if "stroke-width" not in tag:
-            return tag
-        return _scale_stroke_width_declarations(tag, factor)
-
-    return tag_pattern.sub(scale_tag, revised)
 
 
 def _primitive_vertical_centre(element: ET.Element) -> float | None:
