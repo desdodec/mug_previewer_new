@@ -171,6 +171,8 @@ def test_vertical_spread_separates_native_face_rows_without_changing_geometry() 
     assert 'points="5,50 15,50"' in adjusted
     assert 'd="M 5,80 L 15,80"' in adjusted
     assert adjusted.count("translate(0 ") == 2
+    assert 'xmlns="http://www.w3.org/2000/svg"' in adjusted
+    assert "ns0:" not in adjusted
     assert _spread_face_component_rows(source, 1.0) == source
 
 
