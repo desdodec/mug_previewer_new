@@ -112,6 +112,54 @@ def _prepared_folder_ids(catalogue: PreprocessedCatalogue) -> set[str]:
     return _dataset_directories(catalogue.root / "previews")
 
 
+def _record_asset_folder(record: dict[str, object]) -> str | None:
+    """Return the physical prepared dataset folder named by an indexed asset."""
+    for key in ("svg_path", "approved_svg_path", "generated_svg_path", "preview_path"):
+        value = record.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        parts = Path(value).parts
+        if len(parts) >= 3 and parts[0].casefold() in {"faces", "previews"}:
+            return parts[1]
+    return None
+
+
+def _records_for_folder(
+    folder_id: str,
+    groups: dict[str, list[dict[str, object]]],
+) -> list[dict[str, object]]:
+    """Map a physical faces folder back to its logical indexed records.
+
+    Preprocessing writes faces below ``faces/<slug(dataset.id)>`` while the
+    index deliberately keeps the original dataset id.  Treating the physical
+    folder name as the dataset id breaks catalogue lookup, cached previews and
+    production planning whenever slugging changed the name.
+    """
+    matched: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for dataset_id, records in groups.items():
+        for record in records:
+            record_folder = _record_asset_folder(record)
+            if dataset_id != folder_id and record_folder != folder_id:
+                continue
+            key = (str(record.get("dataset_id") or dataset_id), str(record.get("street_id") or ""))
+            if not key[1] or key in seen:
+                continue
+            seen.add(key)
+            matched.append(record)
+    matched.sort(key=lambda item: str(item.get("street_id", "")))
+    return matched
+
+
+def _logical_prepared_id(folder_id: str, records: Sequence[dict[str, object]]) -> str:
+    ids = {
+        str(item.get("dataset_id"))
+        for item in records
+        if isinstance(item.get("dataset_id"), str) and str(item.get("dataset_id")).strip()
+    }
+    return next(iter(ids)) if len(ids) == 1 else folder_id
+
+
 def _source_name_index(dataset: Dataset) -> dict[str, list[StreetRecord]]:
     result: dict[str, list[StreetRecord]] = defaultdict(list)
     for street in dataset.streets:
@@ -259,8 +307,11 @@ def _prepared_only_dataset(
     catalogue: PreprocessedCatalogue,
     prepared_id: str,
     records: Sequence[dict[str, object]],
+    *,
+    folder_id: str | None = None,
 ) -> Dataset | None:
     """Expose an existing prepared folder even when source-map data is absent."""
+    physical_id = folder_id or prepared_id
     streets: list[StreetRecord] = []
     seen: set[str] = set()
     for record in records:
@@ -269,7 +320,7 @@ def _prepared_only_dataset(
             continue
         seen.add(street_id)
         street_name = str(record.get("street_name") or street_id).strip() or street_id
-        missing_source = catalogue.root / ".source-unavailable" / prepared_id / f"{street_id}.svg"
+        missing_source = catalogue.root / ".source-unavailable" / physical_id / f"{street_id}.svg"
         streets.append(
             StreetRecord(
                 id=street_id,
@@ -284,7 +335,7 @@ def _prepared_only_dataset(
     # canonical SVG filenames: <street_id>_<street_name>.svg. This is only a
     # selector/navigation fallback; source geometry is still required for map
     # rendering/export.
-    face_folder = catalogue.root / "faces" / prepared_id
+    face_folder = catalogue.root / "faces" / physical_id
     if not streets and face_folder.is_dir():
         try:
             candidates = sorted(face_folder.glob("*.svg"))
@@ -319,9 +370,9 @@ def _prepared_only_dataset(
     # it visible even when no indexed street records are currently available.
     physical_root = next(
         (
-            catalogue.root / container / prepared_id
+            catalogue.root / container / physical_id
             for container in ("faces", "previews")
-            if (catalogue.root / container / prepared_id).is_dir()
+            if (catalogue.root / container / physical_id).is_dir()
         ),
         catalogue.root,
     )
@@ -363,21 +414,28 @@ def prepared_dataset_options(
     folders are considered only when there are no face dataset folders at all.
     Source matching enriches a visible prepared set with map geometry when
     possible, but never adds extra prepared entries.
+
+    The dropdown label follows the physical folder name, while the Dataset
+    object keeps the logical ``dataset_id`` stored in preprocess_index.json.
+    That distinction is required for catalogue lookup and production exports.
     """
     groups = _prepared_records(catalogue)
     folder_ids = _prepared_folder_ids(catalogue)
-    # Actual folders under faces/ are authoritative. Do not hide a folder just
-    # because preprocess_index.json is incomplete, stale or has not yet been
-    # rebuilt for that set.
     prepared_ids = sorted(folder_ids)
 
     options: list[DatasetOption] = []
-    for prepared_id in prepared_ids:
-        records = groups.get(prepared_id, [])
+    for folder_id in prepared_ids:
+        records = _records_for_folder(folder_id, groups)
+        prepared_id = _logical_prepared_id(folder_id, records)
         source = _best_source(prepared_id, records, source_options)
         dataset = _linked_dataset(prepared_id, records, source) if source is not None else None
         if dataset is None:
-            dataset = _prepared_only_dataset(catalogue, prepared_id, records)
+            dataset = _prepared_only_dataset(
+                catalogue,
+                prepared_id,
+                records,
+                folder_id=folder_id,
+            )
         if dataset is not None:
-            options.append(DatasetOption(prepared_id, dataset))
+            options.append(DatasetOption(folder_id, dataset))
     return options
