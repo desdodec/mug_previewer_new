@@ -11,6 +11,7 @@ from mug_previewer.datasets.loader import load_dataset
 from mug_previewer.rendering.face import (
     FRONT_GROUP_SCALE,
     TITLE_FONT_SIZE_TIERS,
+    FaceRenderOptions,
     _render_face_standard,
     layout_title_text,
     render_face_svg,
@@ -51,6 +52,20 @@ def test_stoke_newington_church_street_wraps_at_natural_boundary() -> None:
     assert layout.wrapped
     assert layout.size_px == pytest.approx(TITLE_FONT_SIZE_TIERS[0])
     assert all(width <= layout.safe_width_px for width in layout.rendered_widths_px)
+
+
+def test_reduced_profile_scale_does_not_turn_long_title_back_into_tiny_one_line() -> None:
+    font_stack = native.get_text_font_stack(native.DEFAULT_TEXT_FONT_KEY)
+    layout = layout_title_text(
+        "Stoke Newington Church Street",
+        font_stack,
+        font_scale=0.80,
+        group_scale=FRONT_GROUP_SCALE,
+    )
+
+    assert layout.lines == ("Stoke Newington", "Church Street")
+    assert layout.status == "wrapped"
+    assert layout.wrapped
 
 
 def test_guardrail_safe_width_accounts_for_final_composition_scale() -> None:
@@ -103,3 +118,21 @@ def test_png_renderer_reports_wrapped_title_layout(tmp_path: Path) -> None:
     assert image.info["title_layout_status"] == "wrapped"
     assert image.info["title_layout_lines"] == ("Stoke Newington", "Church Street")
     assert image.info["title_layout_size_px"] == pytest.approx(TITLE_FONT_SIZE_TIERS[0])
+
+
+def test_png_renderer_remains_valid_with_profile_like_title_scale(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = replace(
+        data.get_street("0001"),
+        street_name="Stoke Newington Church Street",
+        display_name="Stoke Newington Church Street",
+    )
+
+    image = _render_face_standard(
+        street,
+        FaceRenderOptions(area=data.display_name, title_font_scale=0.80),
+    )
+
+    assert image.size == (495, 462)
+    assert image.info["title_layout_status"] == "wrapped"
+    assert image.info["title_layout_lines"] == ("Stoke Newington", "Church Street")
