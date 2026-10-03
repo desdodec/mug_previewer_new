@@ -1,21 +1,9 @@
 """Automatic production-safe layout for long front street titles.
 
-The established front renderer predates the print-style calibration lab and
-chooses progressively smaller one-line title tiers.  That works for most names,
-but on supplier mockups a long title can end up too close to the printable
-edge after the whole front composition is scaled.  This module installs one
-shared guard rail around the existing renderer:
-
-* short titles keep the existing one-line pixels;
-* a title may shrink only to the 30 px production tier before wrapping;
-* multi-word titles that still do not fit are split over two balanced lines;
-* both lines are measured with the same CairoSVG text path as production;
-* the locality is moved down by half a title-line spacing so its gap from the
-  second title line remains the same as the normal one-line gap.
-
-The installer is called once by :mod:`mug_previewer.rendering`.  Keeping the
-layout here makes the policy independently testable while the existing face
-module remains the single source for native face geometry and styling.
+This module is deliberately policy-only: face.py remains authoritative for the
+native face geometry and styling.  We replace the two front composition entry
+points so the lab, generated SVGs, previews and production rendering all use
+one title layout decision.
 """
 from __future__ import annotations
 
@@ -30,14 +18,19 @@ from typing import Any
 from PIL import Image
 
 
+TITLE_GUARDRAIL_POLICY_VERSION = 2
 TITLE_FINAL_SAFE_WIDTH_PX = 440.0
-TITLE_MIN_SINGLE_LINE_BASE_SIZE_PX = 30.0
+# This is an absolute effective font size, not a value multiplied by the user
+# profile.  A calibration profile may make normal titles smaller, but it must
+# not silently turn a print-safe wrapped long title back into a tiny one-line
+# title.
+TITLE_MIN_SINGLE_LINE_SIZE_PX = 30.0
 TITLE_LINE_SPACING_RATIO = 0.92
 
 
 @dataclass(frozen=True)
 class TitleLayout:
-    """Resolved front-title layout after production fit guard rails."""
+    """Resolved one- or two-line production title layout."""
 
     lines: tuple[str, ...]
     size_px: float
@@ -58,17 +51,48 @@ class TitleLayout:
         return self.size_px * TITLE_LINE_SPACING_RATIO if self.wrapped else 0.0
 
 
+def _png_bytes(face: Any, markup: str, *, width: int, height: int) -> bytes:
+    """Rasterise SVG through an explicit stream and validate the PNG payload.
+
+    CairoSVG normally returns PNG bytes when ``write_to`` is omitted, but using
+    an explicit stream is more robust in the long-lived Tk calibration process
+    and avoids passing a transient/empty return value to Pillow.
+    """
+    stream = io.BytesIO()
+    face.cairosvg.svg2png(
+        bytestring=markup.encode("utf-8"),
+        write_to=stream,
+        output_width=width,
+        output_height=height,
+    )
+    payload = stream.getvalue()
+    if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise face.FaceRenderError("Front SVG rasteriser did not produce a valid PNG image.")
+    return payload
+
+
+def _measure_title_width(face: Any, text: str, font_stack: str, size_px: float) -> int:
+    """Measure with the same CairoSVG font path used by the production face."""
+    markup = f'''<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="140">
+  <style>.title {{ font-family:{font_stack}; font-size:{size_px:.1f}px; font-weight:{face.TITLE_WEIGHT}; }}</style>
+  <text class="title" x="20" y="95">{face._escape(text)}</text>
+</svg>'''
+    payload = _png_bytes(face, markup, width=1600, height=140)
+    with Image.open(io.BytesIO(payload)) as rendered:
+        rendered.load()
+        bounds = rendered.getchannel("A").getbbox()
+    if bounds is None:
+        raise face.FaceRenderError("Street title produced no visible text.")
+    return bounds[2] - bounds[0]
+
+
 def title_safe_width_for_group(face: Any, group_scale: float) -> float:
-    """Return source-coordinate width that remains safe after group scaling."""
     try:
         scale = float(group_scale)
     except (TypeError, ValueError) as error:
         raise face.FaceRenderError("Front composition scale must be positive and finite.") from error
     if not math.isfinite(scale) or scale <= 0:
         raise face.FaceRenderError("Front composition scale must be positive and finite.")
-    # TITLE_SAFE_WIDTH_PX remains the original source-space cap.  The second
-    # cap protects a final ~440 px painted width on the 495 px front panel,
-    # leaving useful supplier/mockup edge tolerance after composition scaling.
     return min(float(face.TITLE_SAFE_WIDTH_PX), TITLE_FINAL_SAFE_WIDTH_PX / scale)
 
 
@@ -81,7 +105,7 @@ def layout_title_text(
     group_scale: float | None = None,
     safe_width_px: float | None = None,
 ) -> TitleLayout:
-    """Resolve a one- or two-line title using measured production text widths."""
+    """Resolve a measured one- or two-line title with a print-safe fallback."""
     title = str(text).strip()
     if not title:
         raise face.FaceRenderError("Street title produced no visible text.")
@@ -98,25 +122,23 @@ def layout_title_text(
 
     tiers = tuple(float(base) * scale for base in face.TITLE_FONT_SIZE_TIERS)
 
-    # Preserve the established appearance for normal names, but do not make a
-    # multi-word title weaker than the 30 px base tier merely to keep one line.
-    minimum_single = TITLE_MIN_SINGLE_LINE_BASE_SIZE_PX * scale
+    # One line is allowed only while its *effective* size remains print-robust.
+    # This guard is absolute so loading a profile with title_font_scale < 1 does
+    # not accidentally undo the long-name wrap policy.
     for size_px in tiers:
-        if size_px + 1e-9 < minimum_single:
+        if size_px + 1e-9 < TITLE_MIN_SINGLE_LINE_SIZE_PX:
             continue
-        width = face._measure_title_width(title, font_stack, size_px)
+        width = _measure_title_width(face, title, font_stack, size_px)
         if width <= safe_width:
             return TitleLayout((title,), size_px, (width,), safe_width, "safe")
 
     words = title.split()
     if len(words) >= 2:
-        # Prefer the largest approved tier that permits a safe two-line split.
-        # Within that tier choose the most visually balanced measured widths.
         for size_px in tiers:
             candidates: list[tuple[tuple[float, ...], tuple[str, str], tuple[int, int]]] = []
             for index in range(1, len(words)):
                 lines = (" ".join(words[:index]), " ".join(words[index:]))
-                widths = tuple(face._measure_title_width(line, font_stack, size_px) for line in lines)
+                widths = tuple(_measure_title_width(face, line, font_stack, size_px) for line in lines)
                 if max(widths) > safe_width:
                     continue
                 score = (
@@ -129,10 +151,9 @@ def layout_title_text(
                 _score, lines, widths = min(candidates, key=lambda item: item[0])
                 return TitleLayout(lines, size_px, widths, safe_width, "wrapped")
 
-    # A single unusually long word cannot be wrapped naturally.  Retain the
-    # legacy final 26 px tier as a last safe fallback before requiring review.
+    # Last resort for a single long token or an exceptionally awkward phrase.
     for size_px in tiers:
-        width = face._measure_title_width(title, font_stack, size_px)
+        width = _measure_title_width(face, title, font_stack, size_px)
         if width <= safe_width:
             return TitleLayout((title,), size_px, (width,), safe_width, "reduced")
 
@@ -141,23 +162,36 @@ def layout_title_text(
     )
 
 
-def _title_positions(face: Any, layout: TitleLayout, title_y: float, area_y: float, spread: float) -> tuple[tuple[float, ...], float]:
+def _title_positions(
+    face: Any,
+    layout: TitleLayout,
+    title_y: float,
+    area_y: float,
+    spread: float,
+) -> tuple[tuple[float, ...], float]:
     if layout.wrapped:
         half = layout.line_spacing_px / 2.0
         title_positions = (title_y - half, title_y + half)
-        # Shift locality by the same half-spacing as the second title baseline;
-        # therefore the established second-title -> locality baseline gap is
-        # exactly the same as the old title -> locality gap.
         area_y += half
     else:
         title_positions = (title_y,)
     return (
-        tuple(face._spread_vertical_position(value, face.SOURCE_CANVAS_PX[1], spread) for value in title_positions),
+        tuple(
+            face._spread_vertical_position(value, face.SOURCE_CANVAS_PX[1], spread)
+            for value in title_positions
+        ),
         face._spread_vertical_position(area_y, face.SOURCE_CANVAS_PX[1], spread),
     )
 
 
-def _title_markup(face: Any, layout: TitleLayout, panel_center: float, positions: tuple[float, ...], *, editable: bool = False) -> str:
+def _title_markup(
+    face: Any,
+    layout: TitleLayout,
+    panel_center: float,
+    positions: tuple[float, ...],
+    *,
+    editable: bool = False,
+) -> str:
     nodes = "\n    ".join(
         f'<text class="mug-title" x="{panel_center:.1f}" y="{y:.1f}">{face._escape(line)}</text>'
         for line, y in zip(layout.lines, positions)
@@ -165,8 +199,13 @@ def _title_markup(face: Any, layout: TitleLayout, panel_center: float, positions
     return f'<g id="title">{nodes}</g>' if editable else nodes
 
 
-def _render_face_standard(face: Any, street: Any, options: Any = None, *, face_markup: str | None = None) -> Image.Image:
-    """Production front renderer with measured two-line title fallback."""
+def _render_face_standard(
+    face: Any,
+    street: Any,
+    options: Any = None,
+    *,
+    face_markup: str | None = None,
+) -> Image.Image:
     options = options or face.FaceRenderOptions()
     glyph = street.glyph_path
     if not glyph.is_file():
@@ -209,21 +248,13 @@ def _render_face_standard(face: Any, street: Any, options: Any = None, *, face_m
         options.typography_block_y_offset,
     )
     title_positions, area_y = _title_positions(
-        face,
-        layout,
-        title_y,
-        area_y,
-        options.vertical_spread,
+        face, layout, title_y, area_y, options.vertical_spread,
     )
     locality_font_size = face.LOCALITY_FONT_SIZE * face._positive_style_multiplier(
-        options.locality_font_scale,
-        "Locality font scale",
+        options.locality_font_scale, "Locality font scale",
     )
     group_transform = face._front_group_transform(
-        panel_center,
-        height,
-        options.group_scale,
-        options.group_y_offset,
+        panel_center, height, options.group_scale, options.group_y_offset,
     )
     title_markup = _title_markup(face, layout, panel_center, title_positions)
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">
@@ -237,12 +268,9 @@ def _render_face_standard(face: Any, street: Any, options: Any = None, *, face_m
     {face_markup}
   </g>
 </svg>'''
-    png = face.cairosvg.svg2png(
-        bytestring=svg.encode("utf-8"),
-        output_width=width,
-        output_height=height,
-    )
+    png = _png_bytes(face, svg, width=width, height=height)
     with Image.open(io.BytesIO(png)) as rendered:
+        rendered.load()
         panel = rendered.convert("RGBA").crop((0, 0, face.FRONT_PANEL_PX[0], face.FRONT_PANEL_PX[1])).copy()
     feature_colour = face.extract_street_feature_colour(face._decode_native_face_asset(face_markup))
     if feature_colour is not None:
@@ -251,11 +279,11 @@ def _render_face_standard(face: Any, street: Any, options: Any = None, *, face_m
     panel.info["title_layout_status"] = layout.status
     panel.info["title_layout_size_px"] = layout.size_px
     panel.info["title_layout_safe_width_px"] = layout.safe_width_px
+    panel.info["title_guardrail_policy_version"] = TITLE_GUARDRAIL_POLICY_VERSION
     return panel
 
 
 def _render_face_svg(face: Any, dataset: Any, street: Any, options: Any = None) -> str:
-    """Editable canonical SVG using the same guarded title layout as PNG output."""
     options = options or face.FaceRenderOptions(area=dataset.display_name)
     placement_source = face._validated_svg_placement_source(dataset, street, options)
     glyph = street.glyph_path
@@ -281,8 +309,7 @@ def _render_face_svg(face: Any, dataset: Any, street: Any, options: Any = None) 
     asset_root = ET.fromstring(asset)
     face_content = next(
         (
-            node
-            for node in asset_root.iter()
+            node for node in asset_root.iter()
             if face._svg_local_name(node.tag) == "g"
             and "face-content" in node.get("class", "").split()
         ),
@@ -309,21 +336,13 @@ def _render_face_svg(face: Any, dataset: Any, street: Any, options: Any = None) 
         options.typography_block_y_offset,
     )
     title_positions, area_y = _title_positions(
-        face,
-        layout,
-        title_y,
-        area_y,
-        options.vertical_spread,
+        face, layout, title_y, area_y, options.vertical_spread,
     )
     locality_font_size = face.LOCALITY_FONT_SIZE * face._positive_style_multiplier(
-        options.locality_font_scale,
-        "Locality font scale",
+        options.locality_font_scale, "Locality font scale",
     )
     group_transform = face._front_group_transform(
-        panel_center,
-        height,
-        options.group_scale,
-        options.group_y_offset,
+        panel_center, height, options.group_scale, options.group_y_offset,
     )
     face_x, face_y, face_width, face_height = face._native_face_markup_placement(face_markup)
     asset_scale = min(face_width / face.FACE_ASSET_SIZE[0], face_height / face.FACE_ASSET_SIZE[1])
@@ -346,6 +365,7 @@ def _render_face_svg(face: Any, dataset: Any, street: Any, options: Any = None) 
             "lines": list(layout.lines),
             "size_px": round(layout.size_px, 3),
             "status": layout.status,
+            "policy_version": TITLE_GUARDRAIL_POLICY_VERSION,
         },
     }
     title_markup = _title_markup(face, layout, panel_center, title_positions, editable=True)
@@ -366,9 +386,13 @@ def _render_face_svg(face: Any, dataset: Any, street: Any, options: Any = None) 
 
 
 def install(face: Any) -> None:
-    """Install the shared guard rails on the existing face renderer module."""
+    """Install the guard rails exactly once on the face renderer module."""
     if getattr(face, "_title_guardrails_installed", False):
         return
+
+    # Keep explicit references for diagnostics and safe future migrations.
+    face._title_guardrails_original_render_face_standard = face._render_face_standard
+    face._title_guardrails_original_render_face_svg = face.render_face_svg
 
     @wraps(face._render_face_standard)
     def render_standard(street: Any, options: Any = None, *, face_markup: str | None = None) -> Image.Image:
@@ -399,8 +423,9 @@ def install(face: Any) -> None:
         return title_safe_width_for_group(face, group_scale)
 
     face.TitleLayout = TitleLayout
+    face.TITLE_GUARDRAIL_POLICY_VERSION = TITLE_GUARDRAIL_POLICY_VERSION
     face.TITLE_FINAL_SAFE_WIDTH_PX = TITLE_FINAL_SAFE_WIDTH_PX
-    face.TITLE_MIN_SINGLE_LINE_BASE_SIZE_PX = TITLE_MIN_SINGLE_LINE_BASE_SIZE_PX
+    face.TITLE_MIN_SINGLE_LINE_SIZE_PX = TITLE_MIN_SINGLE_LINE_SIZE_PX
     face.TITLE_LINE_SPACING_RATIO = TITLE_LINE_SPACING_RATIO
     face.layout_title_text = public_layout
     face.title_safe_width_for_group = public_safe_width
