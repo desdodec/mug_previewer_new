@@ -128,6 +128,38 @@ def test_enlarged_rear_map_and_attribution_remain_inside_panel() -> None:
     assert ATTRIBUTION_LINES == ("Map data: OpenStreetMap", "openstreetmap.org/copyright")
 
 
+def test_rear_attribution_calibration_defaults_preserve_production_style() -> None:
+    options = ContextRenderOptions()
+    assert options.attribution_font_scale == pytest.approx(1.0)
+    assert options.attribution_line_spacing_scale == pytest.approx(1.0)
+
+
+def test_rear_attribution_spacing_changes_only_text_layout(tmp_path: Path) -> None:
+    data = load_dataset(dataset_copy(tmp_path))
+    street = data.get_street("0001")
+
+    baseline = render_context_map_result(data, street, ContextRenderOptions())
+    calibrated = render_context_map_result(
+        data,
+        street,
+        ContextRenderOptions(
+            attribution_font_scale=1.25,
+            attribution_line_spacing_scale=1.30,
+        ),
+    )
+
+    assert baseline.image.size == calibrated.image.size == REAR_PANEL_PX
+    assert baseline.framing_mode == calibrated.framing_mode
+    assert baseline.dataset_context_width_m == calibrated.dataset_context_width_m
+    assert baseline.street_context_width_m == calibrated.street_context_width_m
+    assert baseline.final_context_width_m == calibrated.final_context_width_m
+    assert baseline.image.tobytes() != calibrated.image.tobytes()
+
+    # The calibration changes only the attribution typography. Map geometry
+    # and the first attribution baseline stay fixed.
+    assert _rear_panel_layout(*REAR_PANEL_PX) == pytest.approx(_rear_panel_layout(*REAR_PANEL_PX))
+
+
 def test_attribution_renders_below_the_map_without_clipping(tmp_path: Path) -> None:
     data = load_dataset(dataset_copy(tmp_path))
     image = render_context_map_result(data, data.get_street("0001")).image

@@ -107,6 +107,13 @@ class ContextRenderOptions:
     highlight_stroke_scale: float = REAR_STREET_HIGHLIGHT_SCALE
     highlight_stroke_colour: str | None = None
     minimum_highlight_margin_fraction: float = REAR_STREET_MIN_MARGIN_FRACTION
+    # Legacy shared scale remains for backwards-compatible callers/profiles.
+    attribution_font_scale: float = 1.0
+    attribution_line1_font_scale: float = 1.0
+    attribution_line2_font_scale: float = 1.0
+    attribution_line_spacing_scale: float = 1.0
+    attribution_line1_y_offset: float = 0.0
+    attribution_line2_y_offset: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -240,7 +247,17 @@ def render_context_map_result(
                 options.highlight_stroke_colour,
             )
         markup = _scale_highlight_stroke(markup, options.highlight_stroke_scale)
-        image = _rasterise_rear_panel(markup, panel_width, panel_height)
+        image = _rasterise_rear_panel(
+            markup,
+            panel_width,
+            panel_height,
+            attribution_font_scale=options.attribution_font_scale,
+            attribution_line1_font_scale=options.attribution_line1_font_scale,
+            attribution_line2_font_scale=options.attribution_line2_font_scale,
+            attribution_line_spacing_scale=options.attribution_line_spacing_scale,
+            attribution_line1_y_offset=options.attribution_line1_y_offset,
+            attribution_line2_y_offset=options.attribution_line2_y_offset,
+        )
     except (cairosvg.CairoSVGError, ET.ParseError, ValueError, OSError) as error:
         raise ContextRenderError(f"Could not rasterise context SVG for street {street.id}: {error}") from error
     LOGGER.info(
@@ -562,11 +579,45 @@ def _highlight_stroke_width(markup: str) -> float | None:
     return min(widths) if widths else None
 
 
-def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> Image.Image:
+def _rasterise_rear_panel(
+    markup: str,
+    panel_width: int,
+    panel_height: int,
+    *,
+    attribution_font_scale: float = 1.0,
+    attribution_line1_font_scale: float = 1.0,
+    attribution_line2_font_scale: float = 1.0,
+    attribution_line_spacing_scale: float = 1.0,
+    attribution_line1_y_offset: float = 0.0,
+    attribution_line2_y_offset: float = 0.0,
+) -> Image.Image:
+    scales = (
+        ("Rear attribution font scale", attribution_font_scale),
+        ("Rear attribution line 1 font scale", attribution_line1_font_scale),
+        ("Rear attribution line 2 font scale", attribution_line2_font_scale),
+        ("Rear attribution line-spacing scale", attribution_line_spacing_scale),
+    )
+    for label, value in scales:
+        if not math.isfinite(value) or value <= 0:
+            raise ContextRenderError(f"{label} must be positive and finite.")
+    for label, value in (
+        ("Rear attribution line 1 Y offset", attribution_line1_y_offset),
+        ("Rear attribution line 2 Y offset", attribution_line2_y_offset),
+    ):
+        if not math.isfinite(value):
+            raise ContextRenderError(f"{label} must be finite.")
+
     map_x, map_y, map_width, map_height, attribution_y = _rear_panel_layout(panel_width, panel_height)
     scale = _panel_reference_scale(panel_width)
-    attribution_font_size = ATTRIBUTION_FONT_SIZE * scale
-    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale
+    line1_font_size = (
+        ATTRIBUTION_FONT_SIZE * scale * attribution_font_scale * attribution_line1_font_scale
+    )
+    line2_font_size = (
+        ATTRIBUTION_FONT_SIZE * scale * attribution_font_scale * attribution_line2_font_scale
+    )
+    attribution_line_height = ATTRIBUTION_LINE_HEIGHT * scale * attribution_line_spacing_scale
+    line1_y = attribution_y + attribution_line1_y_offset * scale
+    line2_y = attribution_y + attribution_line_height + attribution_line2_y_offset * scale
     # CairoSVG can omit vector overlays (including the highlighted street) when
     # an SVG containing a raster map is itself used as an SVG ``<image>``.
     # Rasterise the completed source SVG first, then place that bitmap in the
@@ -584,8 +635,12 @@ def _rasterise_rear_panel(markup: str, panel_width: int, panel_height: int) -> I
         map_image = map_image.resize(target_size, Image.Resampling.LANCZOS)
     attribution_svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{panel_width}" height="{panel_height}" viewBox="0 0 {panel_width} {panel_height}">\n'
-        f'  <style>.attribution {{ font:400 {attribution_font_size:.2f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}</style>\n'
-        f'  <text class="attribution" x="{panel_width / 2:.1f}" y="{attribution_y:.1f}"><tspan x="{panel_width / 2:.1f}">{ATTRIBUTION_LINES[0]}</tspan><tspan x="{panel_width / 2:.1f}" dy="{attribution_line_height:.2f}">{ATTRIBUTION_LINES[1]}</tspan></text>\n'
+        f'  <style>'
+        f'.attribution-line-1 {{ font:400 {line1_font_size:.2f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}'
+        f'.attribution-line-2 {{ font:400 {line2_font_size:.2f}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill:#5c5750; text-anchor:middle; }}'
+        f'</style>\n'
+        f'  <text class="attribution-line-1" x="{panel_width / 2:.1f}" y="{line1_y:.2f}">{ATTRIBUTION_LINES[0]}</text>\n'
+        f'  <text class="attribution-line-2" x="{panel_width / 2:.1f}" y="{line2_y:.2f}">{ATTRIBUTION_LINES[1]}</text>\n'
         '</svg>'
     )
     attribution_png = cairosvg.svg2png(bytestring=attribution_svg.encode("utf-8"), output_width=panel_width, output_height=panel_height)

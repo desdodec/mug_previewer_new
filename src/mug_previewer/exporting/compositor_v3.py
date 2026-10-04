@@ -43,13 +43,28 @@ def compose_provider_artwork(
     *,
     debug: bool = False,
 ) -> ProviderCompositionResult:
-    """Centre tight visual bounds on the profile's normalised anchors."""
+    """Centre tight visual bounds on the profile's normalised anchors.
+
+    Artwork may be rendered above the historical 495 px reference resolution.
+    Its full-panel width therefore also carries pixel-density information.  We
+    normalise that density before applying the supplier scale so a 945 px rear
+    panel prints at the same physical size as the old 495 px panel, but retains
+    the extra source detail instead of being reduced and enlarged again.
+    """
     if not isinstance(front_artwork, Image.Image) or not isinstance(rear_artwork, Image.Image):
         raise ProviderCompositionError("Front and rear artwork must be PIL images.")
+    front_density = _reference_density_scale(front_artwork)
+    rear_density = _reference_density_scale(rear_artwork)
     front, front_bounds = _tight_crop(front_artwork, "front")
     rear, rear_bounds = _tight_crop(rear_artwork, "rear")
-    front = _uniform_scale(front, REFERENCE_GROUP_SCALE * profile.front_scale)
-    rear = _uniform_scale(rear, REFERENCE_GROUP_SCALE * profile.rear_scale)
+    front = _uniform_scale(
+        front,
+        REFERENCE_GROUP_SCALE * profile.front_scale * front_density,
+    )
+    rear = _uniform_scale(
+        rear,
+        REFERENCE_GROUP_SCALE * profile.rear_scale * rear_density,
+    )
 
     width, height = profile.canvas_width_px, profile.canvas_height_px
     inward = profile.inward_offset_mm * profile.dpi / 25.4
@@ -139,6 +154,13 @@ def supplier_output_filename(design_name: str, profile: ProviderProfile, *, debu
     if not design:
         raise ProviderCompositionError("Design name must contain usable filename text.")
     return f"{design}_{supplier}{'_debug' if debug else ''}.png"
+
+
+def _reference_density_scale(image: Image.Image) -> float:
+    """Convert source pixels back to the historical 495 px physical reference."""
+    if image.width <= 0:
+        raise ProviderCompositionError("Artwork width must be positive.")
+    return FRONT_PANEL_PX[0] / image.width
 
 
 def _tight_crop(image: Image.Image, label: str):

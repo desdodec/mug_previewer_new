@@ -24,7 +24,15 @@ from ..preview_v2 import (
     resolve_calibration_profile,
     render_mug_preview_v2,
 )
-from ..design import DESIGN_WEIGHT_MAX, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_STEP, REAR_HIGHLIGHT_WEIGHT_MAX, DesignOptions
+from ..design import (
+    DESIGN_WEIGHT_MAX,
+    DESIGN_WEIGHT_MIN,
+    DESIGN_WEIGHT_STEP,
+    REAR_HIGHLIGHT_WEIGHT_MAX,
+    DesignOptions,
+    design_profile_summary,
+    load_design_profile,
+)
 from ..datasets.models import Dataset, StreetRecord
 from .artwork_panel import ArtworkPanelMixin
 from .batch_export_panel import BatchExportPanel
@@ -231,6 +239,39 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
                 text='Also create separate debug/calibration PNG',
                 variable=self.production_debug_var,
             ).grid(row=2, column=0, sticky='w', pady=(4, 0))
+
+            self.production_style_profile_path: Path | None = None
+            self.production_style_profile_var = tk.StringVar(value='Built-in production style')
+            self.production_style_profile_detail = tk.StringVar(
+                value=design_profile_summary(self.state.design_options)
+            )
+            style_profile = ttk.LabelFrame(
+                controls, text='Production style profile', padding=6,
+            )
+            style_profile.grid(row=9, column=0, sticky='ew', pady=(4, 6))
+            style_profile.columnconfigure(0, weight=1)
+            ttk.Label(
+                style_profile,
+                textvariable=self.production_style_profile_var,
+                wraplength=260,
+                justify='left',
+            ).grid(row=0, column=0, columnspan=2, sticky='w')
+            ttk.Label(
+                style_profile,
+                textvariable=self.production_style_profile_detail,
+                wraplength=260,
+                justify='left',
+            ).grid(row=1, column=0, columnspan=2, sticky='w', pady=(2, 4))
+            ttk.Button(
+                style_profile,
+                text='Load profile…',
+                command=self._load_production_style_profile,
+            ).grid(row=2, column=0, sticky='ew', padx=(0, 3))
+            ttk.Button(
+                style_profile,
+                text='Reset',
+                command=self._reset_production_style_profile,
+            ).grid(row=2, column=1, sticky='ew', padx=(3, 0))
 
             rear_design = ttk.LabelFrame(
                 controls, text='Artwork / mug preview', padding=6,
@@ -449,6 +490,51 @@ class MugPreviewerApp(ArtworkPanelMixin, ttk.Frame):
         self._design_changed()
         if self.state.current_wrap is not None:
             self.status_var.set("Design reset \u2014 render to update preview.")
+
+    def _production_style_changed(self, label: str) -> None:
+        if "production_style_profile_var" in self.__dict__:
+            self.production_style_profile_var.set(label)
+            self.production_style_profile_detail.set(
+                design_profile_summary(self.state.design_options)
+            )
+        if "front_weight_var" in self.__dict__:
+            self.front_weight_var.set(self.state.design_options.front_feature_weight)
+            self.rear_weight_var.set(self.state.design_options.rear_highlight_weight)
+            self._update_weight_displays()
+        if "batch_panel" in self.__dict__:
+            self.batch_panel.invalidate()
+        if "mockup_batch_panel" in self.__dict__:
+            self.mockup_batch_panel.invalidate()
+        self._invalidate_active_render_request()
+        if self.state.current_wrap is not None:
+            self.status_var.set("Production style changed — preview again before exporting.")
+
+    def _load_production_style_profile(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self.root,
+            title="Load production style profile",
+            filetypes=(("Mug style profile", "*.json"), ("JSON", "*.json")),
+        )
+        if not path:
+            return
+        try:
+            options = load_design_profile(path)
+        except (OSError, ValueError, TypeError) as error:
+            self._show_error(str(error))
+            return
+        self.state.apply_design_options(options)
+        self.production_style_profile_path = Path(path)
+        self._production_style_changed(f"Loaded: {Path(path).name}")
+        self.status_var.set(
+            f"Loaded production style profile: {Path(path).name}. "
+            "Preview or rebuild export plans to apply it."
+        )
+
+    def _reset_production_style_profile(self) -> None:
+        self.state.reset_design_options()
+        self.production_style_profile_path = None
+        self._production_style_changed("Built-in production style")
+        self.status_var.set("Production style reset to built-in defaults.")
 
     def _preview_card(self, title: str) -> ttk.Frame:
         card = ttk.LabelFrame(self, text=title, padding=8)

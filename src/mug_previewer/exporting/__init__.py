@@ -19,6 +19,13 @@ from .export import (
     save_provider_export,
     save_provider_png,
 )
+
+from . import compositor_v3 as _compositor_v3
+from .rear_artwork_scale import install as _install_rear_artwork_scale
+
+_install_rear_artwork_scale(_compositor_v3)
+del _install_rear_artwork_scale
+
 from .compositor_v3 import (
     DEFAULT_PROFILE_IDS,
     ProviderCompositionError,
