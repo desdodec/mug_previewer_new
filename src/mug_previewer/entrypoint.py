@@ -26,5 +26,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preprocessed = candidate
         return launch(dataset_root=root, preprocessed=preprocessed)
 
+    if args and args[-1] == "front-style-lab":
+        parser = argparse.ArgumentParser(prog="mug-previewer")
+        parser.add_argument("--dataset-root", type=Path)
+        parser.add_argument("command", choices=("front-style-lab",))
+        parsed = parser.parse_args(args)
+        from .config import load_settings
+        from .ui.front_style_lab_enhanced import launch
+
+        root = parsed.dataset_root or load_settings().dataset_root
+        if root is None:
+            print("No dataset root is configured. Set MUG_PREVIEWER_DATASET_ROOT or pass --dataset-root.")
+            return 2
+        return launch(dataset_root=root)
+
     from .cli import main as cli_main
     return cli_main(args)
