@@ -12,6 +12,8 @@ from functools import wraps
 import math
 from typing import Any
 
+from .rear_source_frame import is_authoritative_local_osm_context, source_map_layout
+
 
 ATTRIBUTION_EDGE_MARGIN_PX = 3.0
 
@@ -69,9 +71,14 @@ def install(context: Any) -> None:
         )
         if all(math.isfinite(float(value)) for value in values):
             scale = context._panel_reference_scale(panel_width)
-            _map_x, _map_y, _map_width, _map_height, attribution_y = context._rear_panel_layout(
-                panel_width, panel_height
-            )
+            if is_authoritative_local_osm_context(markup):
+                _map_x, _map_y, _map_width, _map_height, attribution_y = source_map_layout(
+                    context, markup, panel_width, panel_height
+                )
+            else:
+                _map_x, _map_y, _map_width, _map_height, attribution_y = context._rear_panel_layout(
+                    panel_width, panel_height
+                )
             line_height = (
                 context.ATTRIBUTION_LINE_HEIGHT
                 * scale
