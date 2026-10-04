@@ -9,7 +9,12 @@ import math
 from pathlib import Path
 
 from .rendering.artwork import WrapRenderOptions
-from .rendering.context_map import ContextRenderOptions, REAR_STREET_HIGHLIGHT_SCALE
+from .rendering.context_map import (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    ContextRenderOptions,
+    REAR_PANEL_PX,
+    REAR_STREET_HIGHLIGHT_SCALE,
+)
 from .rendering.face import (
     FRONT_GROUP_SCALE,
     FRONT_GROUP_Y_OFFSET,
@@ -24,6 +29,15 @@ REAR_HIGHLIGHT_WEIGHT_MIN = 0.25
 DESIGN_WEIGHT_MAX = 4.00
 REAR_HIGHLIGHT_WEIGHT_MAX = 4.00
 DESIGN_WEIGHT_STEP = 0.05
+
+# Profile-driven production rendering uses the same native rear resolution as
+# the canonical wrap renderer.  This keeps fine map labels/roads from being
+# reduced to the 495 px preview panel and enlarged again during supplier
+# composition.
+PRODUCTION_REAR_PANEL_SIZE = (
+    CANONICAL_REAR_PANEL_WIDTH_PX,
+    round(CANONICAL_REAR_PANEL_WIDTH_PX * REAR_PANEL_PX[1] / REAR_PANEL_PX[0]),
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +120,7 @@ def build_render_options(design: DesignOptions, *, area: str) -> WrapRenderOptio
             vertical_spread=design.front_vertical_spread,
         ),
         context_options=ContextRenderOptions(
+            panel_size=PRODUCTION_REAR_PANEL_SIZE,
             highlight_stroke_scale=REAR_STREET_HIGHLIGHT_SCALE * design.rear_highlight_weight,
             attribution_line1_font_scale=design.rear_attribution_line1_font_scale,
             attribution_line2_font_scale=design.rear_attribution_line2_font_scale,
