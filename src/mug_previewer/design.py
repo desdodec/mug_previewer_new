@@ -29,6 +29,8 @@ REAR_HIGHLIGHT_WEIGHT_MIN = 0.25
 DESIGN_WEIGHT_MAX = 4.00
 REAR_HIGHLIGHT_WEIGHT_MAX = 4.00
 DESIGN_WEIGHT_STEP = 0.05
+REAR_ARTWORK_SCALE_MIN = 0.50
+REAR_ARTWORK_SCALE_MAX = 1.50
 
 # Profile-driven production rendering uses the same native rear resolution as
 # the canonical wrap renderer.  This keeps fine map labels/roads from being
@@ -62,6 +64,7 @@ class DesignOptions:
     front_group_scale: float = FRONT_GROUP_SCALE
     front_group_y_offset: float = FRONT_GROUP_Y_OFFSET
 
+    rear_artwork_scale: float = 1.0
     rear_attribution_line1_font_scale: float = 1.0
     rear_attribution_line2_font_scale: float = 1.0
     rear_attribution_line_spacing_scale: float = 1.0
@@ -72,6 +75,7 @@ class DesignOptions:
         limits = (
             ("Front street feature weight", self.front_feature_weight, DESIGN_WEIGHT_MIN, DESIGN_WEIGHT_MAX),
             ("Rear map highlight weight", self.rear_highlight_weight, REAR_HIGHLIGHT_WEIGHT_MIN, REAR_HIGHLIGHT_WEIGHT_MAX),
+            ("Rear artwork scale", self.rear_artwork_scale, REAR_ARTWORK_SCALE_MIN, REAR_ARTWORK_SCALE_MAX),
         )
         for name, value, minimum, maximum in limits:
             if not math.isfinite(value) or not minimum <= value <= maximum:
@@ -122,6 +126,7 @@ def build_render_options(design: DesignOptions, *, area: str) -> WrapRenderOptio
         context_options=ContextRenderOptions(
             panel_size=PRODUCTION_REAR_PANEL_SIZE,
             highlight_stroke_scale=REAR_STREET_HIGHLIGHT_SCALE * design.rear_highlight_weight,
+            artwork_scale=design.rear_artwork_scale,
             attribution_line1_font_scale=design.rear_attribution_line1_font_scale,
             attribution_line2_font_scale=design.rear_attribution_line2_font_scale,
             attribution_line_spacing_scale=design.rear_attribution_line_spacing_scale,
@@ -179,6 +184,7 @@ def load_design_profile(path: Path | str) -> DesignOptions:
         front_vertical_spread=float(face.get("vertical_spread", defaults.front_vertical_spread)),
         front_group_scale=float(face.get("group_scale", defaults.front_group_scale)),
         front_group_y_offset=float(face.get("group_y_offset", defaults.front_group_y_offset)),
+        rear_artwork_scale=float(rear.get("artwork_scale", defaults.rear_artwork_scale)),
         rear_attribution_line1_font_scale=float(
             rear.get(
                 "attribution_line1_font_scale",
@@ -217,7 +223,8 @@ def design_profile_summary(options: DesignOptions | None) -> str:
         f"{resolved.front_locality_font_scale:.2f}× · "
         f"linework {resolved.front_facial_linework_multiplier:.2f}× · "
         f"street {resolved.front_feature_weight:.2f}× · "
-        f"Rear text {resolved.rear_attribution_line1_font_scale:.2f}×/"
+        f"Rear artwork {resolved.rear_artwork_scale:.2f}× · "
+        f"text {resolved.rear_attribution_line1_font_scale:.2f}×/"
         f"{resolved.rear_attribution_line2_font_scale:.2f}× · "
         f"spacing {resolved.rear_attribution_line_spacing_scale:.2f}×"
     )
