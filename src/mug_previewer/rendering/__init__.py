@@ -20,3 +20,12 @@ from .rear_attribution_guardrails import install as _install_rear_attribution_gu
 _install_rear_attribution_guardrails(_context_map)
 
 del _install_rear_attribution_guardrails
+
+# Carry a presentation-only rear artwork scale through the completed rear
+# image. Provider composition applies the physical enlargement later, so map
+# geography, native raster resolution and attribution layout stay unchanged.
+from .rear_artwork_scale import install as _install_rear_artwork_scale
+
+_install_rear_artwork_scale(_context_map)
+
+del _install_rear_artwork_scale
