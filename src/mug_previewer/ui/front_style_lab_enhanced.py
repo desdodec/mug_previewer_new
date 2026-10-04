@@ -7,7 +7,13 @@ from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from ..rendering.context_map import REAR_STREET_HIGHLIGHT_SCALE
+from PIL import Image, ImageTk
+
+from ..rendering.context_map import (
+    ContextRenderError,
+    REAR_STREET_HIGHLIGHT_SCALE,
+    render_context_map_result,
+)
 from ..rendering.face import (
     FRONT_GROUP_SCALE,
     FRONT_GROUP_Y_OFFSET,
@@ -19,6 +25,7 @@ from .front_style_lab import FrontStyleLab
 
 
 PROFILE_VERSION = 4
+PREVIEW_MAX_REAR_ARTWORK_SCALE = 1.30
 
 
 class EnhancedFrontStyleLab(FrontStyleLab):
@@ -44,7 +51,7 @@ class EnhancedFrontStyleLab(FrontStyleLab):
         self._add_slider(
             style,
             6,
-            "Rear artwork size ×",
+            "Rear artwork size on mug ×",
             self.rear_artwork_scale,
             0.90,
             1.30,
@@ -56,6 +63,48 @@ class EnhancedFrontStyleLab(FrontStyleLab):
         return replace(
             super()._rear_options(),
             artwork_scale=self.rear_artwork_scale.get(),
+        )
+
+    def _render_rear_preview(self) -> None:
+        """Show the provider-visible rear scale without lowering render quality."""
+        self._rear_refresh_after = None
+        selected = self._selected()
+        if selected is None:
+            return
+        dataset, street = selected
+        self.status_var.set(f"Rendering rear: {street.display_name}...")
+        self.root.update_idletasks()
+        try:
+            image = render_context_map_result(dataset, street, self._rear_options()).image
+        except ContextRenderError as error:
+            self.status_var.set(str(error))
+            return
+        except Exception as error:
+            self.status_var.set(f"Rear preview error: {error}")
+            return
+
+        white = Image.new("RGB", image.size, "white")
+        white.paste(image, mask=image.getchannel("A"))
+        scale = self.rear_artwork_scale.get()
+        display_size = (
+            max(1, round(image.width * 2 * scale)),
+            max(1, round(image.height * 2 * scale)),
+        )
+        display = white.resize(display_size, Image.Resampling.LANCZOS)
+        canvas_size = (
+            round(image.width * 2 * PREVIEW_MAX_REAR_ARTWORK_SCALE),
+            round(image.height * 2 * PREVIEW_MAX_REAR_ARTWORK_SCALE),
+        )
+        canvas = Image.new("RGB", canvas_size, "white")
+        origin = (
+            (canvas.width - display.width) // 2,
+            (canvas.height - display.height) // 2,
+        )
+        canvas.paste(display, origin)
+        self.rear_preview_photo = ImageTk.PhotoImage(canvas)
+        self.rear_preview_label.configure(image=self.rear_preview_photo)
+        self.status_var.set(
+            f"{dataset.display_name} — {street.display_name} — rear artwork {scale:.2f}×"
         )
 
     def _reset_rear(self) -> None:
