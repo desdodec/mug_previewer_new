@@ -1,0 +1,22 @@
+{
+  "id": "inkthreadable_11oz_white_v2",
+  "provider_name": "Inkthreadable",
+  "product_name": "11oz White Mug",
+  "provider_profile_id": "inkthreadable_11oz_white",
+  "sku": null,
+  "status": "provider-dimensions",
+  "body_height_mm": 97,
+  "body_diameter_mm": 82,
+  "print_width_mm": 200,
+  "print_height_mm": 90,
+  "visible_angle_degrees": 150,
+  "body_corner_fraction": 0.055,
+  "handle_width_fraction": 0.3,
+  "handle_height_fraction": 0.54,
+  "handle_stroke_fraction": 0.075,
+  "default_front_yaw_degrees": 0,
+  "default_rear_yaw_degrees": 0,
+  "source_description": "Official Inkthreadable 11oz mug dimensions (97 x 82 mm) and official maximum 11oz mug print area (20 x 9 cm). V2 derives body aspect, printable height fraction and cylindrical print arc from those dimensions.",
+  "source_url": "https://www.inkthreadable.co.uk/mugs",
+  "verified_date": "2026-09-19"
+}
